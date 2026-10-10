@@ -700,7 +700,7 @@ def download():
 
 @app.get("/health")
 def health():
-    return jsonify(ok=True, version=VERSION_CODE)
+    return jsonify(ok=True, version=VERSION_CODE, db=db.engine.dialect.name)
 
 
 @app.after_request
