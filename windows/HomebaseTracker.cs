@@ -1,4 +1,5 @@
 // Homebase for Windows: screen time (only active playing/watching), parent locks and grounded apps.
+// Built for a computer that more than one child uses: it asks who is using it, and counts, locks and grounds each person separately.
 // No scripts, no PowerShell. Run it, type the 6-digit code from Homebase, and it links itself.
 //   HomebaseTracker.exe            first run asks for the code; afterwards it just runs from the tray
 //   HomebaseTracker.exe --code 123456 [--server https://...]    link without the window
@@ -43,12 +44,18 @@ class App : ApplicationContext
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
     static readonly string Installed = Path.Combine(Dir, "HomebaseTracker.exe");
     static readonly string ConfigFile = Path.Combine(Dir, "config.txt");
-    static readonly string TodayFile = Path.Combine(Dir, "today.txt");
     static readonly string LogFile = Path.Combine(Dir, "tracker.log");
     static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
     static bool Test { get { return Environment.GetEnvironmentVariable("HB_NO_START") != null; } }
 
-    string server = DefaultServer, token = "";
+    class Profile { public string Name, Token; }
+    readonly List<Profile> profiles = new List<Profile>();
+    Profile cur;
+    string server = DefaultServer;
+    string token { get { return cur == null ? "" : cur.Token; } }
+    Control sync;                                                            // lets the background loop open windows on the UI thread
+    DateTime lastPrompt = DateTime.MinValue; bool wasAway;
+    string TodayFile { get { return Path.Combine(Dir, "today_" + Regex.Replace(cur == null ? "x" : cur.Name, "[^A-Za-z0-9]", "_") + ".txt"); } }
     NotifyIcon tray;
     Dictionary<string, string[]> apps = new Dictionary<string, string[]>();      // key -> label, category, seconds
     string day = DateTime.Now.ToString("yyyy-MM-dd");
@@ -90,7 +97,7 @@ class App : ApplicationContext
             if (args[i] == "--server" && i + 1 < args.Length) server = args[i + 1].TrimEnd('/');
         }
         LoadConfig();
-        if (token == "")
+        if (profiles.Count == 0)
         {
             if (code == null) code = AskForCode();
             if (code == null) Environment.Exit(0);
@@ -98,9 +105,53 @@ class App : ApplicationContext
             if (err != null) { MessageBox.Show(err, "Homebase screen time"); Environment.Exit(1); }
             Install();
         }
+        else if (code != null)
+        {
+            string err = Claim(code);                                          // running it again with a code adds another person
+            if (err != null) MessageBox.Show(err, "Homebase screen time"); else { Install(); }
+        }
+        sync = new Control(); sync.CreateControl(); IntPtr force = sync.Handle;
+        if (profiles.Count > 1) PickPerson(false);                              // two kids, one laptop: ask who is sitting down
         LoadToday();
         MakeTray();
+        Microsoft.Win32.SystemEvents.SessionSwitch += delegate (object o, Microsoft.Win32.SessionSwitchEventArgs e) { if (profiles.Count > 1 && (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock || e.Reason == Microsoft.Win32.SessionSwitchReason.SessionLogon)) sync.BeginInvoke(new Action(delegate { PickPerson(false); })); };
         new Thread(Loop) { IsBackground = true }.Start();
+    }
+
+    // ---------- who is using the computer? (honest and visible: the family can see which person was counted)
+    void PickPerson(bool allowLink)
+    {
+        if (Test) return;
+        if (profiles.Count < 2 && !allowLink) return;
+        if ((DateTime.Now - lastPrompt).TotalSeconds < 3) return; lastPrompt = DateTime.Now;
+        Form f = new Form { Text = "Homebase", Width = 380, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterScreen, MaximizeBox = false, MinimizeBox = false, TopMost = true, BackColor = Color.FromArgb(18, 18, 20), ForeColor = Color.FromArgb(236, 236, 240), Font = new Font("Segoe UI", 10f) };
+        Label t = new Label { Text = "Who is using this computer?", Font = new Font("Segoe UI", 14f, FontStyle.Bold), Left = 20, Top = 16, Width = 330, Height = 30 };
+        Label h = new Label { Text = "So the right person gets their screen time, locks and grounded apps.", Left = 20, Top = 48, Width = 330, Height = 36, ForeColor = Color.FromArgb(160, 160, 170) };
+        f.Controls.Add(t); f.Controls.Add(h);
+        int y = 92; Profile chosen = null; bool link = false;
+        foreach (Profile p in profiles)
+        {
+            Profile pp = p;
+            Button b = new Button { Text = p.Name, Left = 20, Top = y, Width = 330, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = (cur != null && cur.Name == p.Name) ? Color.FromArgb(91, 147, 255) : Color.FromArgb(27, 27, 31), ForeColor = (cur != null && cur.Name == p.Name) ? Color.FromArgb(8, 16, 31) : Color.White, Font = new Font("Segoe UI", 11f, FontStyle.Bold) };
+            b.FlatAppearance.BorderSize = 0; b.Click += delegate { chosen = pp; f.Close(); }; f.Controls.Add(b); y += 48;
+        }
+        Button more = new Button { Text = "Link someone else...", Left = 20, Top = y, Width = 330, Height = 34, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(18, 18, 20), ForeColor = Color.FromArgb(150, 150, 160) };
+        more.FlatAppearance.BorderColor = Color.FromArgb(50, 50, 56); more.Click += delegate { link = true; f.Close(); }; f.Controls.Add(more); y += 44;
+        f.ClientSize = new Size(370, y + 6);
+        f.ShowDialog();
+        if (link)
+        {
+            string c = AskForCode(); if (c != null) { string err = Claim(c); if (err != null) MessageBox.Show(err, "Homebase screen time"); else { PickPerson(false); } }
+            return;
+        }
+        if (chosen != null && chosen != cur) Switch(chosen);
+    }
+
+    void Switch(Profile p)
+    {
+        lock (apps) { if (dirty) { Send(); } SaveToday(); cur = p; apps.Clear(); dirty = false; cursor = -1; told.Clear(); LoadToday(); }
+        SaveConfig();
+        Say("Homebase", p.Name + " is using this computer.");
     }
 
     // ---------- the window that asks for the code
@@ -123,7 +174,7 @@ class App : ApplicationContext
     {
         HttpWebRequest r = (HttpWebRequest)WebRequest.Create(server + path);
         r.Method = method; r.Timeout = 20000; r.UserAgent = "HomebaseTracker/1.0";
-        if (token != "") r.Headers["Authorization"] = "Bearer " + token;
+        if (token != "" && !path.StartsWith("/api/devices/claim")) r.Headers["Authorization"] = "Bearer " + token;
         if (body != null) { byte[] b = Encoding.UTF8.GetBytes(Json.Serialize(body)); r.ContentType = "application/json"; r.ContentLength = b.Length; using (Stream s = r.GetRequestStream()) s.Write(b, 0, b.Length); }
         try { using (HttpWebResponse x = (HttpWebResponse)r.GetResponse()) { status = (int)x.StatusCode; using (StreamReader sr = new StreamReader(x.GetResponseStream())) return sr.ReadToEnd(); } }
         catch (WebException e) { HttpWebResponse x = e.Response as HttpWebResponse; if (x == null) throw; status = (int)x.StatusCode; using (StreamReader sr = new StreamReader(x.GetResponseStream())) return sr.ReadToEnd(); }
@@ -136,7 +187,11 @@ class App : ApplicationContext
             int st; string txt = Http("POST", "/api/devices/claim", new Dictionary<string, object> { { "code", code }, { "name", Environment.MachineName }, { "kind", "windows" } }, out st);
             Dictionary<string, object> d = Json.Deserialize<Dictionary<string, object>>(txt);
             if (st != 200) return d.ContainsKey("error") ? d["error"].ToString() : "That did not work. Make a new code in Homebase.";
-            token = d["token"].ToString(); SaveConfig(); return null;
+            var mem = d.ContainsKey("member") ? d["member"] as Dictionary<string, object> : null;
+            string name = mem != null && mem.ContainsKey("name") ? mem["name"].ToString() : "Me";
+            Profile existing = profiles.FirstOrDefault(p => p.Name == name);
+            if (existing != null) existing.Token = d["token"].ToString(); else { existing = new Profile { Name = name, Token = d["token"].ToString() }; profiles.Add(existing); }
+            cur = existing; SaveConfig(); return null;
         }
         catch (Exception e) { Log("claim: " + e.Message); return "Could not reach Homebase. Check the internet and try again. (The first try can take a minute while it wakes up.)"; }
     }
@@ -145,17 +200,32 @@ class App : ApplicationContext
     void LoadConfig()
     {
         if (!File.Exists(ConfigFile)) return;
+        string active = "";
         foreach (string line in File.ReadAllLines(ConfigFile))
         {
             int i = line.IndexOf('='); if (i < 0) continue; string k = line.Substring(0, i), v = line.Substring(i + 1);
             if (k == "server" && v != "") server = v;
-            if (k == "token") { try { token = Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(v), null, DataProtectionScope.CurrentUser)); } catch { token = ""; } }
+            if (k == "active") active = v;
+            if (k == "profile")
+            {
+                int bar = v.IndexOf('|'); if (bar < 0) continue;
+                try { profiles.Add(new Profile { Name = v.Substring(0, bar), Token = Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(v.Substring(bar + 1)), null, DataProtectionScope.CurrentUser)) }); } catch { }
+            }
+            if (k == "token")                                                      // the first version kept one person
+            {
+                try { profiles.Add(new Profile { Name = "Me", Token = Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(v), null, DataProtectionScope.CurrentUser)) }); } catch { }
+            }
         }
+        cur = profiles.FirstOrDefault(p => p.Name == active) ?? (profiles.Count > 0 ? profiles[0] : null);
+        string forced = Environment.GetEnvironmentVariable("HB_ACTIVE");           // tests only
+        if (forced != null) cur = profiles.FirstOrDefault(p => p.Name == forced) ?? cur;
     }
     void SaveConfig()
     {
         Directory.CreateDirectory(Dir);
-        File.WriteAllLines(ConfigFile, new[] { "server=" + server, "token=" + Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(token), null, DataProtectionScope.CurrentUser)) });
+        List<string> lines = new List<string> { "server=" + server, "active=" + (cur == null ? "" : cur.Name) };
+        foreach (Profile p in profiles) lines.Add("profile=" + p.Name + "|" + Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(p.Token), null, DataProtectionScope.CurrentUser)));
+        File.WriteAllLines(ConfigFile, lines.ToArray());
     }
     void LoadToday()
     {
@@ -189,7 +259,7 @@ class App : ApplicationContext
     {
         if (ask && MessageBox.Show("Take Homebase screen time off this computer?", "Homebase", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
         try { using (RegistryKey k = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run", true)) if (k != null) k.DeleteValue("HomebaseTracker", false); } catch { }
-        try { File.Delete(ConfigFile); File.Delete(TodayFile); } catch { }
+        try { File.Delete(ConfigFile); foreach (string f in Directory.GetFiles(Dir, "today_*.txt")) File.Delete(f); } catch { }
         if (ask) MessageBox.Show("Done. Homebase screen time is removed from this computer.", "Homebase");
     }
 
@@ -197,20 +267,30 @@ class App : ApplicationContext
     void MakeTray()
     {
         ContextMenuStrip m = new ContextMenuStrip();
-        m.Items.Add("Homebase screen time is on").Enabled = false;
+        ToolStripMenuItem who = new ToolStripMenuItem("Homebase screen time is on"); who.Enabled = false; m.Items.Add(who);
         ToolStripMenuItem today = new ToolStripMenuItem("Today: counting...");
-        m.Opening += delegate { today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
+        m.Opening += delegate { who.Text = cur == null ? "Homebase screen time is on" : "Counting for " + cur.Name; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
         m.Items.Add(today);
+        m.Items.Add("Who is using this computer...", null, delegate { sync.BeginInvoke(new Action(delegate { PickPerson(true); })); });
         m.Items.Add("Open Homebase", null, delegate { try { Process.Start(server + "/app"); } catch { } });
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add("Remove from this computer", null, delegate { Remove(true); Quit(); });
         tray = new NotifyIcon { Icon = SystemIcons.Information, Text = "Homebase screen time", Visible = true, ContextMenuStrip = m };
-        tray.DoubleClick += delegate { tray.ShowBalloonTip(5000, "Homebase", "Today: " + Duration(Total()) + " playing or watching", ToolTipIcon.Info); };
+        tray.DoubleClick += delegate { tray.ShowBalloonTip(5000, "Homebase", (cur == null ? "" : cur.Name + ": ") + Duration(Total()) + " playing or watching today", ToolTipIcon.Info); };
     }
     void Quit() { stopping = true; if (tray != null) { tray.Visible = false; tray.Dispose(); } Application.Exit(); }
     void Say(string title, string text) { try { if (tray != null) tray.ShowBalloonTip(10000, title, text, ToolTipIcon.Info); } catch { } }
     int Total() { int t = 0; foreach (var v in apps.Values) { int s; int.TryParse(v[2], out s); t += s; } return t; }
     static string Duration(int sec) { int m = sec / 60; return m >= 60 ? (m / 60) + " h " + (m % 60).ToString("00") + " min" : m + " min"; }
+
+    void DropCurrent()
+    {
+        if (cur == null) return;
+        string gone = cur.Name; profiles.Remove(cur);
+        if (profiles.Count == 0) { Say("Homebase", "This computer was removed from Homebase."); Remove(false); Quit(); return; }
+        cur = profiles[0]; apps.Clear(); dirty = false; cursor = -1; LoadToday(); SaveConfig();
+        Say("Homebase", gone + " was removed from this computer. Now counting for " + cur.Name + ".");
+    }
 
     // ---------- the loop: lock, nudges, grounded apps, counting
     void Loop()
@@ -232,7 +312,7 @@ class App : ApplicationContext
         try
         {
             string txt = Http("GET", "/api/lock", null, out st);
-            if (st == 401) { Say("Homebase", "This computer was removed from Homebase."); Remove(false); Quit(); return; }
+            if (st == 401) { DropCurrent(); return; }
             var d = Json.Deserialize<Dictionary<string, object>>(txt);
             if (d.ContainsKey("lock") && d["lock"] != null)
             {
@@ -255,6 +335,9 @@ class App : ApplicationContext
         }
         catch (Exception e) { Log("events: " + e.Message); }
         try { EnforceBlocks(); } catch (Exception e) { Log("blocks: " + e.Message); }
+        double idleNow = Native.Idle();
+        if (idleNow > 1200) wasAway = true;
+        if (wasAway && idleNow < 20 && profiles.Count > 1) { wasAway = false; sync.BeginInvoke(new Action(delegate { PickPerson(false); })); }
         if (locked) return;
         try { Count(elapsed); } catch (Exception e) { Log("count: " + e.Message); }
         if (dirty && (now - lastSend).TotalSeconds >= (Environment.GetEnvironmentVariable("HB_TICK") != null ? 1 : 120)) { if (Send()) { dirty = false; lastSend = now; } SaveToday(); }
@@ -333,7 +416,7 @@ class App : ApplicationContext
             List<object> list = new List<object>();
             foreach (var kv in apps) list.Add(new Dictionary<string, object> { { "pkg", kv.Key }, { "label", kv.Value[0] }, { "cat", kv.Value[1] }, { "sec", int.Parse(kv.Value[2]) } });
             int st; Http("POST", "/api/screentime", new Dictionary<string, object> { { "day", day }, { "apps", list } }, out st);
-            if (st == 401) { Say("Homebase", "This computer was removed from Homebase."); Remove(false); Quit(); }
+            if (st == 401) { DropCurrent(); }
             return st == 200;
         }
         catch (Exception e) { Log("send: " + e.Message); return false; }
