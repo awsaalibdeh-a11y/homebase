@@ -31,6 +31,9 @@ class Store(context: Context) {
     var cursor: Int
         get() = p.getInt("cursor", -1)
         set(v) = p.edit().putInt("cursor", v).apply()
+    var tourDone: Boolean
+        get() = p.getBoolean("tourDone", false)
+        set(v) = p.edit().putBoolean("tourDone", v).apply()
     var onboarded: Boolean
         get() = p.getBoolean("onboarded", false)
         set(v) = p.edit().putBoolean("onboarded", v).apply()

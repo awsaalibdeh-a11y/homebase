@@ -53,7 +53,7 @@ fun Avatar(emoji: String, size: Int = 44, tint: Color = BlueSoft) {
 }
 
 @Composable
-fun SoftCard(modifier: Modifier = Modifier, tint: Color = Color.White, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
+fun SoftCard(modifier: Modifier = Modifier, tint: Color = Surface, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
     val m = if (onClick != null) modifier.clickable { onClick() } else modifier
     Card(m.fillMaxWidth(), shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = tint), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
         Column(Modifier.padding(16.dp)) { content() }

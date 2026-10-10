@@ -19,6 +19,8 @@ from db import delete, insert, select, update
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
+import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
+hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
 VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "1"))
 KEEP_LOCATIONS_DAYS = 7

@@ -27,7 +27,7 @@ private fun ShareChip(m: Member) {
     when (m.share) {
         "on" -> Chip("Sharing location", MintSoft, Mint)
         "paused" -> Chip("Paused", SunSoft, Ink)
-        else -> Chip("Not sharing", Color(0xFFEDEFF5), Muted)
+        else -> Chip("Not sharing", Surface2, Muted)
     }
 }
 

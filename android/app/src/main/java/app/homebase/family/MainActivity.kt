@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = hb.store
-        val start = if (!store.signedIn) Screen.Welcome else if (!store.onboarded) Screen.Permissions else Screen.Main
+        val start = if (!store.signedIn) Screen.Welcome else if (!store.onboarded) Screen.Permissions else if (!store.tourDone) Screen.Tour else Screen.Main
         val nav = Nav(start)
         if (store.signedIn) startHomebase(this)
         open.value = intent?.getStringExtra("open")
@@ -82,6 +82,7 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
             is Screen.Consent -> ConsentScreen(nav, s)
             Screen.Permissions -> PermissionsScreen(nav)
             Screen.Main -> MainScreen(nav)
+            Screen.Tour -> app.homebase.family.ui.TourScreen(nav)
             is Screen.Thread -> ThreadScreen(nav, s.id)
             is Screen.Perms -> app.homebase.family.ui.PermsScreen(nav)
             Screen.Places -> PlacesScreen(nav)

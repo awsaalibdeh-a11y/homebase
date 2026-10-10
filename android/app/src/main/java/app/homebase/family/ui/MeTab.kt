@@ -49,7 +49,7 @@ fun MeTab(nav: Nav) {
         Heading("Hi, ${me?.name ?: app.store.myName} ${me?.emoji ?: ""}", app.store.familyName)
 
         val share = me?.share ?: "off"
-        SoftCard(tint = when (share) { "on" -> MintSoft; "paused" -> SunSoft; else -> androidx.compose.ui.graphics.Color.White }) {
+        SoftCard(tint = when (share) { "on" -> MintSoft; "paused" -> SunSoft; else -> Surface }) {
             Text(when (share) { "on" -> "📍 Sharing your location"; "paused" -> "⏸ Sharing is paused"; else -> "Location sharing is off" }, style = MaterialTheme.typography.titleMedium)
             Text(when (share) {
                 "on" -> if (app.store.isParent) "Your family can see where you are." else "Your family can see where you are. You can pause any time, and they will see that it is paused."
@@ -92,6 +92,7 @@ fun MeTab(nav: Nav) {
         if (!ctx.hb.store.isParent) SoftButton("What parents can do") { nav.go(Screen.Perms) }
         SoftButton("Family list") { nav.go(Screen.Lists) }
         SoftButton("Saved places") { nav.go(Screen.Places) }
+        SoftButton("How Homebase works") { nav.go(Screen.Tour) }
         SoftButton("Settings") { nav.go(Screen.Settings) }
         Gap(8)
     }

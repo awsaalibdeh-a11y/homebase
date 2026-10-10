@@ -74,14 +74,14 @@ private fun Bubble(m: Message, mine: Boolean, who: String, onSpot: (Spot) -> Uni
         return
     }
     val (tint, ink) = when (m.kind) {
-        "sos" -> Rose to Color.White
+        "sos" -> Rose to OnAccent
         "checkin" -> MintSoft to Ink
         "late" -> SunSoft to Ink
-        else -> if (mine) Blue to Color.White else Color.White to Ink
+        else -> if (mine) Blue to OnAccent else Surface2 to Ink
     }
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(Modifier.widthIn(max = 290.dp).background(tint, RoundedCornerShape(18.dp)).padding(horizontal = 14.dp, vertical = 9.dp)) {
-            if (!mine) Text(who, fontSize = 11.sp, color = if (m.kind == "sos") Color.White else Muted)
+            if (!mine) Text(who, fontSize = 11.sp, color = if (m.kind == "sos") OnAccent else Muted)
             when (m.kind) {
                 "heart" -> Text("❤️", fontSize = 34.sp)
                 "checkin" -> Text("✓ ${m.body.ifBlank { "I'm OK" }}", color = ink)
@@ -110,7 +110,7 @@ fun ThreadScreen(nav: Nav, id: Int) {
     androidx.compose.runtime.DisposableEffect(id) { onDispose { if (state.openThread.value == id) state.openThread.value = null } }
     LaunchedEffect(list.size) { if (list.isNotEmpty()) listState.animateScrollToItem(list.size - 1) }
     Column(Modifier.fillMaxSize().background(Bg)) {
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().background(Surface).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton({ nav.back() }) { Text("Back") }
             Avatar(peer?.emoji ?: "👨‍👩‍👧", 36, if (peer == null) SunSoft else BlueSoft)
             Text(peer?.name ?: "Whole family", Modifier.padding(start = 10.dp).weight(1f), style = MaterialTheme.typography.titleMedium)
@@ -119,7 +119,7 @@ fun ThreadScreen(nav: Nav, id: Int) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp), state = listState) {
             items(list, key = { it.id }) { m -> Bubble(m, m.from == me, fam?.members?.firstOrNull { it.id == m.from }?.name ?: "", onSpot = { s -> state.showOnMap.tryEmit(s); nav.back() }) }
         }
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().background(Surface).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             TextButton({ sendQuick(ctx, "heart", "", id, done = "❤️ sent") }) { Text("❤️", fontSize = 22.sp) }
             OutlinedTextField(text, { text = it }, Modifier.weight(1f), placeholder = { Text("Message") }, maxLines = 4, shape = RoundedCornerShape(24.dp))
             TextButton({ if (text.isNotBlank()) { sendQuick(ctx, "text", text.trim(), id, done = "Sent"); text = "" } }) { Text("Send") }

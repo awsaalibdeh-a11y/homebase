@@ -65,7 +65,7 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
         }
     }
     Scaffold(containerColor = Bg, bottomBar = {
-        NavigationBar(containerColor = Color.White) {
+        NavigationBar(containerColor = Surface) {
             val items = listOf("Map" to Icons.Filled.Place, "Family" to Icons.Filled.People, "Chat" to Icons.Filled.Chat, "Me" to Icons.Filled.Home)
             items.forEachIndexed { i, (label, icon) ->
                 NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icon, label) }, label = { Text(label) },

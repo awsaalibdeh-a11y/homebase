@@ -44,7 +44,7 @@ private fun Reason(emoji: String, title: String, text: String) {
 @Composable
 fun PermissionsScreen(nav: Nav) {
     val ctx = LocalContext.current
-    fun finish() { ctx.hb.store.onboarded = true; startHomebase(ctx); nav.reset(Screen.Main) }
+    fun finish() { ctx.hb.store.onboarded = true; startHomebase(ctx); nav.reset(if (ctx.hb.store.tourDone) Screen.Main else Screen.Tour) }
     val battery = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> askBatteryExemption(ctx); finish() }
     val background = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> askBatteryExemption(ctx); finish() }
     val first = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
