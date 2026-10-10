@@ -102,6 +102,27 @@ data class HistoryPoint(val lat: Double, val lng: Double, val at: Double = 0.0)
 data class HistoryResp(val points: List<HistoryPoint> = emptyList())
 
 @Serializable
+data class Chore(val id: Int, val title: String = "", val emoji: String = "🧹", val points: Int = 0, val to: Int = 0, val status: String = "open", @SerialName("done_by") val doneBy: Int = 0)
+
+@Serializable
+data class ChoresResp(val chores: List<Chore> = emptyList(), val points: Map<String, Int> = emptyMap(), val week: Map<String, Int> = emptyMap())
+
+@Serializable
+data class SumTop(val label: String = "", val sec: Int = 0)
+
+@Serializable
+data class SumScreen(val total: Int = 0, val avg: Int = 0, val top: List<SumTop> = emptyList())
+
+@Serializable
+data class SumLocks(val count: Int = 0, val minutes: Int = 0)
+
+@Serializable
+data class SumChores(val done: Int = 0, val points: Int = 0)
+
+@Serializable
+data class SummaryResp(val name: String = "", val screen: SumScreen? = null, val locks: SumLocks = SumLocks(), val chores: SumChores = SumChores())
+
+@Serializable
 data class RuleKid(val id: Int, val name: String = "", val emoji: String = "🙂")
 
 @Serializable

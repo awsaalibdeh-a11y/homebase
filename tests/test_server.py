@@ -500,5 +500,55 @@ class Rules(Base):
         self.assertEqual(len([e for e in self.events(self.kid) if e["type"] == "nudge" and "daily limit of 30" in e["payload"]["text"]]), 1)
 
 
+class Chores(Base):
+    def add(self, title="Take out the bins", points=10, to=0):
+        return self.post(self.mum, "/api/chores", title=title, points=points, to=to or self.kid_id).get_json()["id"]
+
+    def test_the_whole_life_of_a_job_and_the_points(self):
+        cid = self.add()
+        self.assertEqual(self.get(self.kid, "/api/chores").get_json()["chores"][0]["status"], "open")
+        self.assertEqual(self.post(self.kid, f"/api/chores/{cid}/approve").status_code, 403)                  # a child cannot approve their own
+        self.assertEqual(self.post(self.kid, f"/api/chores/{cid}/done").status_code, 200)
+        self.assertEqual(self.get(self.mum, "/api/chores").get_json()["points"], {})                          # not yet: it needs a parent
+        self.assertEqual(self.post(self.mum, f"/api/chores/{cid}/approve").status_code, 200)
+        d = self.get(self.mum, "/api/chores").get_json()
+        self.assertEqual((d["chores"][0]["status"], d["points"][str(self.kid_id)]), ("approved", 10))
+        said = [m["body"] for m in self.get(self.kid, "/api/messages?with=0").get_json()["messages"]]
+        self.assertTrue(any("finished: Take out the bins" in b for b in said) and any("+10 points" in b for b in said))   # the family sees every step
+
+    def test_not_good_enough_sends_it_back_without_points(self):
+        cid = self.add()
+        self.post(self.kid, f"/api/chores/{cid}/done")
+        self.post(self.mum, f"/api/chores/{cid}/approve", ok=False)
+        c = self.get(self.mum, "/api/chores").get_json()
+        self.assertEqual((c["chores"][0]["status"], c["points"]), ("open", {}))
+
+    def test_only_parents_add_and_a_job_for_one_child_is_theirs(self):
+        self.assertEqual(self.post(self.kid, "/api/chores", title="x").status_code, 403)
+        self.assertEqual(self.post(self.mum, "/api/chores", title="").status_code, 400)
+        self.assertEqual(self.post(self.mum, "/api/chores", title="x", to=self.mum_id).status_code, 404)    # must be a child
+        cid = self.post(self.mum, "/api/chores", title="Any child", points=3).get_json()["id"]              # to nobody = any child
+        self.assertEqual(self.post(self.kid, f"/api/chores/{cid}/done").status_code, 200)
+
+    def test_junk_points_and_deleting(self):
+        self.assertEqual(self.post(self.mum, "/api/chores", title="x", points="lots").status_code, 400)
+        cid = self.post(self.mum, "/api/chores", title="x", points=9999).get_json()["id"]
+        self.assertEqual(self.get(self.mum, "/api/chores").get_json()["chores"][0]["points"], 100)           # capped
+        self.assertEqual(self.c.delete(f"/api/chores/{cid}", headers=self.kid).status_code, 403)
+        self.assertEqual(self.c.delete(f"/api/chores/{cid}", headers=self.mum).status_code, 200)
+
+    def test_the_weekly_summary_pulls_it_together(self):
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        self.post(self.kid, "/api/screentime", day=today, apps=[{"pkg": "roblox", "label": "Roblox", "cat": "play", "sec": 3000}, {"pkg": "yt", "label": "YouTube", "cat": "watch", "sec": 600}])
+        cid = self.add(points=7)
+        self.post(self.kid, f"/api/chores/{cid}/done"); self.post(self.mum, f"/api/chores/{cid}/approve")
+        self.post(self.mum, "/api/lock", member=self.kid_id, minutes=30)
+        d = self.get(self.mum, f"/api/summary?member={self.kid_id}").get_json()
+        self.assertEqual((d["screen"]["total"], d["screen"]["top"][0]["label"], d["chores"], d["locks"]["minutes"]), (3600, "Roblox", {"done": 1, "points": 7}, 0))
+        self.c.patch("/api/me", headers=self.kid, json={"perms": {"screentime": False}})
+        self.assertIsNone(self.get(self.mum, f"/api/summary?member={self.kid_id}").get_json()["screen"])      # hidden when the child switched it off
+        self.assertEqual(self.get(self.kid, "/api/summary").get_json()["screen"]["total"], 3600)             # but they still see their own
+
+
 if __name__ == "__main__":
     unittest.main()

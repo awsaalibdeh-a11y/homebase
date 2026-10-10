@@ -68,6 +68,12 @@ locks = Table("locks", meta,                                          # a parent
     Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("by_id", Integer), Column("family_id", Integer, index=True),
     Column("start", Float), Column("until", Float), Column("ended", Float, default=0),                # ended = lifted early (0 = not lifted)
     Column("lifted_by", String(12), default=""), Column("reason", String(120), default=""))          # lifted_by: parent | owner
+chores = Table("chores", meta,                                          # jobs a parent sets, a child ticks off, a parent approves for points
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("title", String(80)), Column("emoji", String(8), default="🧹"),
+    Column("points", Integer, default=5), Column("to_id", Integer, default=0),                                  # 0 = any child
+    Column("created_by", Integer), Column("created", Float),
+    Column("status", String(10), default="open"),                                                               # open | done | approved
+    Column("done_by", Integer, default=0), Column("done_at", Float, default=0), Column("approved_by", Integer, default=0), Column("approved_at", Float, default=0))
 meta.create_all(engine)
 try:                                                                  # older databases get the new column
     with engine.begin() as _c:

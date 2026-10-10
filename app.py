@@ -448,6 +448,127 @@ def delete_history():
 
 
 # ---------------------------------------------------------------- lock a child's devices for a while (a parent's button, four hours a day at most)
+# ---------------------------------------------------------------- chores: a parent sets a job, a child ticks it off, a parent approves it for points
+def chore_view(c):
+    return {"id": c["id"], "title": c["title"], "emoji": c["emoji"], "points": c["points"], "to": c["to_id"], "status": c["status"],
+            "done_by": c["done_by"], "done_at": c["done_at"], "approved_at": c["approved_at"], "created": c["created"]}
+
+
+def chore_points(fid, since=0):
+    pts = {}
+    for c in db.many(select(db.chores).where(db.chores.c.family_id == fid, db.chores.c.status == "approved", db.chores.c.approved_at >= since)):
+        pts[c["done_by"]] = pts.get(c["done_by"], 0) + c["points"]
+    return pts
+
+
+def own_chore(cid):
+    return db.one(select(db.chores).where(db.chores.c.id == cid, db.chores.c.family_id == g.m["family_id"]))
+
+
+@app.get("/api/chores")
+@need
+def get_chores():
+    rows = db.many(select(db.chores).where(db.chores.c.family_id == g.m["family_id"]).order_by(db.chores.c.id.desc()))
+    week = time.time() - 7 * 86400
+    open_rows = [c for c in rows if c["status"] != "approved" or c["approved_at"] >= week][:60]
+    return jsonify(chores=[chore_view(c) for c in open_rows], points=chore_points(g.m["family_id"]), week=chore_points(g.m["family_id"], week))
+
+
+@app.post("/api/chores")
+@parent_only
+def add_chore():
+    b = request.get_json(silent=True) or {}
+    title = clean(b.get("title"), 80)
+    if not title:
+        return err("What is the job?")
+    try:
+        pts = max(0, min(100, int(b.get("points") if b.get("points") not in (None, "") else 5)))
+    except (TypeError, ValueError):
+        return err("Points should be a number.")
+    to = int(b["to"]) if str(b.get("to", "")).isdigit() else 0
+    if to and not (same_family(to) and same_family(to)["role"] == "child"):
+        return err("Pick a child.", 404)
+    if len(db.many(select(db.chores.c.id).where(db.chores.c.family_id == g.m["family_id"], db.chores.c.status != "approved"))) >= 40:
+        return err("That is plenty of jobs (40). Approve or delete some first.")
+    cid = db.run(insert(db.chores).values(family_id=g.m["family_id"], title=title, emoji=clean(b.get("emoji"), 8) or "🧹", points=pts, to_id=to, created_by=g.m["id"], created=time.time()))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} added a job: {title} ({pts} points)")
+    push_family(g.m["family_id"], "chores", {"id": cid})
+    return jsonify(id=cid)
+
+
+@app.post("/api/chores/<int:cid>/done")
+@need
+def chore_done(cid):
+    c = own_chore(cid)
+    if not c or c["status"] != "open":
+        return err("That job is not open.", 404)
+    if g.m["role"] != "child" or (c["to_id"] and c["to_id"] != g.m["id"]):
+        return err("This job is for someone else.", 403)
+    db.run(update(db.chores).where(db.chores.c.id == cid).values(status="done", done_by=g.m["id"], done_at=time.time()))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} finished: {c['title']}. A parent can approve it.")
+    push_family(g.m["family_id"], "chores", {"id": cid})
+    return jsonify(ok=True)
+
+
+@app.post("/api/chores/<int:cid>/approve")
+@parent_only
+def chore_approve(cid):
+    c = own_chore(cid)
+    if not c or c["status"] != "done":
+        return err("Nothing to approve.", 404)
+    ok = bool((request.get_json(silent=True) or {}).get("ok", True))
+    if ok:
+        db.run(update(db.chores).where(db.chores.c.id == cid).values(status="approved", approved_by=g.m["id"], approved_at=time.time()))
+        who = same_family(c["done_by"])
+        say(g.m["family_id"], g.m["id"], f"{g.m['name']} approved {who['name'] if who else 'the job'}'s job: {c['title']} (+{c['points']} points)")
+    else:                                                          # not quite right: back to the list
+        db.run(update(db.chores).where(db.chores.c.id == cid).values(status="open", done_by=0, done_at=0))
+        say(g.m["family_id"], g.m["id"], f"{g.m['name']} asked for {c['title']} to be done again")
+    push_family(g.m["family_id"], "chores", {"id": cid})
+    return jsonify(ok=True)
+
+
+@app.delete("/api/chores/<int:cid>")
+@parent_only
+def chore_delete(cid):
+    if not own_chore(cid):
+        return err("Not found.", 404)
+    db.run(delete(db.chores).where(db.chores.c.id == cid))
+    push_family(g.m["family_id"], "chores", {"id": cid})
+    return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- the week at a glance, for a child (and the parents who may see it)
+@app.get("/api/summary")
+@need
+def week_summary():
+    target = same_family(qint("member", g.m["id"]))
+    if not target or target["role"] != "child":
+        return err("Not found.", 404)
+    if target["id"] != g.m["id"] and g.m["role"] != "parent":
+        return err("Only you or a parent can see this.", 403)
+    now = time.time()
+    since_day = time.strftime("%Y-%m-%d", time.gmtime(now - 7 * 86400))
+    can_screen = parent_may(g.m, target, "screentime")
+    out = {"member": target["id"], "name": target["name"], "screen": None, "locks": {"count": 0, "minutes": 0}, "chores": {"done": 0, "points": 0}}
+    if can_screen:
+        rows = db.many(select(db.screentime).where(db.screentime.c.member_id == target["id"], db.screentime.c.day >= since_day))
+        days, apps = {}, {}
+        for r in rows:
+            days[r["day"]] = days.get(r["day"], 0) + r["sec"]
+            apps[r["label"] or r["pkg"]] = apps.get(r["label"] or r["pkg"], 0) + r["sec"]
+        total = sum(days.values())
+        top = sorted(apps.items(), key=lambda kv: -kv[1])[:3]
+        out["screen"] = {"total": total, "avg": int(total / max(1, len(days))), "days": len(days), "top": [{"label": k, "sec": v} for k, v in top],
+                         "busiest": max(days.items(), key=lambda kv: kv[1])[0] if days else None}
+    lk = db.many(select(db.locks).where(db.locks.c.member_id == target["id"], db.locks.c.until > now - 7 * 86400))
+    out["locks"] = {"count": len(lk), "minutes": int(locked_between(target, now - 7 * 86400, now, lk) // 60)}
+    week = time.time() - 7 * 86400
+    mine = [c for c in db.many(select(db.chores).where(db.chores.c.family_id == target["family_id"], db.chores.c.status == "approved", db.chores.c.done_by == target["id"], db.chores.c.approved_at >= week))]
+    out["chores"] = {"done": len(mine), "points": sum(c["points"] for c in mine)}
+    return jsonify(out)
+
+
 # ---------------------------------------------------------------- family rules: house rules and a daily play/watch limit per child
 def limit_of(m):
     try:

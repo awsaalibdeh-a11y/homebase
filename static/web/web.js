@@ -111,12 +111,13 @@ function enter(d) { S.token = d.token; S.me = d.me.id; store("hb_token", d.token
 function signOut() { S.running = false; stopGeo(); ["hb_token", "hb_snap", "hb_out", "hb_geo"].forEach(k => store(k)); S.token = ""; location.reload(); }
 
 /* ---------- app ---------- */
+S.chores = []; S.chorePts = {}; S.weekPts = {};
 async function startApp(fresh) {
   $("#auth").classList.add("hidden"); $("#app").classList.remove("hidden");
   initMap(); initChrome(); paintOffline();
   if (!loadSnap() && !fresh) { /* first run: nothing to show yet */ }
   try { await refreshFamily(); } catch (e) { if (!e.offline) return; }
-  loadThread(0); refreshItems(); flushOutbox();
+  loadThread(0); refreshItems(); refreshChores(); flushOutbox();
   if (!S.running) { S.running = true; eventLoop(); }
   setInterval(() => { if (!document.hidden && S.token && S.online) refreshFamily().catch(() => {}); }, 12000);
   setInterval(() => { if (S.token && S.online) flushOutbox(); }, 15000);
@@ -172,7 +173,7 @@ function renderSide() {
   const places = S.places.map(p => `<div class="place"><span>${esc(p.emoji)} ${esc(p.name)} <small>${p.radius} m</small></span>${isParent() ? `<button class="btn sm" data-act="delplace" data-id="${p.id}">Remove</button>` : ""}</div>`).join("") || `<div class="empty">No saved places yet.${isParent() ? " Press ＋ Place on the map." : ""}</div>`;
   const items = S.items.map(i => `<label class="item ${i.done ? "done" : ""}"><input type="checkbox" data-act="tick" data-id="${i.id}" ${i.done ? "checked" : ""}><span style="flex:1">${esc(i.text)}</span><button class="link" data-act="delitem" data-id="${i.id}" title="Delete" aria-label="Delete">✕</button></label>`).join("");
   const keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  $("#side").innerHTML = youCard() + `<div class="sechead"><h3>People</h3></div>${people}<div class="sechead"><h3>Saved places</h3></div>${isParent() ? `<button class="btn ${S.places.some(p => p.name === "Home") ? "" : "solid"}" id="bHome" style="width:100%">🏠 ${S.places.some(p => p.name === "Home") ? "Move the Home area" : "Set the Home area"}</button>` : (S.places.some(p => p.name === "Home") ? "" : '<div class="empty">A parent can set the Home area.</div>')}${places}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}
+  $("#side").innerHTML = youCard() + `<div class="sechead"><h3>People</h3></div>${people}<div class="sechead"><h3>Saved places</h3></div>${isParent() ? `<button class="btn ${S.places.some(p => p.name === "Home") ? "" : "solid"}" id="bHome" style="width:100%">🏠 ${S.places.some(p => p.name === "Home") ? "Move the Home area" : "Set the Home area"}</button>` : (S.places.some(p => p.name === "Home") ? "" : '<div class="empty">A parent can set the Home area.</div>')}${places}<div class="sechead"><h3>Jobs</h3></div>${choresHtml()}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}
     <form id="itemForm" style="display:flex;gap:8px"><input class="field" id="itemIn" placeholder="Add to the list" maxlength="120" autocomplete="off" value="${esc(keep)}"><button class="btn" type="submit">Add</button></form>`;
   if (keep) { const i = $("#itemIn"); i.focus(); i.setSelectionRange(keep.length, keep.length); }
 }
@@ -429,6 +430,7 @@ function handleEvent(ev) {
     case "member": case "places": refreshFamily(); break;
     case "nudge": toast("💡 " + p.text, 12000); notify("Time for a break?", p.text, { tag: "nudge", force: false, thread: undefined }); break;
     case "list": refreshItems(); break;
+    case "chores": refreshChores(); break;
     case "location": { const m = member(p.member); if (m) { m.location = { lat: p.lat, lng: p.lng, acc: p.acc, at: p.at }; m.last_seen = Date.now() / 1000; m.battery = p.battery ?? m.battery; renderMap(); renderSide(); } break; }
     case "battery": { const m = member(p.member); if (m) { m.battery = p.battery; renderSide(); } toast(`🔋 ${p.name} has ${p.battery}% battery`); break; }
     case "place": toast(`${p.emoji} ${p.name} ${p.kind === "arrive" ? "arrived at" : "left"} ${p.place}`, 5000); break;
@@ -469,6 +471,21 @@ function initChrome() {
     else if (act === "delplace") { if (confirm("Remove this place?")) { await api("/api/places/" + id, "DELETE").catch(err => toast(err.message)); refreshFamily(); } }
     else if (act === "delitem") { await api("/api/list/" + id, "DELETE").catch(err => toast(err.message)); refreshItems(); }
   };
+  $("#side").addEventListener("click", async e => {
+    const el = e.target.closest("[data-chore]"); if (!el) return; const id = el.dataset.id, act = el.dataset.chore;
+    try {
+      if (act === "done") await api(`/api/chores/${id}/done`, "POST");
+      else if (act === "ok") await api(`/api/chores/${id}/approve`, "POST", { ok: true });
+      else if (act === "redo") await api(`/api/chores/${id}/approve`, "POST", { ok: false });
+      else if (act === "del") { if (!confirm("Delete this job?")) return; await api(`/api/chores/${id}`, "DELETE"); }
+      refreshChores();
+    } catch (err) { toast(err.message); }
+  });
+  $("#side").addEventListener("submit", async e => {
+    if (e.target.id !== "choreForm") return; e.preventDefault();
+    const f = e.target, title = f.title.value.trim(); if (!title) return;
+    try { await api("/api/chores", "POST", { title, points: +f.points.value || 0, to: +f.to.value || 0 }); f.title.value = ""; toast("Job added"); refreshChores(); } catch (err) { toast(err.message); }
+  });
   $("#side").onchange = async e => { const el = e.target.closest('[data-act="tick"]'); if (el) { await api("/api/list/" + el.dataset.id, "POST", { done: el.checked }).catch(err => toast(err.message)); refreshItems(); } };
   $("#side").onsubmit = async e => { if (e.target.id !== "itemForm") return; e.preventDefault(); const v = $("#itemIn").value.trim(); if (!v) return; try { await api("/api/list", "POST", { text: v }); refreshItems(); } catch (err) { toast(err.message); } };
   document.addEventListener("keydown", e => { if (e.key === "Escape") { closeModal(); if (S.adding) $("#bAddPlace").click(); } });
@@ -499,7 +516,9 @@ async function screenDialog(id) {
       : `<div class="empty">${mine ? "Nothing counted for this day yet." : esc(m.name) + " may not have turned tracking on yet. It is their choice."}</div>`}`;
     root.querySelectorAll(".stbar").forEach(b => b.onclick = () => { pick = +b.dataset.i; draw(root); });
   };
-  modal(`<h2>${mine ? "Your" : esc(m.name) + "'s"} screen time</h2><div class="sub">Only time spent actively playing or watching. Not when away, idle, or on homework and work.</div><div id="stBody"></div>
+  let sm = null; try { sm = await api("/api/summary?member=" + id); } catch (e) { /* not available */ }
+  const weekCard = sm ? `<div class="weekcard"><b>This week</b><div class="weekgrid">${sm.screen ? `<div><span>${fmtDur(sm.screen.total)}</span><small>playing and watching</small></div><div><span>${fmtDur(sm.screen.avg)}</span><small>a day on average</small></div>` : ""}<div><span>${sm.chores.done}</span><small>jobs done · ${sm.chores.points} points</small></div><div><span>${sm.locks.minutes ? fmtDur(sm.locks.minutes * 60) : "none"}</span><small>locked</small></div></div>${sm.screen && sm.screen.top.length ? `<small>Most time: ${sm.screen.top.map(t => esc(t.label) + " " + fmtDur(t.sec)).join(" · ")}</small>` : ""}</div>` : "";
+  modal(`<h2>${mine ? "Your" : esc(m.name) + "'s"} screen time</h2><div class="sub">Only time spent actively playing or watching. Not when away, idle, or on homework and work.</div>${weekCard}<div id="stBody"></div>
     ${mine ? `<div class="msec">Track this computer</div><div class="sub">Windows: a small program counts your playing and watching here. Android: turn it on in the Homebase app, in Me.</div><div class="seg"><button class="btn sm" id="stAgent">Get the Windows tracker</button><button class="btn sm" id="stDel">Delete my screen time</button></div>` : ""}
     <div class="foot"><button class="btn solid" id="stDone">Done</button></div>`, root => {
     draw(root); root.querySelector("#stDone").onclick = closeModal;
@@ -594,4 +613,22 @@ async function rulesDialog() {
       const limits = {}; root.querySelectorAll("[data-kid]").forEach(i => { limits[i.dataset.kid] = +i.value || 0; });
       try { await api("/api/rules", "POST", { text: root.querySelector("#ruText").value, limits }); toast("Rules saved"); closeModal(); } catch (e) { toast(e.message); } };
   });
+}
+
+
+/* ---------- jobs: a parent sets them, a child ticks them off, a parent approves them for points ---------- */
+async function refreshChores() { try { const d = await api("/api/chores"); S.chores = d.chores; S.chorePts = d.points; S.weekPts = d.week; renderSide(); } catch (e) { /* offline: keep what we have */ } }
+function choresHtml() {
+  const kids = S.members.filter(m => m.role === "child"), parent = isParent(), mine = me();
+  const row = c => {
+    const who = c.done_by ? member(c.done_by) : null, forMe = !c.to || c.to === S.me, to = c.to ? member(c.to) : null;
+    let act = "";
+    if (c.status === "open" && mine.role === "child" && forMe) act = `<button class="btn sm solid" data-chore="done" data-id="${c.id}">Done</button>`;
+    else if (c.status === "done" && parent) act = `<button class="btn sm" data-chore="redo" data-id="${c.id}">Redo</button><button class="btn sm solid" data-chore="ok" data-id="${c.id}">Approve</button>`;
+    const state = c.status === "done" ? `<small>${esc(who ? who.name : "Someone")} finished it${parent ? "" : ". Waiting for a parent"}</small>` : c.status === "approved" ? `<small>✓ ${esc(who ? who.name : "")} · +${c.points}</small>` : `<small>${to ? "For " + esc(to.name) : "Any child"} · ${c.points} points</small>`;
+    return `<div class="item ${c.status === "approved" ? "done" : ""}"><span class="stemo">${esc(c.emoji)}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(c.title)}</b>${state}</span>${act}${parent && c.status !== "approved" ? `<button class="link" data-chore="del" data-id="${c.id}" title="Delete" aria-label="Delete job">✕</button>` : ""}</div>`;
+  };
+  const board = kids.length ? `<div class="board">${kids.map(k => `<span class="chip">${esc(k.emoji)} ${esc(k.name)} · ${S.weekPts[k.id] || 0} this week · ${S.chorePts[k.id] || 0} total</span>`).join("")}</div>` : "";
+  const form = parent ? `<form id="choreForm" class="choreform"><input class="field" name="title" placeholder="Add a job, e.g. Take out the bins" maxlength="80" autocomplete="off"><div class="choreopts"><input class="field" name="points" type="number" min="0" max="100" value="5" aria-label="Points"><select class="field" name="to" aria-label="Who is it for"><option value="0">Any child</option>${kids.map(k => `<option value="${k.id}">${esc(k.name)}</option>`).join("")}</select><button class="btn" type="submit">Add</button></div></form>` : "";
+  return board + (S.chores.map(row).join("") || `<div class="empty">${parent ? "No jobs yet. Add one below." : "No jobs right now."}</div>`) + form;
 }

@@ -63,6 +63,8 @@ fun ScreenTimeScreen(nav: Nav, memberId: Int) {
     var problem by remember { mutableStateOf("") }
     var pick by remember { mutableIntStateOf(0) }                       // 0 = today, 1 = yesterday ...
     var reload by remember { mutableIntStateOf(0) }
+    var sum by remember { mutableStateOf<app.homebase.family.SummaryResp?>(null) }
+    LaunchedEffect(memberId) { runCatching { ctx.hb.api.summary(memberId) }.onSuccess { sum = it } }
     LaunchedEffect(reload) {
         loaded = false; problem = ""
         runCatching { ctx.hb.api.screenTime(memberId, 7) }
@@ -99,6 +101,16 @@ fun ScreenTimeScreen(nav: Nav, memberId: Int) {
                             Text(week[i].dayOfWeek.getDisplayName(TextStyle.NARROW, Locale.getDefault()), Modifier.padding(top = 4.dp), color = if (i == pick) Ink else Muted, style = MaterialTheme.typography.labelMedium)
                         }
                     }
+                }
+            }
+            sum?.let { s ->
+                SoftCard {
+                    Text("This week", style = MaterialTheme.typography.titleMedium)
+                    s.screen?.let { sc ->
+                        Text("${durationText(sc.total)} playing and watching · ${durationText(sc.avg)} a day on average", color = Muted)
+                        if (sc.top.isNotEmpty()) Text("Most time: " + sc.top.joinToString(" · ") { "${it.label} ${durationText(it.sec)}" }, color = Muted)
+                    }
+                    Text("${s.chores.done} jobs done (${s.chores.points} points) · " + (if (s.locks.minutes > 0) "${durationText(s.locks.minutes * 60)} locked" else "no locks"), color = Muted)
                 }
             }
             SectionLabel("Apps")

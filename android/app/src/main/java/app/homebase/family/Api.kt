@@ -84,6 +84,12 @@ class Api(private val store: Store) {
     suspend fun askUnlock() { raw("POST", "/api/lock/ask") }
     suspend fun rules(): RulesResp = ask("GET", "/api/rules")
     suspend fun saveRules(text: String, limits: Map<Int, Int>) { raw("POST", "/api/rules", obj { put("text", text); put("limits", buildJsonObject { limits.forEach { (k, v) -> put(k.toString(), v) } }) }) }
+    suspend fun chores(): ChoresResp = ask("GET", "/api/chores")
+    suspend fun addChore(title: String, points: Int, to: Int) { raw("POST", "/api/chores", obj { put("title", title); put("points", points); put("to", to) }) }
+    suspend fun choreDone(id: Int) { raw("POST", "/api/chores/$id/done") }
+    suspend fun choreApprove(id: Int, ok: Boolean) { raw("POST", "/api/chores/$id/approve", obj { put("ok", ok) }) }
+    suspend fun choreDelete(id: Int) { raw("DELETE", "/api/chores/$id") }
+    suspend fun summary(member: Int): SummaryResp = ask("GET", "/api/summary?member=$member")
     suspend fun history(member: Int, hours: Int = 12): HistoryResp = ask("GET", "/api/history?member=$member&hours=$hours")
 
     suspend fun deleteHistory() { raw("DELETE", "/api/history") }

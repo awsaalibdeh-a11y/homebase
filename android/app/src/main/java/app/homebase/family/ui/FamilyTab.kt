@@ -72,6 +72,7 @@ fun FamilyTab(nav: Nav) {
         if (me.isParent) {
             BigButton("Invite someone to the family") { nav.go(Screen.Invite) }
         }
+        SoftButton("Jobs and points") { nav.go(Screen.Chores) }
         SoftButton("Saved places") { nav.go(Screen.Places) }
         SoftButton("Family list") { nav.go(Screen.Lists) }
         Gap(8)

@@ -208,6 +208,7 @@ class HomebaseService : Service() {
             }
             "ice" -> (p["candidate"] as? JsonObject)?.let { c -> withContext(Dispatchers.Main) { app.calls.onIce(p.int("id"), c) } }
             "nudge" -> Notifications.post(this, Notifications.CH_MESSAGES, "Time for a break?", p.str("text"), "map")
+            "chores" -> Unit                                              // the jobs screen reloads itself when it opens
             "member", "places" -> app.state.refreshFamily()
             "list" -> app.state.refreshItems()
         }
