@@ -100,6 +100,13 @@ class Location(Base):
         self.assertEqual(len(self.get(self.kid, "/api/history").get_json()["points"]), 1)        # the child can see their own trail too
         self.assertEqual(self.get(self.kid, f"/api/history?member={self.mum_id}").status_code, 403)
 
+    def test_you_can_delete_your_own_trail(self):
+        self.where(self.kid, 51.5, -0.12)
+        self.assertEqual(self.c.delete("/api/history", headers=self.kid).status_code, 200)
+        self.assertEqual(self.get(self.kid, "/api/history").get_json()["points"], [])
+        kid = [m for m in self.get(self.mum, "/api/family").get_json()["members"] if m["name"] == "Sam"][0]
+        self.assertIsNone(kid["location"])
+
     def test_places_tell_everyone_when_someone_arrives_and_leaves(self):
         pid = self.post(self.mum, "/api/places", name="School", emoji="🏫", lat=51.5, lng=-0.12, radius=150).get_json()["id"]
         self.assertTrue(any(e["type"] == "places" for e in self.events(self.kid)))               # the child is told a place was added

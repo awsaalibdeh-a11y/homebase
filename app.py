@@ -344,6 +344,16 @@ def history():
     return jsonify(member=target["id"], points=[{"lat": r["lat"], "lng": r["lng"], "at": r["at"]} for r in rows])
 
 
+@app.delete("/api/history")
+@need
+def delete_history():
+    """Your trail is yours: delete it any time."""
+    db.run(delete(db.locations).where(db.locations.c.member_id == g.m["id"]))
+    db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(last_lat=None, last_lng=None, last_acc=None, last_at=0))
+    push_family(g.m["family_id"], "member", {"id": g.m["id"]}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
 # ---------------------------------------------------------------- messages: texts, check-ins, running late, SOS, hearts
 KINDS = ("text", "checkin", "late", "sos", "heart")
 
