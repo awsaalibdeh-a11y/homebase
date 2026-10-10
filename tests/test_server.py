@@ -561,5 +561,88 @@ class Chores(Base):
         self.assertEqual(self.get(self.kid, "/api/summary").get_json()["screen"]["total"], 3600)             # but they still see their own
 
 
+class Devices(Base):
+    def claim(self, code, **extra):
+        return self.c.post("/api/devices/claim", json={"code": code, "name": "Sam's laptop", **extra})
+
+    def test_a_code_links_a_device_that_acts_as_the_person(self):
+        code = self.post(self.kid, "/api/devices/code").get_json()["code"]
+        r = self.claim(code)
+        self.assertEqual(r.status_code, 200)
+        dev = {"Authorization": "Bearer " + r.get_json()["token"]}
+        self.assertEqual(self.post(dev, "/api/screentime", day="2026-10-12", apps=[{"pkg": "pc:roblox", "label": "Roblox", "cat": "play", "sec": 600}]).status_code, 200)
+        self.assertEqual(self.get(self.mum, f"/api/screentime?member={self.kid_id}").get_json()["days"][0]["total"], 600)   # it counted as Sam
+        self.assertEqual(self.claim(code).status_code, 400)                                                                # a code works once
+        said = [m["body"] for m in self.get(self.mum, "/api/messages?with=0").get_json()["messages"]]
+        self.assertTrue(any("linked a windows device" in b for b in said))                                                 # and the family is told
+
+    def test_wrong_and_old_codes_are_refused_and_a_device_can_be_removed(self):
+        self.assertEqual(self.claim("000000").status_code, 400)
+        code = self.post(self.kid, "/api/devices/code").get_json()["code"]
+        dev = {"Authorization": "Bearer " + self.claim(code).get_json()["token"]}
+        did = self.get(self.kid, "/api/devices").get_json()["devices"][0]["id"]
+        self.assertEqual(self.c.delete(f"/api/devices/{did}", headers=self.kid).status_code, 200)
+        self.assertEqual(self.get(dev, "/api/family").status_code, 401)                                                    # its key stops working at once
+
+
+class WindowsDownload(Base):
+    def test_the_program_is_served_as_a_download(self):
+        r = self.c.get("/download/windows")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_data()[:2], b"MZ")                                                      # a real Windows program
+        self.assertIn("HomebaseTracker.exe", r.headers["Content-Disposition"])
+
+
+class Grounding(Base):
+    def ground(self, apps=("roblox", "Minecraft"), minutes=60, who=None):
+        return self.post(who or self.mum, "/api/blocks", member=self.kid_id, apps=[{"key": a.lower(), "label": a} for a in apps], minutes=minutes)
+
+    def test_a_parent_grounds_apps_and_the_child_and_family_see_it(self):
+        self.assertEqual(self.ground().status_code, 200)
+        mine = self.get(self.kid, "/api/blocks").get_json()["blocks"]
+        self.assertEqual(sorted(b["key"] for b in mine), ["minecraft", "roblox"])
+        said = [m["body"] for m in self.get(self.kid, "/api/messages?with=0").get_json()["messages"]]
+        self.assertTrue(any("grounded Sam from roblox, Minecraft" in b or "grounded Sam from" in b for b in said))
+        v = {m["id"]: m for m in self.get(self.kid, "/api/family").get_json()["members"]}[self.kid_id]
+        self.assertEqual(len(v["blocks"]), 2)
+
+    def test_only_parents_ground_and_they_can_lift_it(self):
+        self.assertEqual(self.ground(who=self.kid).status_code, 403)
+        self.assertEqual(self.ground(minutes=2).status_code, 400)
+        self.assertEqual(self.ground(apps=("x",)).status_code, 400)
+        self.ground(apps=("roblox",))
+        bid = self.get(self.kid, "/api/blocks").get_json()["blocks"][0]["id"]
+        self.assertEqual(self.c.delete(f"/api/blocks/{bid}", headers=self.kid).status_code, 403)
+        self.assertEqual(self.c.delete(f"/api/blocks/{bid}", headers=self.mum).status_code, 200)
+        self.assertEqual(self.get(self.kid, "/api/blocks").get_json()["blocks"], [])
+
+
+class OwnerTools(Base):
+    def setUp(self):
+        super().setUp()
+        os.environ["HB_ADMIN_KEY"] = "owner-key-for-the-tests"
+        self.h = {"X-Admin-Key": "owner-key-for-the-tests"}
+
+    def tearDown(self):
+        os.environ.pop("HB_ADMIN_KEY", None)
+
+    def test_the_owner_can_list_families_invite_announce_and_ground(self):
+        self.assertEqual(self.c.get("/api/admin/families").status_code, 403)
+        fams = self.c.get("/api/admin/families", headers=self.h).get_json()["families"]
+        mine = next(f for f in fams if any(m["id"] == self.kid_id for m in f["members"]))
+        inv = self.c.post("/api/admin/invite", headers=self.h, json={"family_id": mine["id"], "role": "child"}).get_json()
+        j = self.c.post("/api/join", json={"code": inv["code"], "name": "Jo", "emoji": "x"})
+        self.assertEqual(j.status_code, 200)                                                                  # the owner's code really joins the family
+        self.assertEqual(self.c.post("/api/admin/announce", headers=self.h, json={"family_id": mine["id"], "text": "Pizza night"}).status_code, 200)
+        said = [m["body"] for m in self.get(self.kid, "/api/messages?with=0").get_json()["messages"]]
+        self.assertTrue(any("Announcement: Pizza night" in b for b in said))
+        self.assertTrue(any(e["type"] == "message" and "Pizza night" in e["payload"]["body"] for e in self.events(self.kid)))   # and it pops up on their devices
+        self.assertEqual(self.c.post("/api/admin/blocks", headers=self.h, json={"member_id": self.kid_id, "apps": ["tiktok"], "minutes": 30}).status_code, 200)
+        bl = self.c.get("/api/admin/blocks", headers=self.h).get_json()["blocks"]
+        mineb = next(b for b in bl if b["member_id"] == self.kid_id)
+        self.assertEqual(self.c.delete(f"/api/admin/blocks/{mineb['id']}", headers=self.h).status_code, 200)
+        self.assertEqual(self.get(self.kid, "/api/blocks").get_json()["blocks"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

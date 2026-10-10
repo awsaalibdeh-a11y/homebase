@@ -53,7 +53,17 @@ def err(msg, code=400, **extra):
 # ---------------------------------------------------------------- who is asking
 def current():
     token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    return db.one(select(db.members).where(db.members.c.token_hash == db.hash_token(token))) if token else None
+    if not token:
+        return None
+    h = db.hash_token(token)
+    m = db.one(select(db.members).where(db.members.c.token_hash == h))
+    if m:
+        return m
+    d = db.one(select(db.devices).where(db.devices.c.token_hash == h))
+    if d:
+        db.run(update(db.devices).where(db.devices.c.id == d["id"]).values(last_seen=time.time()))
+        return db.one(select(db.members).where(db.members.c.id == d["member_id"]))
+    return None
 
 
 def need(fn):
@@ -141,7 +151,7 @@ def member_view(m, viewer=None):
     gated = bool(viewer) and viewer["role"] == "parent" and m["role"] == "child" and viewer["id"] != m["id"]
     out = {"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "battery": m["battery"], "share": state,
            "paused_until": m["paused_until"] if state == "paused" else 0, "last_seen": m["last_seen"], "quiet": m["quiet_from"] >= 0,
-           "location": None, "perms": perms, "lock": lock_view(m), "home": at_home(m)}
+           "location": None, "perms": perms, "lock": lock_view(m), "home": at_home(m), "blocks": block_views(m)}
     if state == "on" and m["last_lat"] is not None and not (gated and not perms["location"]):
         out["location"] = {"lat": m["last_lat"], "lng": m["last_lng"], "acc": m["last_acc"], "at": m["last_at"]}
     if gated and not perms["location"]:
@@ -447,6 +457,129 @@ def delete_history():
     return jsonify(ok=True)
 
 
+# ---------------------------------------------------------------- linking a computer or tablet with a 6-digit code (no scripts, no copying keys)
+@app.post("/api/devices/code")
+@need
+def device_code():
+    if limited(f"devcode:{g.m['id']}", 20):
+        return err("Too many codes. Wait a little.", 429)
+    db.run(delete(db.pair_codes).where(db.pair_codes.c.expires < time.time()))
+    code = "".join(secrets.choice("0123456789") for _ in range(6))
+    db.run(insert(db.pair_codes).values(code=code, member_id=g.m["id"], expires=time.time() + 900))
+    return jsonify(code=code, expires_in=900)
+
+
+@app.post("/api/devices/claim")
+def device_claim():
+    """The Windows tracker (or any linked device) trades the code for its own key. The code works once and lasts 15 minutes."""
+    if limited(f"devclaim:{request.remote_addr}", 20):
+        return err("Too many tries. Wait a little.", 429)
+    b = request.get_json(silent=True) or {}
+    code = re.sub(r"\D", "", str(b.get("code") or ""))
+    row = db.one(select(db.pair_codes).where(db.pair_codes.c.code == code)) if code else None
+    if not row or row["expires"] < time.time():
+        return err("That code is wrong or has run out. Make a new one in Homebase.", 400)
+    db.run(delete(db.pair_codes).where(db.pair_codes.c.code == code))
+    m = db.one(select(db.members).where(db.members.c.id == row["member_id"]))
+    token = secrets.token_urlsafe(32)
+    db.run(insert(db.devices).values(member_id=m["id"], token_hash=db.hash_token(token), name=clean(b.get("name"), 60) or "Computer",
+                                     kind=clean(b.get("kind"), 12) or "windows", created=time.time(), last_seen=time.time()))
+    say(m["family_id"], m["id"], f"{m['name']} linked a {clean(b.get('kind'), 12) or 'windows'} device: {clean(b.get('name'), 60) or 'Computer'}")     # nothing is silent
+    return jsonify(token=token, member={"id": m["id"], "name": m["name"], "role": m["role"]})
+
+
+@app.get("/api/devices")
+@need
+def list_devices():
+    rows = db.many(select(db.devices).where(db.devices.c.member_id == g.m["id"]).order_by(db.devices.c.id))
+    return jsonify(devices=[{"id": d["id"], "name": d["name"], "kind": d["kind"], "created": d["created"], "last_seen": d["last_seen"]} for d in rows])
+
+
+@app.delete("/api/devices/<int:did>")
+@need
+def remove_device(did):
+    d = db.one(select(db.devices).where(db.devices.c.id == did, db.devices.c.member_id == g.m["id"]))
+    if not d:
+        return err("Not found.", 404)
+    db.run(delete(db.devices).where(db.devices.c.id == did))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} removed a device: {d['name']}")
+    return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- grounding: block certain apps on a child's laptop or tablet for a while
+def active_blocks(member_id, now=None):
+    now = now or time.time()
+    rows = db.many(select(db.blocks).where(db.blocks.c.member_id == member_id, db.blocks.c.until > now).order_by(db.blocks.c.id))
+    return [r for r in rows if not r["ended"] or r["ended"] > now]
+
+
+def block_views(m):
+    if m["role"] != "child":
+        return []
+    return [{"id": r["id"], "key": r["key"], "label": r["label"], "until": r["until"]} for r in active_blocks(m["id"])]
+
+
+def make_blocks(by, target, apps, minutes):
+    now = time.time()
+    labels = []
+    for a in apps[:12]:
+        key = clean((a or {}).get("key") if isinstance(a, dict) else a, 60).lower()
+        label = clean((a or {}).get("label") if isinstance(a, dict) else a, 60) or key
+        if len(key) < 2:
+            continue
+        db.run(insert(db.blocks).values(member_id=target["id"], family_id=target["family_id"], key=key, label=label, by_id=by["id"] if by else 0, created=now, until=now + minutes * 60))
+        labels.append(label)
+    if labels:
+        who = by["name"] if by else "The owner"
+        until = time.strftime("%H:%M", time.gmtime(now + minutes * 60 - (target["tz_offset"] or 0) * 60))
+        say(target["family_id"], by["id"] if by else target["id"], f"{who} grounded {target['name']} from {', '.join(labels)} until {until}")
+        push_family(target["family_id"], "member", {"id": target["id"], "blocks": True})
+    return labels
+
+
+@app.get("/api/blocks")
+@need
+def get_blocks():
+    target = same_family(qint("member", g.m["id"]))
+    if not target or target["role"] != "child":
+        return err("Not found.", 404)
+    if target["id"] != g.m["id"] and g.m["role"] != "parent":
+        return err("Only you or a parent can see this.", 403)
+    return jsonify(blocks=block_views(target), now=time.time())
+
+
+@app.post("/api/blocks")
+@parent_only
+def add_blocks():
+    b = request.get_json(silent=True) or {}
+    target = same_family(int(b["member"])) if str(b.get("member", "")).isdigit() else None
+    if not target or target["role"] != "child":
+        return err("Pick a child.", 404)
+    try:
+        minutes = int(b.get("minutes") or 0)
+    except (TypeError, ValueError):
+        return err("How many minutes?")
+    if minutes < 5:
+        return err("Ground for at least 5 minutes.")
+    apps = b.get("apps") if isinstance(b.get("apps"), list) else []
+    labels = make_blocks(g.m, target, apps, min(minutes, 24 * 60))
+    if not labels:
+        return err("Pick at least one app (a name of two letters or more).")
+    return jsonify(ok=True, apps=labels)
+
+
+@app.delete("/api/blocks/<int:bid>")
+@parent_only
+def lift_block(bid):
+    r = db.one(select(db.blocks).where(db.blocks.c.id == bid, db.blocks.c.family_id == g.m["family_id"]))
+    if not r:
+        return err("Not found.", 404)
+    db.run(update(db.blocks).where(db.blocks.c.id == bid).values(ended=time.time()))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} lifted the grounding from {r['label']}")
+    push_family(g.m["family_id"], "member", {"id": r["member_id"], "blocks": True})
+    return jsonify(ok=True)
+
+
 # ---------------------------------------------------------------- lock a child's devices for a while (a parent's button, four hours a day at most)
 # ---------------------------------------------------------------- chores: a parent sets a job, a child ticks it off, a parent approves it for points
 def chore_view(c):
@@ -721,6 +854,97 @@ def owner_ok():
     return verify_owner(request.headers.get("X-Admin-Key", ""))
 
 
+def admin_gate():
+    return None if owner_ok() else err("Wrong key.", 403)
+
+
+@app.get("/api/admin/families")
+def admin_families():
+    if (bad := admin_gate()):
+        return bad
+    out = []
+    for f in db.many(select(db.families).order_by(db.families.c.id.desc())):
+        ms = family_members(f["id"])
+        out.append({"id": f["id"], "name": f["name"], "created": f["created"], "members": [{"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "last_seen": m["last_seen"],
+                    "devices": len(db.many(select(db.devices.c.id).where(db.devices.c.member_id == m["id"]))), "lock": lock_view(m), "blocks": block_views(m)} for m in ms]})
+    return jsonify(families=out, now=time.time())
+
+
+@app.post("/api/admin/invite")
+def admin_invite():
+    if (bad := admin_gate()):
+        return bad
+    b = request.get_json(silent=True) or {}
+    fam = db.one(select(db.families).where(db.families.c.id == int(b["family_id"]))) if str(b.get("family_id", "")).isdigit() else None
+    if not fam:
+        return err("No such family.", 404)
+    role = "parent" if b.get("role") == "parent" else "child"
+    code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
+    db.run(insert(db.invites).values(code=code, family_id=fam["id"], role=role, created_by=0, expires=time.time() + 86400, used=False))
+    return jsonify(code=code, role=role, family=fam["name"], expires=time.time() + 86400)
+
+
+@app.post("/api/admin/announce")
+def admin_announce():
+    if (bad := admin_gate()):
+        return bad
+    b = request.get_json(silent=True) or {}
+    text = clean(b.get("text"), 500)
+    if not text:
+        return err("Write the announcement first.")
+    fams = [f for f in db.many(select(db.families))] if b.get("family_id") in ("*", None, "") else [f for f in db.many(select(db.families).where(db.families.c.id == int(b["family_id"])))] if str(b.get("family_id", "")).isdigit() else []
+    if not fams:
+        return err("No such family.", 404)
+    for f in fams:
+        mid = say(f["id"], 0, f"📢 Announcement: {text}", kind="system")
+        row = db.one(select(db.messages).where(db.messages.c.id == mid))
+        for m in family_members(f["id"]):
+            push(m["id"], "message", {**msg_view(row), "name": "Homebase", "emoji": "📢", "quiet": False, "urgent": False})
+    return jsonify(ok=True, families=len(fams))
+
+
+@app.get("/api/admin/blocks")
+def admin_blocks():
+    if (bad := admin_gate()):
+        return bad
+    now = time.time()
+    out = []
+    for r in db.many(select(db.blocks).where(db.blocks.c.until > now)):
+        if r["ended"] and r["ended"] <= now:
+            continue
+        kid = db.one(select(db.members).where(db.members.c.id == r["member_id"]))
+        out.append({"id": r["id"], "child": kid["name"] if kid else "?", "label": r["label"], "until": r["until"], "member_id": r["member_id"]})
+    return jsonify(blocks=out, now=now)
+
+
+@app.post("/api/admin/blocks")
+def admin_add_block():
+    if (bad := admin_gate()):
+        return bad
+    b = request.get_json(silent=True) or {}
+    kid = db.one(select(db.members).where(db.members.c.id == int(b["member_id"]))) if str(b.get("member_id", "")).isdigit() else None
+    if not kid or kid["role"] != "child":
+        return err("Pick a child.", 404)
+    try:
+        minutes = max(5, min(24 * 60, int(b.get("minutes") or 60)))
+    except (TypeError, ValueError):
+        return err("How many minutes?")
+    labels = make_blocks(None, kid, b.get("apps") if isinstance(b.get("apps"), list) else [], minutes)
+    return jsonify(ok=bool(labels), apps=labels)
+
+
+@app.delete("/api/admin/blocks/<int:bid>")
+def admin_lift_block(bid):
+    if (bad := admin_gate()):
+        return bad
+    r = db.one(select(db.blocks).where(db.blocks.c.id == bid))
+    if not r:
+        return err("No such block.", 404)
+    db.run(update(db.blocks).where(db.blocks.c.id == bid).values(ended=time.time()))
+    push_family(r["family_id"], "member", {"id": r["member_id"], "blocks": True})
+    return jsonify(ok=True)
+
+
 @app.get("/api/admin/locks")
 def admin_locks():
     if not owner_ok():
@@ -884,6 +1108,12 @@ def screentime_agent():
         return app.response_class("\ufeff" + body, mimetype="text/plain", headers={"Content-Disposition": 'attachment; filename="Homebase-ScreenTime.ps1"', "Cache-Control": "no-store"})
     text = (CMD_HEAD + body).replace("\r\n", "\n").replace("\n", "\r\n")                  # batch files need Windows line endings
     return app.response_class(text, mimetype="application/octet-stream", headers={"Content-Disposition": 'attachment; filename="Homebase-ScreenTime.cmd"', "Cache-Control": "no-store"})
+
+
+@app.get("/download/windows")
+def download_windows():
+    """The Windows tracker: one program for everyone. It links itself with the 6-digit code from Homebase."""
+    return send_from_directory(os.path.join(BASE, "windows"), "HomebaseTracker.exe", as_attachment=True, mimetype="application/octet-stream", max_age=0)
 
 
 @app.delete("/api/screentime")

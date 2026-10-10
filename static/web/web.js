@@ -160,6 +160,7 @@ function youCard() {
     ${on && !S.geo ? `<button class="btn solid" id="bAllow">Allow this laptop to share</button>` : ""}
     ${notifyState() === "default" ? `<button class="btn" id="bNotify">🔔 Turn on desktop notifications for messages and calls</button>` : ""}
     <div class="shareline"><div><b>Family rules</b><small>${m.role === "parent" ? "Set the house rules and daily limits." : "What your family agreed."}</small></div><button class="btn sm" id="bRules">${m.role === "parent" ? "Edit" : "Read"}</button></div>
+    ${m.role === "child" && (m.blocks || []).length ? `<div class="shareline"><div><b>🚫 Grounded apps</b><small>${m.blocks.map(b => esc(b.label) + " until " + clock(b.until)).join(" · ")}</small></div></div>` : ""}
     ${m.role === "child" ? `<div class="shareline"><div><b>Screen time</b><small>Only time spent playing or watching.</small></div><button class="btn sm" id="bScreen">See</button></div>` : ""}
     ${on || paused ? `<div class="quick">Pause for <button class="btn sm" data-pause="15">15 min</button><button class="btn sm" data-pause="60">1 hour</button>${paused ? `<button class="btn sm" data-pause="0">Resume</button>` : ""}</div>` : ""}</section>`;
 }
@@ -167,8 +168,8 @@ function renderSide() {
   const others = S.members.filter(m => m.id !== S.me);
   const people = others.map(m => {
     const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
-    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>Trail</button>${m.role === "child" && isParent() ? `<button class="btn sm" data-act="lock" data-id="${m.id}">${m.lock ? "🔒 Locked" : "Lock device"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="screen" data-id="${m.id}" ${may(m, "screentime") ? "" : "disabled"}>Screen time</button>` : ""}</div>` : "";
-    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${esc(m.emoji)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small></span>${m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`}</button>${offTags(m)}${acts}</div>`;
+    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>Trail</button>${m.role === "child" && isParent() ? `<button class="btn sm" data-act="ground" data-id="${m.id}">${(m.blocks || []).length ? "🚫 Grounded (" + m.blocks.length + ")" : "Ground apps"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="lock" data-id="${m.id}">${m.lock ? "🔒 Locked" : "Lock device"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="screen" data-id="${m.id}" ${may(m, "screentime") ? "" : "disabled"}>Screen time</button>` : ""}</div>` : "";
+    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${esc(m.emoji)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small></span>${m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`}</button>${offTags(m)}${acts}</div>`;
   }).join("") || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press Invite to add someone." : ""}</div>`;
   const places = S.places.map(p => `<div class="place"><span>${esc(p.emoji)} ${esc(p.name)} <small>${p.radius} m</small></span>${isParent() ? `<button class="btn sm" data-act="delplace" data-id="${p.id}">Remove</button>` : ""}</div>`).join("") || `<div class="empty">No saved places yet.${isParent() ? " Press ＋ Place on the map." : ""}</div>`;
   const items = S.items.map(i => `<label class="item ${i.done ? "done" : ""}"><input type="checkbox" data-act="tick" data-id="${i.id}" ${i.done ? "checked" : ""}><span style="flex:1">${esc(i.text)}</span><button class="link" data-act="delitem" data-id="${i.id}" title="Delete" aria-label="Delete">✕</button></label>`).join("");
@@ -468,6 +469,7 @@ function initChrome() {
     else if (act === "trail") showTrail(id);
     else if (act === "screen") screenDialog(id);
     else if (act === "lock") lockDialog(id);
+    else if (act === "ground") groundDialog(id);
     else if (act === "delplace") { if (confirm("Remove this place?")) { await api("/api/places/" + id, "DELETE").catch(err => toast(err.message)); refreshFamily(); } }
     else if (act === "delitem") { await api("/api/list/" + id, "DELETE").catch(err => toast(err.message)); refreshItems(); }
   };
@@ -526,16 +528,16 @@ async function screenDialog(id) {
     const x = root.querySelector("#stDel"); if (x) x.onclick = async () => { if (confirm("Delete all your saved screen time?")) { await api("/api/screentime", "DELETE").then(() => { toast("Deleted"); closeModal(); }).catch(e => toast(e.message)); } };
   });
 }
-function agentDialog() {
-  modal(`<h2>🖥️ Windows screen time</h2><div class="sub">It counts only time you spend <b>playing or watching</b> (games, YouTube, Netflix, TikTok and so on). Not when you are away, locked, or doing homework.</div>
-    <div class="msec">What it sees</div><div class="sub">Which program is in front, the title of its window (to tell YouTube from a homework tab) and how long since you touched the mouse or keyboard. Never your screen, files, passwords or what you type.</div>
-    <div class="msec">How to start</div><div class="sub">1. Download the file below. 2. Double-click it. If Windows says it protected your PC, press <b>More info</b>, then <b>Run anyway</b> (and <b>Keep</b> if your browser asks). 3. It starts with Windows. You can remove it any time with <code>-Remove</code>. It sends minutes per app to your family. Your parents see them only while "See my screen time" is on in your settings.</div>
-    <div class="foot"><button class="btn" id="agX">Close</button><button class="btn solid" id="agGo">Download for Windows</button></div>`, root => {
-    root.querySelector("#agX").onclick = closeModal;
-    root.querySelector("#agGo").onclick = async () => {
-      try { const r = await fetch("/api/screentime/agent", { headers: { Authorization: "Bearer " + S.token } }); if (!r.ok) throw new Error((await r.json()).error || "Could not download.");
-        const url = URL.createObjectURL(await r.blob()), a = document.createElement("a"); a.href = url; a.download = "Homebase-ScreenTime.cmd"; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); toast("Downloaded. Double-click Homebase-ScreenTime.cmd to start it.", 7000);
-      } catch (e) { toast(e.message); } };
+async function agentDialog() {
+  let code = "", err = "";
+  try { code = (await api("/api/devices/code", "POST")).code; } catch (e) { err = e.message; }
+  modal(`<h2>🖥️ Link a Windows computer</h2><div class="sub">A small program counts only the time you spend <b>playing or watching</b> (games, YouTube, Netflix, TikTok). Not when you are away, locked, or doing homework. It also follows parent locks and grounded apps.</div>
+    <div class="msec">1 · Download</div><div class="seg"><a class="btn solid" href="/download/windows" id="agDl">Download HomebaseTracker.exe</a></div>
+    <div class="sub">If Windows says it protected your PC, press <b>More info</b>, then <b>Run anyway</b>. That warning is normal for a new small program.</div>
+    <div class="msec">2 · Open it and type this code</div>${err ? `<div class="err">${esc(err)}</div>` : `<div class="big">${esc(code)}</div><div class="sub" style="text-align:center">The code works once and lasts 15 minutes.</div>`}
+    <div class="msec">What it sees</div><div class="sub">Which program is in front, its window title (to tell YouTube from a homework tab) and how long since you used the mouse or keyboard. Never your screen, files, passwords or what you type. It shows an icon near the clock, and the family is told when it is linked.</div>
+    <div class="foot"><button class="btn" id="agNew">New code</button><button class="btn solid" id="agX">Done</button></div>`, root => {
+    root.querySelector("#agX").onclick = closeModal; root.querySelector("#agNew").onclick = agentDialog;
   });
 }
 
@@ -631,4 +633,30 @@ function choresHtml() {
   const board = kids.length ? `<div class="board">${kids.map(k => `<span class="chip">${esc(k.emoji)} ${esc(k.name)} · ${S.weekPts[k.id] || 0} this week · ${S.chorePts[k.id] || 0} total</span>`).join("")}</div>` : "";
   const form = parent ? `<form id="choreForm" class="choreform"><input class="field" name="title" placeholder="Add a job, e.g. Take out the bins" maxlength="80" autocomplete="off"><div class="choreopts"><input class="field" name="points" type="number" min="0" max="100" value="5" aria-label="Points"><select class="field" name="to" aria-label="Who is it for"><option value="0">Any child</option>${kids.map(k => `<option value="${k.id}">${esc(k.name)}</option>`).join("")}</select><button class="btn" type="submit">Add</button></div></form>` : "";
   return board + (S.chores.map(row).join("") || `<div class="empty">${parent ? "No jobs yet. Add one below." : "No jobs right now."}</div>`) + form;
+}
+
+
+/* ---------- grounding: block certain apps on a child's laptop or tablet for a while ---------- */
+const GROUND_PRESETS = ["Roblox", "Minecraft", "Fortnite", "YouTube", "TikTok", "Netflix", "Discord", "Steam"];
+async function groundDialog(id) {
+  const m = member(id); let seen = [], active = [];
+  try { const d = await api("/api/screentime?member=" + id + "&days=7"); const tot = {}; d.days.forEach(x => x.apps.forEach(a => { const k = (a.label || a.pkg).replace(/\s*\(.*\)\s*$/, ""); tot[k] = (tot[k] || 0) + a.sec; })); seen = Object.entries(tot).sort((a, b) => b[1] - a[1]).map(x => x[0]).slice(0, 8); } catch (e) { /* hidden by the child */ }
+  try { active = (await api("/api/blocks?member=" + id)).blocks; } catch (e) { return toast(e.message); }
+  const names = [...new Set([...seen, ...GROUND_PRESETS])].slice(0, 14), picked = new Set();
+  modal(`<h2>🚫 Ground apps for ${esc(m.name)}</h2><div class="sub">Pick apps to lock on their laptop and tablet for a while. They are closed (or a grounded website is minimised) and ${esc(m.name)} is told why. The family sees it in the chat.</div>
+    ${active.length ? `<div class="msec">Grounded now</div>${active.map(b => `<div class="sw"><div><b>${esc(b.label)}</b><span>until ${clock(b.until)}</span></div><button class="btn sm" data-lift="${b.id}">Lift</button></div>`).join("")}` : ""}
+    <div class="msec">Choose apps</div><div class="seg" id="grApps">${names.map(n => `<button class="btn sm" data-app="${esc(n)}">${esc(n)}</button>`).join("")}</div>
+    <input class="field" id="grOther" placeholder="Another app or website name" maxlength="40" style="margin-top:10px">
+    <div class="msec">For how long</div><div class="seg" id="grLen">${[[30, "30 min"], [60, "1 hour"], [120, "2 hours"], [240, "4 hours"], [720, "12 hours"], [1440, "Until tomorrow"]].map(([n, t]) => `<button class="btn sm ${n === 60 ? "sel" : ""}" data-m="${n}">${t}</button>`).join("")}</div>
+    <div class="foot"><button class="btn" id="grX">Close</button><button class="btn solid" id="grGo">Ground them</button></div>`, root => {
+    let mins = 60;
+    root.querySelector("#grX").onclick = closeModal;
+    root.querySelectorAll("#grApps [data-app]").forEach(b => b.onclick = () => { const n = b.dataset.app; picked.has(n) ? picked.delete(n) : picked.add(n); b.classList.toggle("sel", picked.has(n)); });
+    root.querySelectorAll("#grLen [data-m]").forEach(b => b.onclick = () => { mins = +b.dataset.m; root.querySelectorAll("#grLen .btn").forEach(x => x.classList.toggle("sel", x === b)); });
+    root.querySelectorAll("[data-lift]").forEach(b => b.onclick = async () => { try { await api("/api/blocks/" + b.dataset.lift, "DELETE"); toast("Lifted"); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } });
+    root.querySelector("#grGo").onclick = async () => {
+      const other = root.querySelector("#grOther").value.trim(), list = [...picked, ...(other ? [other] : [])];
+      if (!list.length) return toast("Pick at least one app.");
+      try { await api("/api/blocks", "POST", { member: id, minutes: mins, apps: list.map(n => ({ key: n.toLowerCase(), label: n })) }); toast(m.name + " is grounded from " + list.join(", ")); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } };
+  });
 }
