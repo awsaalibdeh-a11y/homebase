@@ -416,6 +416,19 @@ class Locks(Base):
         v = {m["id"]: m for m in self.get(self.kid, "/api/family").get_json()["members"]}[self.kid_id]
         self.assertIsNone(v["lock"])
 
+    def test_homebase_asks_cramly_whether_a_key_is_the_owners(self):
+        from unittest import mock
+        ok = mock.MagicMock()
+        ok.__enter__.return_value.status = 200
+        with mock.patch("urllib.request.urlopen", return_value=ok) as call:
+            server._owner_seen.clear()
+            self.assertTrue(server.verify_owner("the-owners-real-key"))
+            self.assertTrue(server.verify_owner("the-owners-real-key"))                          # remembered for a minute
+            self.assertEqual(call.call_count, 1)
+        with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
+            self.assertFalse(server.verify_owner("another-long-wrong-key"))                      # if Cramly cannot be reached, nobody gets in
+        self.assertFalse(server.verify_owner("short"))
+
     def test_the_owner_can_see_and_lift_any_lock_with_the_owner_key(self):
         self.lock(120)
         old = os.environ.get("HB_ADMIN_KEY")

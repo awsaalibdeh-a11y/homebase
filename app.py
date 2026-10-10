@@ -565,9 +565,34 @@ def ask_unlock():
 
 
 # the owner's override, from Cramly Control: see every lock and lift any of them
+_owner_seen = {}                                               # sha256 of a key Cramly accepted -> when (a minute of memory, so a click is not a round trip)
+
+
+def verify_owner(key):
+    """Is this the owner's key? Homebase holds no owner secret of its own: Cramly (which does) answers."""
+    mine = os.environ.get("HB_ADMIN_KEY", "")                      # optional: a local override for development
+    if len(mine) >= 12:
+        return hmac.compare_digest(mine.encode(), key.encode())
+    if len(key) < 12:
+        return False
+    import hashlib
+    import urllib.request
+    h = hashlib.sha256(key.encode()).hexdigest()
+    if time.time() - _owner_seen.get(h, 0) < 60:
+        return True
+    try:
+        req = urllib.request.Request(os.environ.get("HUB_URL", "https://cramly-twz5.onrender.com").rstrip("/") + "/api/uni/verify", headers={"X-Admin-Key": key})
+        with urllib.request.urlopen(req, timeout=45) as r:           # 45 s: a sleeping free server needs a moment
+            ok = r.status == 200
+    except Exception:
+        return False
+    if ok:
+        _owner_seen[h] = time.time()
+    return ok
+
+
 def owner_ok():
-    want = os.environ.get("HB_ADMIN_KEY", "")
-    return len(want) >= 12 and hmac.compare_digest(want.encode(), request.headers.get("X-Admin-Key", "").encode())
+    return verify_owner(request.headers.get("X-Admin-Key", ""))
 
 
 @app.get("/api/admin/locks")
