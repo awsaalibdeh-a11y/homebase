@@ -37,8 +37,13 @@ fun memberLine(m: Member): String {
         m.location != null -> "Seen ${timeAgo(m.location.at)}"
         else -> "Waiting for a location"
     }
-    return if (m.battery in 0..100) "$where · 🔋 ${m.battery}%" else where
+    val line = if (m.battery in 0..100) "$where · 🔋 ${m.battery}%" else where
+    val off = PERM_LABELS.filter { (key, _) -> !m.allows(key) }.map { it.second }
+    return if (off.isEmpty()) line else "$line · off: ${off.joinToString(", ")}"
 }
+
+/** Plain names for the things a person can switch off for their parents. */
+val PERM_LABELS = listOf("location" to "location", "trail" to "trail", "battery" to "battery", "messages" to "messages", "calls" to "calls", "ping" to "where-are-you")
 
 @Composable
 fun MainScreen(nav: Nav, initialTab: Int = 0) {
