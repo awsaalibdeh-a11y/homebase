@@ -70,6 +70,12 @@ fun OsmMap(
         Configuration.getInstance().load(ctx, ctx.getSharedPreferences("osm", Context.MODE_PRIVATE))
         MapView(ctx).apply {
             setTileSource(TileSourceFactory.MAPNIK)
+            // matte dark like the rest of the app: invert the light tiles, mute the colour and dim them a little
+            val dark = android.graphics.ColorMatrix(floatArrayOf(-0.8f, 0f, 0f, 0f, 205f, 0f, -0.8f, 0f, 0f, 205f, 0f, 0f, -0.8f, 0f, 205f, 0f, 0f, 0f, 1f, 0f))
+            dark.postConcat(android.graphics.ColorMatrix().apply { setSaturation(0.3f) })
+            overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(dark))
+            overlayManager.tilesOverlay.loadingBackgroundColor = android.graphics.Color.parseColor("#0A0A0B")
+            overlayManager.tilesOverlay.loadingLineColor = android.graphics.Color.parseColor("#1B1B1F")
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(14.0)

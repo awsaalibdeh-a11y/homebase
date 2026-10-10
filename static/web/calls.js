@@ -14,22 +14,34 @@ window.Calls = (() => {
   const ringStart = () => { beep(); ringIv = setInterval(beep, 2600); };
   const ringStop = () => { clearInterval(ringIv); ringIv = 0; };
 
+  const ICON = {
+    call: '<svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>',
+    end: '<svg viewBox="0 0 24 24"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .4-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.97.97 0 0 1-.29-.7c0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28a11.3 11.3 0 0 0-2.67-1.85.99.99 0 0 1-.56-.9v-3.1A15.3 15.3 0 0 0 12 9z"/></svg>',
+    mic: '<svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>',
+    micoff: '<svg viewBox="0 0 24 24"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23A6.9 6.9 0 0 0 19 11zM15 11.16V5a3 3 0 0 0-5.94-.6L15 10.34v.82zM4.27 3 3 4.27l6 6V11a3 3 0 0 0 4.2 2.75l1.67 1.67A5 5 0 0 1 7 11H5a7 7 0 0 0 6 6.92V21h2v-3.08c.9-.13 1.74-.45 2.49-.9L19.73 21 21 19.73 4.27 3z"/></svg>',
+  };
+  const mmss = t => String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0");
   function render() {
     if (!C.status) { el.classList.remove("on"); el.innerHTML = ""; return; }
-    const p = C.peer || {}, ringing = C.status === "ringing" || C.status === "calling";
-    const label = { calling: "Calling…", ringing: "Incoming Homebase call", connecting: "Connecting…", active: "00:00" }[C.status] || "";
-    el.innerHTML = `<div class="av ${ringing ? "ring" : ""}">${esc(p.emoji || "🙂")}</div><h2>${esc(p.name || "")}</h2><div class="stt" id="cst">${label}</div>
-      <div class="acts">${C.status === "ringing" ? `<button class="btn accept" id="cAns" aria-label="Answer">📞</button><button class="btn end" id="cNo" aria-label="Decline">✕</button>`
-        : `${C.status === "active" ? `<button class="btn" id="cMute" aria-label="Mute">${C.muted ? "🔇" : "🎙️"}</button>` : ""}<button class="btn end" id="cEnd" aria-label="Hang up">✕</button>`}</div>`;
+    const p = C.peer || {}, ringing = C.status === "ringing" || C.status === "calling" || C.status === "connecting", live = C.status === "active";
+    const label = { calling: "Calling…", ringing: "Incoming Homebase call", connecting: "Connecting…", active: mmss(Math.floor((Date.now() - (C.t0 || Date.now())) / 1000)) }[C.status] || "";
+    const act = (id, cls, icon, text, aria) => `<div class="act"><button class="cb ${cls}" id="${id}" aria-label="${aria || text}">${ICON[icon]}</button><span>${text}</span></div>`;
+    el.innerHTML = `<div class="callwrap" role="dialog" aria-label="Homebase call">
+      <div class="who">${C.incoming ? "Homebase call" : "Calling from Homebase"}</div>
+      <div class="avawrap ${ringing ? "ring" : ""} ${live ? "live" : ""}"><i class="rg"></i><i class="rg b"></i><i class="rg live"></i><div class="av">${esc(p.emoji || "🙂")}</div></div>
+      <h2>${esc(p.name || "")}</h2><div class="stt ${live ? "live" : ""}" id="cst">${label}</div>
+      ${live ? '<div class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></div>' : ""}
+      <div class="acts">${C.status === "ringing" ? act("cNo", "end big", "end", "Decline") + act("cAns", "accept big", "call", "Answer")
+        : act("cMute", C.muted ? "on" : "", C.muted ? "micoff" : "mic", C.muted ? "Muted" : "Mute", "Mute") + act("cEnd", "end big", "end", live ? "End" : "Cancel", "Hang up")}</div></div>`;
     el.classList.add("on");
     const b = id => el.querySelector(id);
-    if (b("#cAns")) b("#cAns").onclick = accept; if (b("#cNo")) b("#cNo").onclick = decline; if (b("#cEnd")) b("#cEnd").onclick = hangup;
+    if (b("#cAns")) { b("#cAns").onclick = accept; b("#cAns").focus(); } if (b("#cNo")) b("#cNo").onclick = decline; if (b("#cEnd")) b("#cEnd").onclick = hangup;
     if (b("#cMute")) b("#cMute").onclick = () => { C.muted = !C.muted; C.stream && C.stream.getAudioTracks().forEach(t => t.enabled = !C.muted); render(); };
   }
   function setStatus(s) {
     if (C.status === s) return; C.status = s;
     clearInterval(C.tick);
-    if (s === "active") { C.t0 = Date.now(); C.tick = setInterval(() => { const e = document.getElementById("cst"); if (e) { const t = Math.floor((Date.now() - C.t0) / 1000); e.textContent = String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0"); } }, 1000); ringStop(); clearTimeout(C.timeout); }
+    if (s === "active") { C.t0 = Date.now(); C.tick = setInterval(() => { const e = document.getElementById("cst"); if (e) e.textContent = mmss(Math.floor((Date.now() - C.t0) / 1000)); }, 1000); ringStop(); clearTimeout(C.timeout); }
     render();
   }
   function cleanup() {

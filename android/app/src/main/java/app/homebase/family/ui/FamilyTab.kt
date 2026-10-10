@@ -55,15 +55,17 @@ fun FamilyTab(nav: Nav) {
                         }
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                Row(Modifier.fillMaxWidth()) {
                     if (m.id != me.myId) {
-                        TextButton({ nav.go(Screen.Thread(m.id)) }, enabled = canDo(m, "messages")) { Text("Message") }
-                        TextButton({ call(m, false) }, enabled = canDo(m, "calls")) { Text("Call") }
-                        TextButton({ askWhere(ctx, m) }, enabled = canDo(m, "ping")) { Text("Where?") }
+                        TextButton({ nav.go(Screen.Thread(m.id)) }, enabled = canDo(m, "messages")) { Text("Message", maxLines = 1, softWrap = false) }
+                        TextButton({ call(m, false) }, enabled = canDo(m, "calls")) { Text("Call", maxLines = 1, softWrap = false) }
+                        TextButton({ askWhere(ctx, m) }, enabled = canDo(m, "ping")) { Text("Where?", maxLines = 1, softWrap = false) }
                     }
-                    if (m.id == me.myId || (me.isParent && !m.isParent)) TextButton({ nav.go(Screen.History(m.id)) }) { Text("Trail") }
-                    if (!m.isParent && me.isParent) TextButton({ lockFor = m }) { Text(if (m.lock != null) "🔒 Locked" else "Lock") }
-                    if (!m.isParent && (m.id == me.myId || me.isParent)) TextButton({ nav.go(Screen.ScreenTime(m.id)) }, enabled = canDo(m, "screentime")) { Text("Screen time") }
+                    if (m.id == me.myId || (me.isParent && !m.isParent)) TextButton({ nav.go(Screen.History(m.id)) }) { Text("Trail", maxLines = 1, softWrap = false) }
+                }
+                if (!m.isParent && (m.id == me.myId || me.isParent)) Row(Modifier.fillMaxWidth()) {
+                    if (me.isParent) TextButton({ lockFor = m }) { Text(if (m.lock != null) "🔒 Locked" else "Lock", maxLines = 1, softWrap = false) }
+                    TextButton({ nav.go(Screen.ScreenTime(m.id)) }, enabled = canDo(m, "screentime")) { Text("Screen time", maxLines = 1, softWrap = false) }
                 }
             }
         }

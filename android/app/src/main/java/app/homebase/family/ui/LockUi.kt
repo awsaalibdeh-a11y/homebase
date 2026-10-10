@@ -126,7 +126,8 @@ class LockOverlay(private val ctx: Context, private val onAsk: () -> Unit, priva
     }
 
     private fun button(t: String, bg: Int, fg: Int, click: () -> Unit) = Button(ctx).apply {
-        text = t; setBackgroundColor(bg); setTextColor(fg); setOnClickListener { click() }
+        text = t; isAllCaps = false; textSize = 17f; setTextColor(fg); setOnClickListener { click() }
+        background = android.graphics.drawable.GradientDrawable().apply { setColor(bg); cornerRadius = 90f }
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 150).apply { topMargin = 24 }
     }
 

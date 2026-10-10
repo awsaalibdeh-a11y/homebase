@@ -102,6 +102,7 @@ class ScreenTimeTracker(private val ctx: Context) {
         val store = ctx.hb.store
         val now = System.currentTimeMillis()
         if (store.isParent || !store.trackScreen || !hasAccess(ctx)) { lastTick = 0; return }
+        if (store.screenDay.isNotEmpty() && store.screenDay != today() && dirty) upload(store)         // yesterday's last minutes are not lost at midnight
         rollDay(store)
         scan(now)
         val elapsed = if (lastTick == 0L) 0L else minOf((now - lastTick) / 1000, 45L)

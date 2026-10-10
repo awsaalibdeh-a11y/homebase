@@ -66,8 +66,8 @@ function loadSnap() {
 }
 
 /* ---------- theme ---------- */
-function applyTheme() { const t = localStorage.getItem("hb_theme") || "auto"; if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.dataset.theme = t; }
-const mapDark = () => (localStorage.getItem("hb_map") || "light") === "dark";
+function applyTheme() { document.documentElement.dataset.theme = localStorage.getItem("hb_theme") || "dark"; }
+const mapDark = () => (localStorage.getItem("hb_map") || "dark") === "dark";
 applyTheme();
 
 /* ---------- sign in ---------- */
@@ -335,7 +335,7 @@ async function setSharing(state, minutes) {
 async function meDialog() {
   let q = { from: -1, to: -1 }; try { q = (await api("/api/me")).quiet; } catch (e) { /* offline */ }
   const m = me(), hm = v => v < 0 ? "" : String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
-  const theme = localStorage.getItem("hb_theme") || "auto", layer = localStorage.getItem("hb_map") || "light";
+  const theme = localStorage.getItem("hb_theme") || "dark", layer = localStorage.getItem("hb_map") || "dark";
   const perms = m.role === "child" ? `<div class="msec">What parents can do</div><div class="sub">You decide. Switch something off and Homebase stops it straight away. Your parents see that it is off.</div>` +
     PERMS.map(([k, t, why]) => `<div class="sw"><div><b>${t}</b><span>${why}</span></div><button class="tg ${m.perms[k] !== false ? "on" : ""}" data-perm="${k}" aria-label="${t}"></button></div>`).join("") : "";
   modal(`<h2>${esc(m.emoji)} ${esc(m.name)}</h2><div class="sub">${m.role === "parent" ? "Parent" : "Child"} · ${esc(S.family?.name || "")}</div>

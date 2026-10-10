@@ -503,7 +503,7 @@ def make_lock():
     if g.m["role"] != "parent":
         return err("Only a parent can lock a device.", 403)
     b = request.get_json(silent=True) or {}
-    target = same_family(int(b.get("member") or 0))
+    target = same_family(int(b["member"])) if str(b.get("member", "")).isdigit() else None
     if not target or target["role"] != "child":
         return err("Pick a child.", 404)
     try:
@@ -559,8 +559,13 @@ def ask_unlock():
     """A locked child can always ask for their device back, or send an SOS (the messages route). Nobody is shut out of reaching their family."""
     if g.m["role"] != "child":
         return err("Only children are locked.", 403)
-    say(g.m["family_id"], g.m["id"], f"{g.m['name']} asked to be unlocked early", kind="text")
-    push_family(g.m["family_id"], "message", {"id": 0, "from": g.m["id"], "to": 0, "kind": "text", "body": f"{g.m['name']} asked to be unlocked early", "name": g.m["name"], "created": time.time()}, skip=g.m["id"])
+    if limited(f"ask:{g.m['id']}", 6):
+        return err("You already asked. They will see it.", 429)
+    mid = say(g.m["family_id"], g.m["id"], f"{g.m['name']} asked to be unlocked early", kind="text")
+    row = db.one(select(db.messages).where(db.messages.c.id == mid))
+    for x in family_members(g.m["family_id"]):
+        if x["id"] != g.m["id"]:
+            push(x["id"], "message", {**msg_view(row), "name": g.m["name"], "emoji": g.m["emoji"], "quiet": False, "urgent": False})
     return jsonify(ok=True)
 
 
@@ -660,7 +665,10 @@ def post_screentime():
         pkg = str(a.get("pkg") or "")[:120]
         if not pkg:
             continue
-        sec = max(0, min(86400, int(a.get("sec") or 0)))
+        try:
+            sec = max(0, min(86400, int(float(a.get("sec") or 0))))
+        except (TypeError, ValueError):
+            sec = 0
         cat = a.get("cat") if a.get("cat") in CATS else "play"
         label = str(a.get("label") or pkg.rsplit(".", 1)[-1])[:60]
         row = db.one(select(db.screentime).where(db.screentime.c.member_id == g.m["id"], db.screentime.c.day == day, db.screentime.c.pkg == pkg))
@@ -710,7 +718,9 @@ def screentime_agent():
         return err("Screen time is for children's devices.", 403)
     token = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
     src = open(os.path.join(BASE, "static", "windows", "screentime.ps1"), encoding="utf-8").read()
-    body = src.replace("{{SERVER}}", request.host_url.rstrip("/")).replace("{{TOKEN}}", token)
+    scheme = (request.headers.get("X-Forwarded-Proto") or request.scheme).split(",")[0].strip()
+    server = f"{scheme}://{request.host}"
+    body = src.replace("{{SERVER}}", server).replace("{{TOKEN}}", token)
     return app.response_class("\ufeff" + body, mimetype="text/plain", headers={"Content-Disposition": 'attachment; filename="Homebase-ScreenTime.ps1"', "Cache-Control": "no-store"})
 
 

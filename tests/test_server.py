@@ -358,6 +358,15 @@ class ScreenTime(Base):
         self.assertNotIn("{{SERVER}}", text)
         self.assertEqual(self.get(self.mum, "/api/screentime/agent").status_code, 403)         # parents are not tracked
 
+    def test_the_tracker_posts_to_https_when_the_proxy_says_so(self):
+        r = self.c.get("/api/screentime/agent", headers={**self.kid, "X-Forwarded-Proto": "https"})
+        self.assertIn('$Server = "https://', r.get_data(as_text=True))
+
+    def test_junk_numbers_do_not_crash_it(self):
+        r = self.post(self.kid, "/api/screentime", day=self.DAY, apps=[{"pkg": "x", "sec": "lots"}, {"pkg": "y", "sec": "90"}, {"pkg": "z", "sec": None}])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.post(self.mum, "/api/lock", member="abc", minutes=10).status_code, 404)
+
     def test_a_child_can_delete_it_and_nobody_else_can_read_it(self):
         self.send(self.kid, roblox=("play", 600))
         self.assertEqual(self.c.delete("/api/screentime", headers=self.kid).status_code, 200)
@@ -408,6 +417,8 @@ class Locks(Base):
         self.assertEqual(self.post(self.kid, f"/api/lock/{self.kid_id}/release").status_code, 403)
         self.lock(30)
         self.assertEqual(self.post(self.kid, "/api/lock/ask").status_code, 200)
+        asked = [e for e in self.events(self.mum) if e["type"] == "message" and "asked to be unlocked" in e["payload"]["body"]]
+        self.assertTrue(asked and asked[-1]["payload"]["id"] > 0 and asked[-1]["payload"]["name"] == "Sam")      # a proper message, so every screen can show it
         self.assertEqual(self.lock(3).status_code, 400)                                           # too short
 
     def test_release_unlocks(self):
