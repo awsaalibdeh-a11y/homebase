@@ -639,13 +639,14 @@ function choresHtml() {
 /* ---------- grounding: block certain apps on a child's laptop or tablet for a while ---------- */
 const GROUND_PRESETS = ["Roblox", "Minecraft", "Fortnite", "YouTube", "TikTok", "Netflix", "Discord", "Steam"];
 async function groundDialog(id) {
-  const m = member(id); let seen = [], active = [];
-  try { const d = await api("/api/screentime?member=" + id + "&days=7"); const tot = {}; d.days.forEach(x => x.apps.forEach(a => { const k = (a.label || a.pkg).replace(/\s*\(.*\)\s*$/, ""); tot[k] = (tot[k] || 0) + a.sec; })); seen = Object.entries(tot).sort((a, b) => b[1] - a[1]).map(x => x[0]).slice(0, 8); } catch (e) { /* hidden by the child */ }
-  try { active = (await api("/api/blocks?member=" + id)).blocks; } catch (e) { return toast(e.message); }
-  const names = [...new Set([...seen, ...GROUND_PRESETS])].slice(0, 14), picked = new Set();
+  const m = member(id); let active = [], avail = [];
+  try { const d = await api("/api/blocks?member=" + id); active = d.blocks; avail = d.available || []; } catch (e) { return toast(e.message); }
+  // real apps the computer reported, plus a few common ones; picked by key so the match is exact
+  const byKey = {}; avail.forEach(a => byKey[a.key] = a.label); GROUND_PRESETS.forEach(n => { const k = n.toLowerCase(); if (!byKey[k]) byKey[k] = n; });
+  const names = Object.entries(byKey).map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label)), picked = new Set();
   modal(`<h2>🚫 Ground apps for ${esc(m.name)}</h2><div class="sub">Pick apps to lock on their laptop and tablet for a while. They are closed (or a grounded website is minimised) and ${esc(m.name)} is told why. The family sees it in the chat.</div>
     ${active.length ? `<div class="msec">Grounded now</div>${active.map(b => `<div class="sw"><div><b>${esc(b.label)}</b><span>until ${clock(b.until)}</span></div><button class="btn sm" data-lift="${b.id}">Lift</button></div>`).join("")}` : ""}
-    <div class="msec">Choose apps</div><div class="seg" id="grApps">${names.map(n => `<button class="btn sm" data-app="${esc(n)}">${esc(n)}</button>`).join("")}</div>
+    <div class="msec">Choose apps ${avail.length ? `<small class="muted">(${avail.length} on their computer)</small>` : `<small class="muted">(link a device to see their apps)</small>`}</div><div class="seg grapps" id="grApps">${names.map(n => `<button class="btn sm" data-app="${esc(n.key)}" data-label="${esc(n.label)}">${esc(n.label)}</button>`).join("")}</div>
     <input class="field" id="grOther" placeholder="Another app or website name" maxlength="40" style="margin-top:10px">
     <div class="msec">For how long</div><div class="seg" id="grLen">${[[30, "30 min"], [60, "1 hour"], [120, "2 hours"], [240, "4 hours"], [720, "12 hours"], [1440, "Until tomorrow"]].map(([n, t]) => `<button class="btn sm ${n === 60 ? "sel" : ""}" data-m="${n}">${t}</button>`).join("")}</div>
     <div class="foot"><button class="btn" id="grX">Close</button><button class="btn solid" id="grGo">Ground them</button></div>`, root => {
@@ -655,9 +656,10 @@ async function groundDialog(id) {
     root.querySelectorAll("#grLen [data-m]").forEach(b => b.onclick = () => { mins = +b.dataset.m; root.querySelectorAll("#grLen .btn").forEach(x => x.classList.toggle("sel", x === b)); });
     root.querySelectorAll("[data-lift]").forEach(b => b.onclick = async () => { try { await api("/api/blocks/" + b.dataset.lift, "DELETE"); toast("Lifted"); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } });
     root.querySelector("#grGo").onclick = async () => {
-      const other = root.querySelector("#grOther").value.trim(), list = [...picked, ...(other ? [other] : [])];
+      const other = root.querySelector("#grOther").value.trim();
+      const list = [...[...picked].map(key => ({ key, label: byKey[key] || key })), ...(other ? [{ key: other.toLowerCase(), label: other }] : [])];
       if (!list.length) return toast("Pick at least one app.");
-      try { await api("/api/blocks", "POST", { member: id, minutes: mins, apps: list.map(n => ({ key: n.toLowerCase(), label: n })) }); toast(m.name + " is grounded from " + list.join(", ")); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } };
+      try { await api("/api/blocks", "POST", { member: id, minutes: mins, apps: list }); toast(m.name + " is grounded from " + list.map(a => a.label).join(", ")); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } };
   });
 }
 

@@ -491,6 +491,34 @@ def device_claim():
     return jsonify(token=token, member={"id": m["id"], "name": m["name"], "role": m["role"]})
 
 
+def apps_for(member_id):
+    """The apps seen across this child's linked computers, for the grounding picker. Deduped by key, best label kept."""
+    seen = {}
+    for d in db.many(select(db.devices).where(db.devices.c.member_id == member_id)):
+        try:
+            for a in json.loads(d["apps"] or "[]"):
+                key = str(a.get("key") or "").lower()[:60]
+                if len(key) >= 2:
+                    seen.setdefault(key, str(a.get("label") or key)[:60])
+        except (ValueError, AttributeError):
+            pass
+    return [{"key": k, "label": v} for k, v in sorted(seen.items(), key=lambda kv: kv[1].lower())]
+
+
+@app.post("/api/devices/apps")
+@need
+def report_apps():
+    """The Windows tracker sends the list of apps on this computer, so a parent can tick them instead of typing."""
+    token = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+    dev = db.one(select(db.devices).where(db.devices.c.token_hash == db.hash_token(token)))
+    if not dev:
+        return err("Only a linked device reports apps.", 403)
+    apps = [a for a in (request.get_json(silent=True) or {}).get("apps", []) if isinstance(a, dict)][:200]
+    clean_apps = [{"key": str(a.get("key") or "").lower()[:60], "label": str(a.get("label") or "")[:60]} for a in apps if len(str(a.get("key") or "")) >= 2]
+    db.run(update(db.devices).where(db.devices.c.id == dev["id"]).values(apps=json.dumps(clean_apps[:200])))
+    return jsonify(ok=True, count=len(clean_apps))
+
+
 @app.get("/api/devices")
 @need
 def list_devices():
@@ -548,7 +576,7 @@ def get_blocks():
         return err("Not found.", 404)
     if target["id"] != g.m["id"] and g.m["role"] != "parent":
         return err("Only you or a parent can see this.", 403)
-    return jsonify(blocks=block_views(target), now=time.time())
+    return jsonify(blocks=block_views(target), available=apps_for(target["id"]), now=time.time())
 
 
 @app.post("/api/blocks")
@@ -870,7 +898,7 @@ def admin_families():
         ms = family_members(f["id"])
         out.append({"id": f["id"], "name": f["name"], "created": f["created"], "members": [{"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "last_seen": m["last_seen"],
                     "devices": len(db.many(select(db.devices.c.id).where(db.devices.c.member_id == m["id"]))), "device_list": [{"id": d["id"], "name": d["name"], "kind": d["kind"], "last_seen": d["last_seen"]} for d in db.many(select(db.devices).where(db.devices.c.member_id == m["id"]))],
-                    "lock": lock_view(m), "blocks": block_views(m)} for m in ms]})
+                    "lock": lock_view(m), "blocks": block_views(m), "apps": apps_for(m["id"]) if m["role"] == "child" else []} for m in ms]})
     return jsonify(families=out, now=time.time())
 
 

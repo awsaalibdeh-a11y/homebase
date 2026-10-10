@@ -4,6 +4,7 @@
 //   HomebaseTracker.exe            first run asks for the code; afterwards it just runs from the tray
 //   HomebaseTracker.exe --code 123456 [--server https://...]    link without the window
 //   HomebaseTracker.exe --remove   take it off this computer
+// It also shows family texts, announcements and ringing calls here, like any chat app.
 // It never reads your screen, files, passwords or what you type. It only sees which program is in front, the title of
 // its window (to tell YouTube from a homework tab) and how long since the mouse or keyboard was last used.
 using System;
@@ -18,6 +19,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Media;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -54,7 +56,7 @@ class App : ApplicationContext
     string server = DefaultServer;
     string token { get { return cur == null ? "" : cur.Token; } }
     Control sync;                                                            // lets the background loop open windows on the UI thread
-    DateTime lastPrompt = DateTime.MinValue; bool wasAway;
+    DateTime lastPrompt = DateTime.MinValue; bool wasAway; DateTime lastApps = DateTime.MinValue;
     string TodayFile { get { return Path.Combine(Dir, "today_" + Regex.Replace(cur == null ? "x" : cur.Name, "[^A-Za-z0-9]", "_") + ".txt"); } }
     NotifyIcon tray;
     Dictionary<string, string[]> apps = new Dictionary<string, string[]>();      // key -> label, category, seconds
@@ -62,6 +64,8 @@ class App : ApplicationContext
     bool dirty; DateTime lastSend = DateTime.MinValue, lastTick = DateTime.Now; int cursor = -1;
     readonly Dictionary<string, DateTime> told = new Dictionary<string, DateTime>();
     volatile bool stopping;
+    volatile int ringingCall;                                               // the id of a call that is ringing right now, 0 = none
+    readonly HashSet<int> seenCalls = new HashSet<int>();
 
     static readonly string[] Browsers = { "chrome", "msedge", "firefox", "brave", "opera", "opera_gx", "vivaldi", "iexplore" };
     static readonly string[][] WatchSites = { new[] { "YouTube", "YouTube" }, new[] { "Netflix", "Netflix" }, new[] { "Twitch", "Twitch" }, new[] { "Disney\\+|Disney Plus", "Disney+" },
@@ -275,9 +279,32 @@ class App : ApplicationContext
         m.Items.Add("Open Homebase", null, delegate { try { Process.Start(server + "/app"); } catch { } });
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add("Remove from this computer", null, delegate { Remove(true); Quit(); });
-        tray = new NotifyIcon { Icon = SystemIcons.Information, Text = "Homebase screen time", Visible = true, ContextMenuStrip = m };
-        tray.DoubleClick += delegate { tray.ShowBalloonTip(5000, "Homebase", (cur == null ? "" : cur.Name + ": ") + Duration(Total()) + " playing or watching today", ToolTipIcon.Info); };
+        tray = new NotifyIcon { Icon = SystemIcons.Information, Text = "Homebase", Visible = true, ContextMenuStrip = m };
+        tray.DoubleClick += delegate { Open("/app"); };
+        tray.BalloonTipClicked += delegate { Open(pendingOpen ?? "/app"); pendingOpen = null; };
     }
+    string pendingOpen;
+    void Open(string path) { try { Process.Start(server + path); } catch { } }
+
+    // a call ringing on this computer: beep a ring pattern and show a balloon you can click to answer in the web app
+    void Ring(int callId, string who)
+    {
+        if (ringingCall == callId) return;
+        ringingCall = callId; pendingOpen = "/app";
+        Say(who + " is calling", "Click here to answer in Homebase.");
+        new Thread(delegate ()
+        {
+            DateTime start = DateTime.Now;
+            while (!stopping && ringingCall == callId && (DateTime.Now - start).TotalSeconds < 35)
+            {
+                try { Console.Beep(880, 350); Thread.Sleep(180); Console.Beep(660, 350); } catch { try { SystemSounds.Exclamation.Play(); } catch { } }
+                Thread.Sleep(1600);
+                try { int st; string txt = Http("GET", "/api/calls/" + callId, null, out st); var d = Json.Deserialize<Dictionary<string, object>>(txt); if (!d.ContainsKey("status") || Convert.ToString(d["status"]) != "ringing") break; } catch { }
+            }
+            if (ringingCall == callId) ringingCall = 0;
+        }) { IsBackground = true }.Start();
+    }
+
     void Quit() { stopping = true; if (tray != null) { tray.Visible = false; tray.Dispose(); } Application.Exit(); }
     void Say(string title, string text) { try { if (tray != null) tray.ShowBalloonTip(10000, title, text, ToolTipIcon.Info); } catch { } }
     int Total() { int t = 0; foreach (var v in apps.Values) { int s; int.TryParse(v[2], out s); t += s; } return t; }
@@ -330,11 +357,34 @@ class App : ApplicationContext
                 foreach (object o in (System.Collections.ArrayList)d["events"])
                 {
                     var ev = (Dictionary<string, object>)o;
-                    if (Convert.ToString(ev["type"]) == "nudge") Say("Time for a break?", Convert.ToString(((Dictionary<string, object>)ev["payload"])["text"]));
+                    {
+                        string type = Convert.ToString(ev["type"]);
+                        var pl = ev.ContainsKey("payload") ? ev["payload"] as Dictionary<string, object> : null;
+                        if (type == "nudge" && pl != null) Say("Time for a break?", Convert.ToString(pl["text"]));
+                        else if (type == "message" && pl != null)
+                        {
+                            string kind = pl.ContainsKey("kind") ? Convert.ToString(pl["kind"]) : "text";
+                            string body = pl.ContainsKey("body") ? Convert.ToString(pl["body"]) : "";
+                            string from = pl.ContainsKey("name") ? Convert.ToString(pl["name"]) : "Homebase";
+                            bool quiet = pl.ContainsKey("quiet") && Convert.ToBoolean(pl["quiet"]);
+                            if (!quiet)
+                            {
+                                if (kind == "sos") { Say("\U0001F6A8 " + from + " needs help", body); try { SystemSounds.Hand.Play(); } catch { } }
+                                else if (from == "Homebase") Say("\U0001F4E2 Announcement", body);
+                                else { Say(from, body); try { SystemSounds.Asterisk.Play(); } catch { } }
+                            }
+                        }
+                        else if (type == "call" && pl != null)
+                        {
+                            int cid = pl.ContainsKey("id") ? Convert.ToInt32(pl["id"]) : 0;
+                            if (cid > 0 && seenCalls.Add(cid)) Ring(cid, pl.ContainsKey("name") ? Convert.ToString(pl["name"]) : "Someone");
+                        }
+                    }
                 }
         }
         catch (Exception e) { Log("events: " + e.Message); }
         try { EnforceBlocks(); } catch (Exception e) { Log("blocks: " + e.Message); }
+        if ((now - lastApps).TotalMinutes > 60) { lastApps = now; try { ReportApps(); } catch (Exception e) { Log("apps: " + e.Message); } }
         double idleNow = Native.Idle();
         if (idleNow > 1200) wasAway = true;
         if (wasAway && idleNow < 20 && profiles.Count > 1) { wasAway = false; sync.BeginInvoke(new Action(delegate { PickPerson(false); })); }
@@ -407,6 +457,42 @@ class App : ApplicationContext
         if (GameNames.IsMatch(n)) return new[] { "pc:" + n, proc, "play" };
         if (path != null && Regex.IsMatch(path, "\\\\(steamapps\\\\common|Epic Games|Riot Games|XboxGames)\\\\", RegexOptions.IgnoreCase)) return new[] { "pc:" + n, proc, "play" };
         return null;
+    }
+
+    // the apps on this computer, so a parent can pick them to ground instead of typing. Names only, nothing about what is inside them.
+    void ReportApps()
+    {
+        Dictionary<string, string> found = new Dictionary<string, string>();                     // key (exe name) -> label
+        // 1. Start Menu shortcuts: the apps someone actually has, with friendly names
+        foreach (Environment.SpecialFolder sf in new[] { Environment.SpecialFolder.StartMenu, Environment.SpecialFolder.CommonStartMenu, Environment.SpecialFolder.Programs, Environment.SpecialFolder.CommonPrograms, Environment.SpecialFolder.Desktop })
+        {
+            string root; try { root = Environment.GetFolderPath(sf); } catch { continue; }
+            if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) continue;
+            string[] links; try { links = Directory.GetFiles(root, "*.lnk", SearchOption.AllDirectories); } catch { continue; }
+            foreach (string lnk in links)
+            {
+                try
+                {
+                    string label = Path.GetFileNameWithoutExtension(lnk);
+                    dynamic sh = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+                    dynamic sc = sh.CreateShortcut(lnk);
+                    string target = (string)sc.TargetPath;
+                    if (string.IsNullOrEmpty(target) || !target.ToLower().EndsWith(".exe")) continue;
+                    string key = Path.GetFileNameWithoutExtension(target).ToLower();
+                    if (key == "" || key == "unins000" || key.StartsWith("setup") || key.StartsWith("install") || key == "explorer") continue;
+                    if (!found.ContainsKey(key)) found[key] = label;
+                }
+                catch { }
+            }
+        }
+        // 2. anything with a window open right now (catches games launched from elsewhere)
+        foreach (Process p in Process.GetProcesses())
+        {
+            try { if (p.MainWindowHandle != IntPtr.Zero && !string.IsNullOrEmpty(p.MainWindowTitle)) { string key = p.ProcessName.ToLower(); if (!found.ContainsKey(key)) found[key] = p.ProcessName; } } catch { }
+        }
+        List<object> list = new List<object>();
+        foreach (var kv in found) list.Add(new Dictionary<string, object> { { "key", kv.Key }, { "label", kv.Value } });
+        int st; Http("POST", "/api/devices/apps", new Dictionary<string, object> { { "apps", list } }, out st);
     }
 
     bool Send()

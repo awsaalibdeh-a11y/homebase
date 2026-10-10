@@ -76,7 +76,7 @@ chores = Table("chores", meta,                                          # jobs a
     Column("done_by", Integer, default=0), Column("done_at", Float, default=0), Column("approved_by", Integer, default=0), Column("approved_at", Float, default=0))
 devices = Table("devices", meta,                                          # a computer or tablet linked to a person with a 6-digit code; it has its own key
     Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("token_hash", String(64), unique=True),
-    Column("name", String(60), default=""), Column("kind", String(12), default="windows"), Column("created", Float), Column("last_seen", Float, default=0))
+    Column("name", String(60), default=""), Column("kind", String(12), default="windows"), Column("created", Float), Column("last_seen", Float, default=0), Column("apps", Text, default=""))
 pair_codes = Table("pair_codes", meta,
     Column("code", String(8), primary_key=True), Column("member_id", Integer), Column("expires", Float))
 blocks = Table("blocks", meta,                                            # "grounded" apps: blocked on a child's laptop or tablet until a time
@@ -89,7 +89,7 @@ try:                                                                  # older da
         _c.exec_driver_sql("ALTER TABLE members ADD COLUMN perms TEXT DEFAULT ''")
 except Exception:
     pass
-for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE families ADD COLUMN rules TEXT DEFAULT ''"):
+for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE families ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN apps TEXT DEFAULT ''"):
     try:
         with engine.begin() as _c:
             _c.exec_driver_sql(_sql)

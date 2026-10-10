@@ -198,3 +198,5 @@ body { font-feature-settings: "tnum" 1, "cv11" 1; }
 .weekgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; } .weekgrid span { display: block; font-size: 22px; font-weight: 700; letter-spacing: -.02em; } .weekgrid small { display: block; }
 
 .pinfo small.devwarn { color: var(--warn); }
+
+.seg.grapps { max-height: 180px; overflow-y: auto; }

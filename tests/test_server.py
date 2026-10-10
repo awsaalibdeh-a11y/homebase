@@ -601,6 +601,16 @@ class WindowsDownload(Base):
         self.assertIn("HomebaseTracker.exe", r.headers["Content-Disposition"])
 
 
+class AppReporting(Base):
+    def test_a_device_reports_its_apps_for_the_picker(self):
+        code = self.post(self.kid, "/api/devices/code").get_json()["code"]
+        dev = {"Authorization": "Bearer " + self.c.post("/api/devices/claim", json={"code": code, "name": "Laptop"}).get_json()["token"]}
+        self.assertEqual(self.post(self.kid, "/api/devices/apps", apps=[{"key": "roblox", "label": "Roblox"}]).status_code, 403)   # only a device
+        self.post(dev, "/api/devices/apps", apps=[{"key": "roblox", "label": "Roblox"}, {"key": "chrome", "label": "Chrome"}, {"key": "x", "label": "too short"}])
+        avail = self.get(self.mum, f"/api/blocks?member={self.kid_id}").get_json()["available"]
+        self.assertEqual(sorted(a["key"] for a in avail), ["chrome", "roblox"])                         # the 1-letter key is dropped
+
+
 class Grounding(Base):
     def ground(self, apps=("roblox", "Minecraft"), minutes=60, who=None):
         return self.post(who or self.mum, "/api/blocks", member=self.kid_id, apps=[{"key": a.lower(), "label": a} for a in apps], minutes=minutes)
