@@ -1,5 +1,6 @@
 package app.homebase.family.ui
 
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +38,7 @@ fun FamilyTab(nav: Nav) {
     val fam by ctx.hb.state.family.collectAsState()
     val me = ctx.hb.store
     val call = rememberCaller()
+    var lockFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Member?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Heading(fam?.family?.name ?: me.familyName.ifBlank { "Family" }, "${fam?.members?.size ?: 1} people")
         fam?.members.orEmpty().forEach { m ->
@@ -60,6 +62,8 @@ fun FamilyTab(nav: Nav) {
                         TextButton({ askWhere(ctx, m) }, enabled = canDo(m, "ping")) { Text("Where?") }
                     }
                     if (m.id == me.myId || (me.isParent && !m.isParent)) TextButton({ nav.go(Screen.History(m.id)) }) { Text("Trail") }
+                    if (!m.isParent && me.isParent) TextButton({ lockFor = m }) { Text(if (m.lock != null) "🔒 Locked" else "Lock") }
+                    if (!m.isParent && (m.id == me.myId || me.isParent)) TextButton({ nav.go(Screen.ScreenTime(m.id)) }, enabled = canDo(m, "screentime")) { Text("Screen time") }
                 }
             }
         }
@@ -70,4 +74,5 @@ fun FamilyTab(nav: Nav) {
         SoftButton("Family list") { nav.go(Screen.Lists) }
         Gap(8)
     }
+    lockFor?.let { LockDialog(it) { lockFor = null } }
 }

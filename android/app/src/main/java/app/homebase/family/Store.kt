@@ -25,6 +25,15 @@ class Store(context: Context) {
     var familyName: String
         get() = p.getString("familyName", "") ?: ""
         set(v) = p.edit().putString("familyName", v).apply()
+    var trackScreen: Boolean                                   // the child's own choice: count my playing and watching time
+        get() = p.getBoolean("trackScreen", false)
+        set(v) = p.edit().putBoolean("trackScreen", v).apply()
+    var screenDay: String
+        get() = p.getString("screenDay", "") ?: ""
+        set(v) = p.edit().putString("screenDay", v).apply()
+    var screenData: String
+        get() = p.getString("screenData", "{}") ?: "{}"
+        set(v) = p.edit().putString("screenData", v).apply()
     var familyCache: String
         get() = p.getString("familyCache", "") ?: ""
         set(v) = p.edit().putString("familyCache", v).apply()

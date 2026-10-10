@@ -302,5 +302,179 @@ class Misc(Base):
         dl.close()
 
 
+class ScreenTime(Base):
+    DAY = "2026-10-10"
+
+    def send(self, who, **apps):
+        return self.post(who, "/api/screentime", day=self.DAY, apps=[{"pkg": k, "label": k.title(), "cat": c, "sec": s} for k, (c, s) in apps.items()])
+
+    def test_a_child_reports_and_a_parent_sees_totals_by_app(self):
+        self.send(self.kid, roblox=("play", 1800), youtube=("watch", 900))
+        d = self.get(self.mum, f"/api/screentime?member={self.kid_id}").get_json()
+        self.assertEqual(d["days"][0]["total"], 2700)
+        self.assertEqual([a["pkg"] for a in d["days"][0]["apps"]], ["roblox", "youtube"])          # biggest first
+
+    def test_sending_again_replaces_the_running_total_instead_of_adding(self):
+        self.send(self.kid, roblox=("play", 600))
+        self.send(self.kid, roblox=("play", 1200))
+        self.assertEqual(self.get(self.mum, f"/api/screentime?member={self.kid_id}").get_json()["days"][0]["total"], 1200)
+
+    def test_the_child_can_turn_it_off_for_parents_but_still_sees_their_own(self):
+        self.send(self.kid, roblox=("play", 600))
+        self.c.patch("/api/me", headers=self.kid, json={"perms": {"screentime": False}})
+        r = self.get(self.mum, f"/api/screentime?member={self.kid_id}")
+        self.assertEqual((r.status_code, r.get_json()["perm"]), (403, "screentime"))
+        self.assertEqual(self.get(self.kid, "/api/screentime").status_code, 200)
+
+    def test_nonsense_is_cleaned_up_and_bad_days_refused(self):
+        self.assertEqual(self.post(self.kid, "/api/screentime", day="today", apps=[]).status_code, 400)
+        self.send(self.kid, x=("weird", 10 ** 9))
+        a = self.get(self.kid, "/api/screentime").get_json()["days"][0]["apps"][0]
+        self.assertEqual((a["cat"], a["sec"]), ("play", 86400))
+
+    def test_every_twenty_minutes_the_childs_devices_get_a_friendly_nudge(self):
+        self.send(self.kid, roblox=("play", 600))                                               # 10 min: nothing yet
+        self.assertEqual([e for e in self.events(self.kid) if e["type"] == "nudge"], [])
+        self.send(self.kid, roblox=("play", 900), youtube=("watch", 600))                       # 25 min together: the first nudge
+        n = [e for e in self.events(self.kid) if e["type"] == "nudge"]
+        self.assertEqual(len(n), 1)
+        self.assertIn("25 minutes", n[0]["payload"]["text"])
+        self.send(self.kid, roblox=("play", 1000), youtube=("watch", 600))                      # 26 min: not another one yet
+        self.assertEqual(len([e for e in self.events(self.kid) if e["type"] == "nudge"]), 1)
+        self.send(self.kid, roblox=("play", 1500), youtube=("watch", 1000))                     # 42 min: the second
+        self.assertEqual(len([e for e in self.events(self.kid) if e["type"] == "nudge"]), 2)
+
+    def test_the_nudges_include_a_chore_for_a_real_parent(self):
+        texts = [server.nudge_text({"family_id": db.one(db.select(db.members).where(db.members.c.id == self.kid_id))["family_id"]}, i, 1200 * i) for i in range(1, 13)]
+        self.assertTrue(any("Mum" in t and "water" in t for t in texts))                         # "Bring Mum a glass of water"
+        self.assertTrue(any("bike" in t for t in texts) and any("book" in t for t in texts))
+
+    def test_the_windows_tracker_is_made_for_the_child_with_their_own_key(self):
+        r = self.get(self.kid, "/api/screentime/agent")
+        text = r.get_data(as_text=True)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(self.kid["Authorization"].split()[1], text)
+        self.assertNotIn("{{TOKEN}}", text)
+        self.assertNotIn("{{SERVER}}", text)
+        self.assertEqual(self.get(self.mum, "/api/screentime/agent").status_code, 403)         # parents are not tracked
+
+    def test_a_child_can_delete_it_and_nobody_else_can_read_it(self):
+        self.send(self.kid, roblox=("play", 600))
+        self.assertEqual(self.c.delete("/api/screentime", headers=self.kid).status_code, 200)
+        self.assertEqual(self.get(self.kid, "/api/screentime").get_json()["days"], [])
+        self.assertEqual(self.get(self.kid, f"/api/screentime?member={self.mum_id}").status_code, 403)   # a child cannot read a parent's
+
+
+class Locks(Base):
+    def lock(self, minutes, who=None):
+        return self.post(who or self.mum, "/api/lock", member=self.kid_id, minutes=minutes)
+
+    def test_a_parent_locks_a_child_and_everyone_can_see_it(self):
+        r = self.lock(60)
+        self.assertEqual(r.status_code, 200)
+        v = {m["id"]: m for m in self.get(self.kid, "/api/family").get_json()["members"]}[self.kid_id]
+        self.assertEqual((v["lock"]["by_name"], round(v["lock"]["until"] - time.time()) // 60), ("Mum", 59 + 1))
+        self.assertTrue(any(e["type"] == "member" and e["payload"].get("lock") for e in self.events(self.kid)))              # the child's devices are told at once
+        said = self.get(self.kid, "/api/messages?with=0").get_json()
+        self.assertTrue(any("locked Sam" in m["body"] for m in said["messages"]))                                          # and the family sees it in the chat
+
+    def test_never_more_than_four_hours_a_day(self):
+        self.assertEqual(self.lock(240).status_code, 200)
+        self.post(self.mum, f"/api/lock/{self.kid_id}/release")                                  # unlocking straight away gives the time back
+        self.assertEqual(self.lock(240).status_code, 200)
+        self.assertEqual(self.get(self.kid, "/api/lock").get_json()["left"] // 60, 0)
+        self.post(self.mum, f"/api/lock/{self.kid_id}/release")
+        self.assertEqual(self.lock(10).status_code, 200)
+
+    def test_the_limit_is_enforced_after_an_early_release_too(self):
+        self.lock(180)
+        self.post(self.mum, f"/api/lock/{self.kid_id}/release")
+        r = self.lock(200)                                                                        # about 0 used + 200 min is fine
+        self.assertEqual(r.status_code, 200)
+        self.post(self.mum, f"/api/lock/{self.kid_id}/release")
+        self.assertEqual(self.lock(5).status_code, 200)
+
+    def test_it_cannot_be_stacked_past_four_hours(self):
+        self.lock(240)
+        r = self.lock(30)
+        self.assertEqual(r.status_code, 409)                                                      # already locked
+        db.run(db.update(db.locks).where(db.locks.c.member_id == self.kid_id).values(start=time.time() - 4 * 3600 - 5, until=time.time() - 5))   # pretend it has ended: all 4 hours are used
+        r = self.lock(30)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("4 hours", r.get_json()["error"])
+
+    def test_only_a_parent_can_lock_and_a_child_can_ask_for_it_back(self):
+        self.assertEqual(self.lock(30, self.kid).status_code, 403)
+        self.assertEqual(self.post(self.kid, f"/api/lock/{self.kid_id}/release").status_code, 403)
+        self.lock(30)
+        self.assertEqual(self.post(self.kid, "/api/lock/ask").status_code, 200)
+        self.assertEqual(self.lock(3).status_code, 400)                                           # too short
+
+    def test_release_unlocks(self):
+        self.lock(30)
+        self.post(self.mum, f"/api/lock/{self.kid_id}/release")
+        v = {m["id"]: m for m in self.get(self.kid, "/api/family").get_json()["members"]}[self.kid_id]
+        self.assertIsNone(v["lock"])
+
+    def test_the_owner_can_see_and_lift_any_lock_with_the_owner_key(self):
+        self.lock(120)
+        old = os.environ.get("HB_ADMIN_KEY")
+        os.environ["HB_ADMIN_KEY"] = "owner-key-for-the-tests"
+        try:
+            self.assertEqual(self.c.get("/api/admin/locks").status_code, 403)
+            h = {"X-Admin-Key": "owner-key-for-the-tests"}
+            locks = self.c.get("/api/admin/locks", headers=h).get_json()["locks"]
+            mine = max(locks, key=lambda x: x["id"])                                              # the newest is the one just made
+            self.assertEqual((mine["child"], mine["by"]), ("Sam", "Mum"))
+            self.assertEqual(self.c.post(f"/api/admin/locks/{mine['id']}/lift", headers=h).status_code, 200)
+            self.assertNotIn(mine["id"], [x["id"] for x in self.c.get("/api/admin/locks", headers=h).get_json()["locks"]])
+            v = {m["id"]: m for m in self.get(self.kid, "/api/family").get_json()["members"]}[self.kid_id]
+            self.assertIsNone(v["lock"])                                                          # and the child is free
+        finally:
+            os.environ.pop("HB_ADMIN_KEY", None) if old is None else os.environ.__setitem__("HB_ADMIN_KEY", old)
+
+
+class Home(Base):
+    def view(self, who, mid):
+        return {m["id"]: m for m in self.get(who, "/api/family").get_json()["members"]}[mid]
+
+    def test_a_parent_sets_the_home_area_and_it_moves_when_set_again(self):
+        self.assertEqual(self.post(self.kid, "/api/home", lat=1, lng=1).status_code, 403)
+        a = self.post(self.mum, "/api/home", lat=51.5, lng=-0.12, radius=250).get_json()
+        b = self.post(self.mum, "/api/home", lat=51.6, lng=-0.2).get_json()
+        self.assertEqual(a["id"], b["id"])                                                       # one Home, not two
+        places = self.get(self.mum, "/api/family").get_json()["places"]
+        home = [p for p in places if p["name"] == "Home"]
+        self.assertEqual((len(home), home[0]["emoji"], round(home[0]["lat"], 1)), (1, "🏠", 51.6))
+
+    def test_people_show_as_at_home_only_while_inside_the_area(self):
+        self.post(self.mum, "/api/home", lat=51.5, lng=-0.12, radius=200)
+        self.assertFalse(self.view(self.mum, self.kid_id)["home"])
+        self.where(self.kid, 51.5001, -0.1201)
+        self.assertTrue(self.view(self.mum, self.kid_id)["home"])
+        self.where(self.kid, 51.6, -0.3)                                                          # far away
+        self.assertFalse(self.view(self.mum, self.kid_id)["home"])
+
+
+class Rules(Base):
+    def test_a_parent_sets_the_rules_and_everyone_can_read_what_applies_to_them(self):
+        self.assertEqual(self.post(self.kid, "/api/rules", text="x").status_code, 403)
+        self.post(self.mum, "/api/rules", text="Homework first. Phones off at dinner.", limits={str(self.kid_id): 90})
+        m = self.get(self.mum, "/api/rules").get_json()
+        self.assertEqual((m["text"], m["limits"][str(self.kid_id)], m["children"][0]["name"]), ("Homework first. Phones off at dinner.", 90, "Sam"))
+        k = self.get(self.kid, "/api/rules").get_json()
+        self.assertEqual((k["text"], k["limits"], k["children"]), ("Homework first. Phones off at dinner.", {str(self.kid_id): 90}, []))    # the child reads theirs
+
+    def test_reaching_the_limit_nudges_the_child_and_tells_the_family_once(self):
+        self.post(self.mum, "/api/rules", limits={str(self.kid_id): 30})
+        sent = lambda sec: self.post(self.kid, "/api/screentime", day="2026-10-11", apps=[{"pkg": "roblox", "label": "Roblox", "cat": "play", "sec": sec}])
+        sent(900)
+        self.assertEqual([e for e in self.events(self.kid) if e["type"] == "nudge" and "limit" in e["payload"]["text"]], [])
+        sent(1900)
+        self.assertEqual(len([e for e in self.events(self.kid) if e["type"] == "nudge" and "daily limit of 30" in e["payload"]["text"]]), 1)
+        sent(2500)
+        self.assertEqual(len([e for e in self.events(self.kid) if e["type"] == "nudge" and "daily limit of 30" in e["payload"]["text"]]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

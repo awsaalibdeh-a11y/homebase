@@ -1,7 +1,7 @@
 /* Homebase offline worker. It keeps the app itself, the map library and every map tile you have looked at,
    so the laptop app opens and shows the last thing it saw even with no connection. Live data (/api) is never cached here:
    the page keeps its own snapshot and message queue. */
-const VERSION = "hb-web-v3";
+const VERSION = "hb-web-v4";
 const SHELL = ["/app", "/static/web/web.css", "/static/web/web.js", "/static/web/calls.js", "/static/web/icon.svg", "/static/web/icon-192.png", "/manifest.webmanifest",
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css", "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"];
 const TILES = "hb-tiles-v1", TILE_LIMIT = 900;
@@ -38,4 +38,17 @@ self.addEventListener("fetch", e => {
       catch (err) { return (await caches.match(req)) || (req.mode === "navigate" ? await caches.match("/app") : null) || new Response("Offline", { status: 503 }); }
     })());
   }
+});
+
+
+/* clicking a desktop notification opens Homebase on that conversation */
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  const thread = e.notification.data && e.notification.data.thread;
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const open = all.find(c => c.url.includes("/app")) || all[0];
+    if (open) { await open.focus(); if (thread !== undefined) open.postMessage({ type: "open-thread", thread }); }
+    else await self.clients.openWindow("/app");
+  })());
 });

@@ -74,6 +74,16 @@ class Api(private val store: Store) {
         raw("POST", "/api/location", obj { put("lat", lat); put("lng", lng); put("acc", acc.toDouble()); put("speed", speed.toDouble()); put("battery", battery) })
     }
     suspend fun sharing(state: String, minutes: Int = 60) { raw("POST", "/api/sharing", obj { put("state", state); put("minutes", minutes) }) }
+    suspend fun postScreenTime(day: String, apps: kotlinx.serialization.json.JsonArray) { raw("POST", "/api/screentime", obj { put("day", day); put("apps", apps) }) }
+    suspend fun screenTime(member: Int, days: Int = 7): ScreenResp = ask("GET", "/api/screentime?member=$member&days=$days")
+    suspend fun deleteScreenTime() { raw("DELETE", "/api/screentime") }
+    suspend fun setHome(lat: Double, lng: Double, radius: Int) { raw("POST", "/api/home", obj { put("lat", lat); put("lng", lng); put("radius", radius) }) }
+    suspend fun lockState(member: Int): LockResp = ask("GET", "/api/lock?member=$member")
+    suspend fun lock(member: Int, minutes: Int): LockResp = ask("POST", "/api/lock", obj { put("member", member); put("minutes", minutes) })
+    suspend fun releaseLock(member: Int) { raw("POST", "/api/lock/$member/release") }
+    suspend fun askUnlock() { raw("POST", "/api/lock/ask") }
+    suspend fun rules(): RulesResp = ask("GET", "/api/rules")
+    suspend fun saveRules(text: String, limits: Map<Int, Int>) { raw("POST", "/api/rules", obj { put("text", text); put("limits", buildJsonObject { limits.forEach { (k, v) -> put(k.toString(), v) } }) }) }
     suspend fun history(member: Int, hours: Int = 12): HistoryResp = ask("GET", "/api/history?member=$member&hours=$hours")
 
     suspend fun deleteHistory() { raw("DELETE", "/api/history") }

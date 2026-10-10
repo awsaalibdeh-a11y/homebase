@@ -17,7 +17,7 @@ engine = create_engine(url, pool_pre_ping=True, **({} if url.startswith("sqlite"
 meta = MetaData()
 
 families = Table("families", meta,
-    Column("id", Integer, primary_key=True), Column("name", String(60)), Column("created", Float))
+    Column("id", Integer, primary_key=True), Column("name", String(60)), Column("created", Float), Column("rules", Text, default=""))   # rules: the house rules text
 members = Table("members", meta,
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("name", String(40)),
     Column("role", String(8)),                                     # parent | child
@@ -28,6 +28,7 @@ members = Table("members", meta,
     Column("quiet_from", Integer, default=-1), Column("quiet_to", Integer, default=-1),      # minutes after midnight, -1 = none
     Column("tz_offset", Integer, default=0),                       # minutes, as the phone reports it
     Column("low_sent", Boolean, default=False),
+    Column("rules", Text, default=""),                                # JSON {"limit": minutes} a parent set for this child
     Column("perms", Text, default=""),                               # JSON {key: false} of what parents may NOT do; the child edits it
     Column("last_lat", Float), Column("last_lng", Float), Column("last_acc", Float), Column("last_at", Float, default=0))
 invites = Table("invites", meta,
@@ -59,12 +60,26 @@ pings = Table("pings", meta,
 lists = Table("lists", meta,
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("text", String(120)), Column("done", Boolean, default=False),
     Column("added_by", Integer), Column("done_by", Integer, default=0), Column("created", Float))
+screentime = Table("screentime", meta,                                # time spent actively playing or watching, per child per day per app
+    Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("day", String(10), index=True),
+    Column("pkg", String(120)), Column("label", String(60)), Column("cat", String(10), default="play"),   # play | watch | social
+    Column("sec", Integer, default=0), Column("updated", Float))
+locks = Table("locks", meta,                                          # a parent locks a child's devices for a while (at most 4 hours a day)
+    Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("by_id", Integer), Column("family_id", Integer, index=True),
+    Column("start", Float), Column("until", Float), Column("ended", Float, default=0),                # ended = lifted early (0 = not lifted)
+    Column("lifted_by", String(12), default=""), Column("reason", String(120), default=""))          # lifted_by: parent | owner
 meta.create_all(engine)
 try:                                                                  # older databases get the new column
     with engine.begin() as _c:
         _c.exec_driver_sql("ALTER TABLE members ADD COLUMN perms TEXT DEFAULT ''")
 except Exception:
     pass
+for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE families ADD COLUMN rules TEXT DEFAULT ''"):
+    try:
+        with engine.begin() as _c:
+            _c.exec_driver_sql(_sql)
+    except Exception:
+        pass
 
 
 def run(stmt):

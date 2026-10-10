@@ -20,6 +20,8 @@ data class Member(
     val quiet: Boolean = false,
     val location: Spot? = null,
     val perms: Map<String, Boolean> = emptyMap(),
+    val home: Boolean = false,
+    val lock: LockInfo? = null,
 ) {
     val isParent get() = role == "parent"
     /** Whether a parent may do [key] with this person. Everything is allowed until they turn it off. */
@@ -98,6 +100,27 @@ data class HistoryPoint(val lat: Double, val lng: Double, val at: Double = 0.0)
 
 @Serializable
 data class HistoryResp(val points: List<HistoryPoint> = emptyList())
+
+@Serializable
+data class RuleKid(val id: Int, val name: String = "", val emoji: String = "🙂")
+
+@Serializable
+data class RulesResp(val text: String = "", val limits: Map<String, Int> = emptyMap(), val children: List<RuleKid> = emptyList())
+
+@Serializable
+data class LockInfo(val id: Int = 0, val until: Double = 0.0, @SerialName("by_name") val byName: String = "a parent")
+
+@Serializable
+data class LockResp(val lock: LockInfo? = null, val left: Int = 0, val used: Int = 0, val until: Double = 0.0)
+
+@Serializable
+data class ScreenApp(val pkg: String, val label: String = "", val cat: String = "play", val sec: Int = 0)
+
+@Serializable
+data class ScreenDay(val day: String, val total: Int = 0, val apps: List<ScreenApp> = emptyList())
+
+@Serializable
+data class ScreenResp(val name: String = "", val days: List<ScreenDay> = emptyList())
 
 @Serializable
 data class QuietInfo(val from: Int = -1, val to: Int = -1)

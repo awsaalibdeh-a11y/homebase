@@ -1,10 +1,12 @@
 package app.homebase.family.ui
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Place
@@ -39,6 +41,8 @@ import app.homebase.family.hb
 
 fun memberLine(m: Member): String {
     val where = when {
+        m.lock != null -> "🔒 Locked until ${clockOf(m.lock.until)}"
+        m.home -> "🏠 At home"
         m.share == "paused" -> "Location paused"
         m.share == "off" -> "Not sharing location"
         m.location != null -> (if (Connectivity.online && System.currentTimeMillis() / 1000.0 - m.lastSeen < 150) "Live · " else "Last known · ") + timeAgo(m.location.at)
@@ -50,7 +54,7 @@ fun memberLine(m: Member): String {
 }
 
 /** Plain names for the things a person can switch off for their parents. */
-val PERM_LABELS = listOf("location" to "location", "trail" to "trail", "battery" to "battery", "messages" to "messages", "calls" to "calls", "ping" to "where-are-you")
+val PERM_LABELS = listOf("location" to "location", "trail" to "trail", "battery" to "battery", "messages" to "messages", "calls" to "calls", "ping" to "where-are-you", "screentime" to "screen time")
 
 @Composable
 fun MainScreen(nav: Nav, initialTab: Int = 0) {
@@ -66,18 +70,26 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
     }
     Scaffold(containerColor = Bg, bottomBar = {
         NavigationBar(containerColor = Surface) {
-            val items = listOf("Map" to Icons.Filled.Place, "Family" to Icons.Filled.People, "Chat" to Icons.Filled.Chat, "Me" to Icons.Filled.Home)
+            val items = listOfNotNull("Map" to Icons.Filled.Place, "Family" to Icons.Filled.People, "Chat" to Icons.Filled.Chat,
+                if (LocalContext.current.hb.store.isParent) "Rules" to Icons.Filled.Edit else null, "Me" to Icons.Filled.Home)
             items.forEachIndexed { i, (label, icon) ->
                 NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icon, label) }, label = { Text(label) },
                     colors = NavigationBarItemDefaults.colors(selectedIconColor = Blue, selectedTextColor = Blue, indicatorColor = BlueSoft))
             }
         }
     }) { pad ->
+        val famNow by state.family.collectAsState()
+        val myLock = famNow?.members?.firstOrNull { it.id == LocalContext.current.hb.store.myId }?.lock
+        var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(myLock) { while (myLock != null) { nowMs = System.currentTimeMillis(); kotlinx.coroutines.delay(2000) } }
         Box(Modifier.padding(pad).fillMaxSize()) {
-            when (tab) {
-                0 -> MapTab(nav)
-                1 -> FamilyTab(nav)
-                2 -> ChatTab(nav)
+            if (myLock != null && myLock.until * 1000 > nowMs) { LockedScreen(myLock); return@Box }
+            val isParent = LocalContext.current.hb.store.isParent
+            when {
+                tab == 0 -> MapTab(nav)
+                tab == 1 -> FamilyTab(nav)
+                tab == 2 -> ChatTab(nav)
+                tab == 3 && isParent -> RulesTab()
                 else -> MeTab(nav)
             }
             val online by state.online.collectAsState()

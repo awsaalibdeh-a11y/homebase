@@ -19,6 +19,7 @@ sealed interface Screen {
     data object Settings : Screen
     data object Transparency : Screen
     data object Perms : Screen
+    data class ScreenTime(val memberId: Int) : Screen
     data object Tour : Screen
     data object Invite : Screen
 }

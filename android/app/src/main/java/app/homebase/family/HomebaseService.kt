@@ -42,6 +42,12 @@ class HomebaseService : Service() {
     private var locationClient: LocationClient? = null
     private var lastSent: Location? = null
     private var lastSentAt = 0L
+    private var screenJob: Job? = null
+    private val lockOverlay by lazy {
+        app.homebase.family.ui.LockOverlay(this, onAsk = { scope.launch { runCatching { hb.api.askUnlock() } } },
+            onSos = { scope.launch { runCatching { hb.api.send("sos", "I need help", 0) } } })
+    }
+    private val screenTracker by lazy { ScreenTimeTracker(this) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -50,10 +56,12 @@ class HomebaseService : Service() {
         goForeground()
         if (loop?.isActive != true) loop = scope.launch { eventLoop() }
         if (watchers?.isActive != true) watchers = scope.launch { watchState() }
+        if (screenJob?.isActive != true) screenJob = scope.launch { while (isActive) { runCatching { screenTracker.tick() }; delay(30_000) } }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        runCatching { lockOverlay.hide() }
         scope.cancel()
         locationClient?.stop()
         super.onDestroy()
@@ -84,7 +92,8 @@ class HomebaseService : Service() {
     private suspend fun watchState() {
         val app = hb
         scope.launch {
-            app.state.family.collect {
+            app.state.family.collect { fam ->
+                lockOverlay.update(if (app.store.isParent) null else fam?.members?.firstOrNull { it.id == app.store.myId }?.lock)
                 withContext(Dispatchers.Main) {
                     if (sharingNow()) {
                         if (locationClient == null) locationClient = LocationClient(this@HomebaseService) { fix -> scope.launch { sendFix(fix) } }
@@ -198,6 +207,7 @@ class HomebaseService : Service() {
                 if (p.str("status") == "missed" && before?.incoming == true && before.id == p.int("id")) Notifications.missedCall(this@HomebaseService, before.peerName)
             }
             "ice" -> (p["candidate"] as? JsonObject)?.let { c -> withContext(Dispatchers.Main) { app.calls.onIce(p.int("id"), c) } }
+            "nudge" -> Notifications.post(this, Notifications.CH_MESSAGES, "Time for a break?", p.str("text"), "map")
             "member", "places" -> app.state.refreshFamily()
             "list" -> app.state.refreshItems()
         }

@@ -87,6 +87,8 @@ fun MeTab(nav: Nav) {
             }
         }
 
+        if (!ctx.hb.store.isParent) { SectionLabel("Screen time"); ScreenTimeCard(nav) }
+
         SectionLabel("More")
         SoftButton("What my family can see") { nav.go(Screen.Transparency) }
         if (!ctx.hb.store.isParent) SoftButton("What parents can do") { nav.go(Screen.Perms) }

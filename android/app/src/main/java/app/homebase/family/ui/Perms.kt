@@ -31,6 +31,7 @@ private val CONTROLS = listOf(
     Triple("messages", "Send me messages", "Check-ins and SOS from you always go through, and you can still message them."),
     Triple("calls", "Call me", "You can always call your parents."),
     Triple("ping", "Ask \"Where are you?\"", "A request you can answer or decline either way."),
+    Triple("screentime", "See my screen time", "How long you spend playing or watching, and in which apps. Only that, never what you do in them."),
 )
 
 /** Whether the buttons a parent sees for [m] should work. Everyone else is never limited. */

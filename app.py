@@ -4,6 +4,7 @@ Principles baked in: everything shared is visible to the person sharing it, they
 and there is no hidden mode. Parents never get silent access to a child's phone: location is shared by the app, check-ins, requests
 ("where are you?") can be declined, and quiet hours are the child's own setting."""
 
+import hmac
 import json
 import math
 import os
@@ -112,7 +113,8 @@ def in_quiet(m, now=None):
 
 
 PERMS = {"location": "see where they are", "trail": "see their location trail", "battery": "see their battery level",
-         "messages": "send them messages", "calls": "call them", "ping": 'ask "Where are you?"'}
+         "messages": "send them messages", "calls": "call them", "ping": 'ask "Where are you?"',
+         "screentime": "see their screen time"}
 
 
 def perms_of(m):
@@ -139,7 +141,7 @@ def member_view(m, viewer=None):
     gated = bool(viewer) and viewer["role"] == "parent" and m["role"] == "child" and viewer["id"] != m["id"]
     out = {"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "battery": m["battery"], "share": state,
            "paused_until": m["paused_until"] if state == "paused" else 0, "last_seen": m["last_seen"], "quiet": m["quiet_from"] >= 0,
-           "location": None, "perms": perms}
+           "location": None, "perms": perms, "lock": lock_view(m), "home": at_home(m)}
     if state == "on" and m["last_lat"] is not None and not (gated and not perms["location"]):
         out["location"] = {"lat": m["last_lat"], "lng": m["last_lng"], "acc": m["last_acc"], "at": m["last_at"]}
     if gated and not perms["location"]:
@@ -147,6 +149,61 @@ def member_view(m, viewer=None):
     if gated and not perms["battery"]:
         out["battery"] = -1
     return out
+
+
+LOCK_MAX_DAY = 4 * 3600                                       # a child can be locked for at most four hours in a day
+
+
+def _lock_end(r):
+    return min(r["until"], r["ended"]) if r["ended"] else r["until"]
+
+
+def day_window(m, ts):
+    """The child's own calendar day around ts, from the timezone their device reports."""
+    off = (m["tz_offset"] or 0) * 60
+    start = (ts - off) - (ts - off) % 86400 + off
+    return start, start + 86400
+
+
+def locked_between(m, a, b, rows=None):
+    rows = rows if rows is not None else db.many(select(db.locks).where(db.locks.c.member_id == m["id"], db.locks.c.until > a, db.locks.c.start < b))
+    return sum(max(0, min(_lock_end(r), b) - max(r["start"], a)) for r in rows)
+
+
+def active_lock(m, now=None):
+    now = now or time.time()
+    rows = db.many(select(db.locks).where(db.locks.c.member_id == m["id"], db.locks.c.start <= now, db.locks.c.until > now).order_by(db.locks.c.id.desc()))
+    return next((r for r in rows if _lock_end(r) > now), None)
+
+
+def home_place(fid):
+    return db.one(select(db.places).where(db.places.c.family_id == fid, db.places.c.name == "Home"))
+
+
+def at_home(m):
+    """Is this person inside the family's Home area right now? (From their last arrival or departure, so it only shows while they share.)"""
+    h = home_place(m["family_id"])
+    if not h or m["share_state"] != "on":
+        return False
+    st = db.one(select(db.place_state).where(db.place_state.c.member_id == m["id"], db.place_state.c.place_id == h["id"]))
+    return bool(st and st["inside"])
+
+
+def lock_view(m):
+    if m["role"] != "child":
+        return None
+    r = active_lock(m)
+    if not r:
+        return None
+    by = db.one(select(db.members).where(db.members.c.id == r["by_id"]))
+    return {"id": r["id"], "until": _lock_end(r), "by": r["by_id"], "by_name": by["name"] if by else "a parent"}
+
+
+def lock_budget(m, now=None):
+    now = now or time.time()
+    a, b = day_window(m, now)
+    used = locked_between(m, a, b)
+    return {"used": int(used), "left": int(max(0, LOCK_MAX_DAY - used)), "max": LOCK_MAX_DAY}
 
 
 def family_view(m):
@@ -390,6 +447,256 @@ def delete_history():
     return jsonify(ok=True)
 
 
+# ---------------------------------------------------------------- lock a child's devices for a while (a parent's button, four hours a day at most)
+# ---------------------------------------------------------------- family rules: house rules and a daily play/watch limit per child
+def limit_of(m):
+    try:
+        return max(0, int(json.loads(m["rules"] or "{}").get("limit") or 0))
+    except (ValueError, TypeError, AttributeError):
+        return 0
+
+
+@app.get("/api/rules")
+@need
+def get_rules():
+    """Everyone can read the rules that apply to them. Only parents change them."""
+    fam = db.one(select(db.families).where(db.families.c.id == g.m["family_id"]))
+    kids = [m for m in family_members(g.m["family_id"]) if m["role"] == "child"]
+    limits = {m["id"]: limit_of(m) for m in kids if g.m["role"] == "parent" or m["id"] == g.m["id"]}
+    return jsonify(text=fam["rules"] or "", limits=limits, children=[{"id": m["id"], "name": m["name"], "emoji": m["emoji"]} for m in kids] if g.m["role"] == "parent" else [])
+
+
+@app.post("/api/rules")
+@parent_only
+def set_rules():
+    b = request.get_json(silent=True) or {}
+    if "text" in b:
+        db.run(update(db.families).where(db.families.c.id == g.m["family_id"]).values(rules=str(b.get("text") or "").strip()[:1500]))
+    for key, val in (b.get("limits") or {}).items():
+        kid = same_family(int(key)) if str(key).isdigit() else None
+        if not kid or kid["role"] != "child":
+            continue
+        try:
+            mins = max(0, min(720, int(val or 0)))
+        except (TypeError, ValueError):
+            return err("Minutes should be a number.")
+        db.run(update(db.members).where(db.members.c.id == kid["id"]).values(rules=json.dumps({"limit": mins})))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} updated the family rules")                  # the family always sees it: nothing is silent
+    push_family(g.m["family_id"], "member", {"id": g.m["id"], "rules": True})
+    return jsonify(ok=True)
+
+
+@app.get("/api/lock")
+@need
+def get_lock():
+    target = same_family(qint("member", g.m["id"]))
+    if not target or target["role"] != "child":
+        return err("Not found.", 404)
+    if target["id"] != g.m["id"] and g.m["role"] != "parent":
+        return err("Only you or a parent can see this.", 403)
+    return jsonify(lock=lock_view(target), now=time.time(), **lock_budget(target))
+
+
+@app.post("/api/lock")
+@need
+def make_lock():
+    if g.m["role"] != "parent":
+        return err("Only a parent can lock a device.", 403)
+    b = request.get_json(silent=True) or {}
+    target = same_family(int(b.get("member") or 0))
+    if not target or target["role"] != "child":
+        return err("Pick a child.", 404)
+    try:
+        minutes = int(b.get("minutes") or 0)
+    except (TypeError, ValueError):
+        return err("How many minutes?")
+    if minutes < 5:
+        return err("Lock for at least 5 minutes.")
+    now = time.time()
+    if active_lock(target, now):
+        return err(f"{target['name']} is already locked. Unlock first to start a new one.", 409)
+    until = now + min(minutes, 240) * 60
+    # the four-hour limit is per day, so check every day this lock touches
+    a, e = day_window(target, now)
+    while a < until:
+        mine = max(0, min(until, e) - max(now, a))
+        if locked_between(target, a, e) + mine > LOCK_MAX_DAY + 1:
+            left = max(0, LOCK_MAX_DAY - locked_between(target, a, e))
+            return err(f"{target['name']} can only be locked for 4 hours a day. {int(left // 60)} minutes are left for that day.", 400, left=int(left))
+        a, e = e, e + 86400
+    lid = db.run(insert(db.locks).values(member_id=target["id"], by_id=g.m["id"], family_id=g.m["family_id"], start=now, until=until, reason=str(b.get("reason") or "")[:120]))
+    clock = time.strftime("%H:%M", time.gmtime(until - (target["tz_offset"] or 0) * 60))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} locked {target['name']}'s devices until {clock}")        # the family always sees it: nothing is silent
+    push_family(g.m["family_id"], "member", {"id": target["id"], "lock": {"until": until}})
+    return jsonify(ok=True, until=until, **lock_budget(target))
+
+
+def _lift(target, by_role, who):
+    r = active_lock(target)
+    if not r:
+        return False
+    now = time.time()
+    db.run(update(db.locks).where(db.locks.c.id == r["id"]).values(ended=now, lifted_by=by_role))
+    say(target["family_id"], target["id"], f"{who} unlocked {target['name']}'s devices")
+    push_family(target["family_id"], "member", {"id": target["id"], "lock": None})
+    return True
+
+
+@app.post("/api/lock/<int:member_id>/release")
+@need
+def release_lock(member_id):
+    if g.m["role"] != "parent":
+        return err("Only a parent can unlock a device.", 403)
+    target = same_family(member_id)
+    if not target or target["role"] != "child":
+        return err("Not found.", 404)
+    return jsonify(ok=True, lifted=_lift(target, "parent", g.m["name"]), **lock_budget(target))
+
+
+@app.post("/api/lock/ask")
+@need
+def ask_unlock():
+    """A locked child can always ask for their device back, or send an SOS (the messages route). Nobody is shut out of reaching their family."""
+    if g.m["role"] != "child":
+        return err("Only children are locked.", 403)
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} asked to be unlocked early", kind="text")
+    push_family(g.m["family_id"], "message", {"id": 0, "from": g.m["id"], "to": 0, "kind": "text", "body": f"{g.m['name']} asked to be unlocked early", "name": g.m["name"], "created": time.time()}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
+# the owner's override, from Cramly Control: see every lock and lift any of them
+def owner_ok():
+    want = os.environ.get("HB_ADMIN_KEY", "")
+    return len(want) >= 12 and hmac.compare_digest(want.encode(), request.headers.get("X-Admin-Key", "").encode())
+
+
+@app.get("/api/admin/locks")
+def admin_locks():
+    if not owner_ok():
+        return err("Wrong key.", 403)
+    now = time.time()
+    rows = db.many(select(db.locks).where(db.locks.c.until > now, db.locks.c.start <= now))
+    out = []
+    for r in rows:
+        if _lock_end(r) <= now:
+            continue
+        kid, by = db.one(select(db.members).where(db.members.c.id == r["member_id"])), db.one(select(db.members).where(db.members.c.id == r["by_id"]))
+        fam = db.one(select(db.families).where(db.families.c.id == r["family_id"]))
+        out.append({"id": r["id"], "child": kid["name"] if kid else "?", "by": by["name"] if by else "?", "family": fam["name"] if fam else "?", "until": _lock_end(r), "start": r["start"]})
+    return jsonify(locks=out, now=now)
+
+
+@app.post("/api/admin/locks/<int:lid>/lift")
+def admin_lift(lid):
+    if not owner_ok():
+        return err("Wrong key.", 403)
+    r = db.one(select(db.locks).where(db.locks.c.id == lid))
+    kid = r and db.one(select(db.members).where(db.members.c.id == r["member_id"]))
+    if not kid:
+        return err("No such lock.", 404)
+    return jsonify(ok=True, lifted=_lift(kid, "owner", "The owner"))
+
+
+# ---------------------------------------------------------------- screen time: only active playing or watching, never idle or study time
+DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+CATS = ("play", "watch", "social")
+
+
+NUDGE_EVERY = 20 * 60                                          # a friendly nudge for every 20 minutes of actual playing or watching
+NUDGES = ["Take a break and ride your bike 🚲", "Grab a book and read for a while 📖", "Bring {parent} a glass of water 💧",
+          "Stretch, then get some fresh air outside 🌳", "Ask {parent} if there is something small you can help with 🤝", "Tidy your room for five minutes 🧹",
+          "Get yourself a glass of water 💧", "Message or call someone you love 💛", "Draw, build or make something ✏️", "Kick a ball around outside ⚽",
+          "Make {parent} a cup of tea or a snack 🍵", "Go for a short walk 🚶"]
+
+
+def nudge_text(m, count, total):
+    parents = [p["name"] for p in family_members(m["family_id"]) if p["role"] == "parent"]
+    who = parents[count % len(parents)] if parents else "someone at home"
+    mins = total // 60
+    return f"{mins} minutes of playing or watching today. " + NUDGES[(count - 1) % len(NUDGES)].format(parent=who)
+
+
+def day_total(member_id, day):
+    return sum(r["sec"] for r in db.many(select(db.screentime).where(db.screentime.c.member_id == member_id, db.screentime.c.day == day)))
+
+
+@app.post("/api/screentime")
+@need
+def post_screentime():
+    """The phone sends today's running totals (it has already left out idle time, a locked screen and study or work apps)."""
+    b = request.get_json(silent=True) or {}
+    day = str(b.get("day") or "")
+    if not DAY_RE.match(day):
+        return err("Which day?")
+    apps = [a for a in (b.get("apps") or []) if isinstance(a, dict)][:80]
+    now = time.time()
+    before = day_total(g.m["id"], day)
+    for a in apps:
+        pkg = str(a.get("pkg") or "")[:120]
+        if not pkg:
+            continue
+        sec = max(0, min(86400, int(a.get("sec") or 0)))
+        cat = a.get("cat") if a.get("cat") in CATS else "play"
+        label = str(a.get("label") or pkg.rsplit(".", 1)[-1])[:60]
+        row = db.one(select(db.screentime).where(db.screentime.c.member_id == g.m["id"], db.screentime.c.day == day, db.screentime.c.pkg == pkg))
+        if row:
+            db.run(update(db.screentime).where(db.screentime.c.id == row["id"]).values(sec=sec, label=label, cat=cat, updated=now))
+        else:
+            db.run(insert(db.screentime).values(member_id=g.m["id"], day=day, pkg=pkg, label=label, cat=cat, sec=sec, updated=now))
+    after = day_total(g.m["id"], day)
+    lim = limit_of(g.m) * 60
+    if g.m["role"] == "child" and lim and before < lim <= after:                                  # reached the daily limit a parent set
+        push(g.m["id"], "nudge", {"text": f"You have reached your daily limit of {lim // 60} minutes of playing and watching. Time for something else 🌳", "total": after})
+        say(g.m["family_id"], g.m["id"], f"{g.m['name']} reached the daily limit of {lim // 60} minutes of playing and watching")
+    elif g.m["role"] == "child" and after // NUDGE_EVERY > before // NUDGE_EVERY and after - before < 3600:      # crossed another 20 minutes (not a big catch-up upload)
+        push(g.m["id"], "nudge", {"text": nudge_text(g.m, after // NUDGE_EVERY, after), "total": after})
+    old = time.strftime("%Y-%m-%d", time.gmtime(now - 35 * 86400))                       # kept for a month, then deleted
+    db.run(delete(db.screentime).where(db.screentime.c.member_id == g.m["id"], db.screentime.c.day < old))
+    return jsonify(ok=True)
+
+
+@app.get("/api/screentime")
+@need
+def get_screentime():
+    target = same_family(qint("member", g.m["id"]))
+    if not target:
+        return err("Not found.", 404)
+    if target["id"] != g.m["id"] and not (g.m["role"] == "parent" and target["role"] == "child"):
+        return err("You can only see your own screen time, or a child's if you are a parent.", 403)
+    if not parent_may(g.m, target, "screentime"):
+        return denied(target, "screentime")
+    days = max(1, min(30, qint("days", 7)))
+    since = time.strftime("%Y-%m-%d", time.gmtime(time.time() - (days + 1) * 86400))
+    rows = db.many(select(db.screentime).where(db.screentime.c.member_id == target["id"], db.screentime.c.day >= since).order_by(db.screentime.c.day.desc(), db.screentime.c.sec.desc()))
+    by_day = {}
+    for r in rows:
+        d = by_day.setdefault(r["day"], {"day": r["day"], "total": 0, "apps": []})
+        d["total"] += r["sec"]
+        d["apps"].append({"pkg": r["pkg"], "label": r["label"], "cat": r["cat"], "sec": r["sec"]})
+    return jsonify(member=target["id"], name=target["name"], days=list(by_day.values())[:days],
+                   updated=max([r["updated"] for r in rows], default=0))
+
+
+@app.get("/api/screentime/agent")
+@need
+def screentime_agent():
+    """The Windows screen-time tracker, made for this child (it carries their own key, so it is only for them)."""
+    if g.m["role"] != "child":
+        return err("Screen time is for children's devices.", 403)
+    token = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+    src = open(os.path.join(BASE, "static", "windows", "screentime.ps1"), encoding="utf-8").read()
+    body = src.replace("{{SERVER}}", request.host_url.rstrip("/")).replace("{{TOKEN}}", token)
+    return app.response_class("\ufeff" + body, mimetype="text/plain", headers={"Content-Disposition": 'attachment; filename="Homebase-ScreenTime.ps1"', "Cache-Control": "no-store"})
+
+
+@app.delete("/api/screentime")
+@need
+def delete_screentime():
+    """Your screen time is yours: delete it any time."""
+    db.run(delete(db.screentime).where(db.screentime.c.member_id == g.m["id"]))
+    return jsonify(ok=True)
+
+
 # ---------------------------------------------------------------- messages: texts, check-ins, running late, SOS, hearts
 KINDS = ("text", "checkin", "late", "sos", "heart")
 
@@ -495,6 +802,29 @@ def add_place():
     say(m["family_id"], m["id"], f"{m['name']} added the place {name}. Everyone is told when someone arrives or leaves.")
     push_family(m["family_id"], "places", {"id": pid, "name": name, "by": m["name"]})
     return jsonify(id=pid)
+
+
+@app.post("/api/home")
+@parent_only
+def set_home():
+    """The Home area: one special place per family. Setting it again moves it."""
+    m, b = g.m, request.get_json(silent=True) or {}
+    try:
+        lat, lng = float(b["lat"]), float(b["lng"])
+    except (KeyError, TypeError, ValueError):
+        return err("Pick a spot, or share your location first.")
+    radius = max(50, min(1000, int(b["radius"]))) if str(b.get("radius", "")).isdigit() else 200
+    h = home_place(m["family_id"])
+    if h:
+        db.run(update(db.places).where(db.places.c.id == h["id"]).values(lat=lat, lng=lng, radius=radius, emoji="🏠"))
+        for mm in family_members(m["family_id"]):                      # everyone starts "away" from the new spot until they are seen near it
+            db.run(delete(db.place_state).where(db.place_state.c.member_id == mm["id"], db.place_state.c.place_id == h["id"]))
+        pid = h["id"]
+    else:
+        pid = db.run(insert(db.places).values(family_id=m["family_id"], name="Home", emoji="🏠", lat=lat, lng=lng, radius=radius, created_by=m["id"], created=time.time()))
+    say(m["family_id"], m["id"], f"{m['name']} set the Home area ({radius} m). Everyone is told when someone gets home or leaves.")
+    push_family(m["family_id"], "places", {"id": pid, "name": "Home", "by": m["name"]})
+    return jsonify(id=pid, radius=radius)
 
 
 @app.delete("/api/places/<int:pid>")

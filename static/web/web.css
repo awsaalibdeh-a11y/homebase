@@ -126,3 +126,19 @@ label.l { display: block; font-size: 14px; font-weight: 600; margin: 16px 0 7px;
   #toasts { bottom: 20px; } #offline { top: 70px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* screen time */
+.stbig { font-size: 34px; font-weight: 700; letter-spacing: -.02em; margin: 2px 0 10px; }
+.stbars { display: flex; gap: 8px; align-items: flex-end; height: 110px; padding: 6px 0 0; }
+.stbar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; background: none; border: 0; cursor: pointer; padding: 0; color: var(--muted); font: inherit; font-size: 12px; }
+.stbar i { display: block; width: 100%; border-radius: 6px; background: var(--surface2); } .stbar.sel i { background: var(--accent); } .stbar.sel { color: var(--ink); }
+.starow { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); } .stemo { font-size: 22px; }
+.stline { display: flex; justify-content: space-between; gap: 12px; } .stline span, .starow small { color: var(--muted); font-size: 13px; }
+.sttrack { height: 6px; border-radius: 3px; background: var(--surface2); margin: 6px 0 2px; overflow: hidden; } .sttrack i { display: block; height: 100%; border-radius: 3px; }
+
+/* the child's lock screen */
+#lockov { position: fixed; inset: 0; z-index: 9000; background: #0a0a0b; color: #ececf0; display: grid; place-items: center; text-align: center; padding: 24px; }
+.lockbox { max-width: 440px; } .lockico { font-size: 64px; } .lockbox h1 { margin: 6px 0; font-size: 34px; } .lockbox p { color: #9a9aa3; margin: 6px 0; }
+.lockleft { font-size: 44px; font-weight: 700; margin: 16px 0; letter-spacing: -.02em; } .lockidea { font-size: 17px; margin-bottom: 20px !important; color: #ececf0 !important; }
+
+.rulesbox { background: var(--surface2); border-radius: 14px; padding: 14px 16px; line-height: 1.55; margin: 8px 0; }

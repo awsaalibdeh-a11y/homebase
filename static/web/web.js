@@ -14,8 +14,9 @@ const PERMS = [
   ["messages", "Send me messages", "Your check-ins and SOS always reach them, and you can still message them."],
   ["calls", "Call me", "You can always call your parents."],
   ["ping", "Ask \"Where are you?\"", "A request you can answer or decline either way."],
+  ["screentime", "See my screen time", "How long you spend playing or watching, and in which apps. Only that, never what you do in them."],
 ];
-const PERM_NAMES = { location: "location", trail: "trail", battery: "battery", messages: "messages", calls: "calls", ping: "where-are-you" };
+const PERM_NAMES = { location: "location", trail: "trail", battery: "battery", messages: "messages", calls: "calls", ping: "where-are-you", screentime: "screen time" };
 
 const S = { token: localStorage.getItem("hb_token") || "", me: 0, family: null, members: [], places: [], ice: [], thread: 0, msgs: {}, unread: {}, items: [],
   map: null, markers: {}, circles: [], trail: null, adding: false, cursor: -1, running: false, geo: null, lastPos: null, lastSent: 0, focusedOnce: false,
@@ -120,7 +121,6 @@ async function startApp(fresh) {
   setInterval(() => { if (!document.hidden && S.token && S.online) refreshFamily().catch(() => {}); }, 12000);
   setInterval(() => { if (S.token && S.online) flushOutbox(); }, 15000);
   if (me().share === "on" && localStorage.getItem("hb_geo") === "1") startGeo();
-  document.addEventListener("click", () => { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); }, { once: true });
   if (window.innerWidth >= 1280 && !S.chatOpen) setChat(false);
 }
 async function refreshFamily() {
@@ -129,6 +129,7 @@ async function refreshFamily() {
   $("#famname").textContent = "· " + d.family.name; saveSnap(); renderAll();
 }
 function renderAll() {
+  paintLock();
   const parent = isParent(); $("#bAddPlace").classList.toggle("hidden", !parent); $("#bInvite").classList.toggle("hidden", !parent);
   renderSide(); renderMap(); renderThreads(); renderComposer(); renderMsgs();
 }
@@ -136,7 +137,8 @@ function renderAll() {
 /* ---------- people (the left panel) ---------- */
 function statusLine(m) {
   let w;
-  if (m.share === "paused") w = "Location paused";
+  if (m.home) w = "🏠 At home";
+  else if (m.share === "paused") w = "Location paused";
   else if (m.share === "off") w = "Not sharing location";
   else if (m.location) w = (isLive(m) ? "Live · " : "Last known · ") + ago(m.location.at);
   else w = "Waiting for a location";
@@ -155,19 +157,22 @@ function youCard() {
   return `<section class="you"><div class="head"><div class="ava ${on ? "on" : paused ? "paused" : ""}">${esc(m.emoji)}</div><div><b>${esc(m.name)} (you)</b><br><small>${m.role === "parent" ? "Parent" : "Child"}</small></div></div>
     <div class="shareline"><div><b>Share my location</b><small>${hint}</small></div><button class="tg ${on ? "on" : ""}" id="tShare" aria-label="Share my location"></button></div>
     ${on && !S.geo ? `<button class="btn solid" id="bAllow">Allow this laptop to share</button>` : ""}
+    ${notifyState() === "default" ? `<button class="btn" id="bNotify">🔔 Turn on desktop notifications for messages and calls</button>` : ""}
+    <div class="shareline"><div><b>Family rules</b><small>${m.role === "parent" ? "Set the house rules and daily limits." : "What your family agreed."}</small></div><button class="btn sm" id="bRules">${m.role === "parent" ? "Edit" : "Read"}</button></div>
+    ${m.role === "child" ? `<div class="shareline"><div><b>Screen time</b><small>Only time spent playing or watching.</small></div><button class="btn sm" id="bScreen">See</button></div>` : ""}
     ${on || paused ? `<div class="quick">Pause for <button class="btn sm" data-pause="15">15 min</button><button class="btn sm" data-pause="60">1 hour</button>${paused ? `<button class="btn sm" data-pause="0">Resume</button>` : ""}</div>` : ""}</section>`;
 }
 function renderSide() {
   const others = S.members.filter(m => m.id !== S.me);
   const people = others.map(m => {
     const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
-    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>Trail</button></div>` : "";
-    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${esc(m.emoji)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small></span><span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span></button>${offTags(m)}${acts}</div>`;
+    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>Trail</button>${m.role === "child" && isParent() ? `<button class="btn sm" data-act="lock" data-id="${m.id}">${m.lock ? "🔒 Locked" : "Lock device"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="screen" data-id="${m.id}" ${may(m, "screentime") ? "" : "disabled"}>Screen time</button>` : ""}</div>` : "";
+    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${esc(m.emoji)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small></span>${m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`}</button>${offTags(m)}${acts}</div>`;
   }).join("") || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press Invite to add someone." : ""}</div>`;
   const places = S.places.map(p => `<div class="place"><span>${esc(p.emoji)} ${esc(p.name)} <small>${p.radius} m</small></span>${isParent() ? `<button class="btn sm" data-act="delplace" data-id="${p.id}">Remove</button>` : ""}</div>`).join("") || `<div class="empty">No saved places yet.${isParent() ? " Press ＋ Place on the map." : ""}</div>`;
   const items = S.items.map(i => `<label class="item ${i.done ? "done" : ""}"><input type="checkbox" data-act="tick" data-id="${i.id}" ${i.done ? "checked" : ""}><span style="flex:1">${esc(i.text)}</span><button class="link" data-act="delitem" data-id="${i.id}" title="Delete" aria-label="Delete">✕</button></label>`).join("");
   const keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  $("#side").innerHTML = youCard() + `<div class="sechead"><h3>People</h3></div>${people}<div class="sechead"><h3>Saved places</h3></div>${places}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}
+  $("#side").innerHTML = youCard() + `<div class="sechead"><h3>People</h3></div>${people}<div class="sechead"><h3>Saved places</h3></div>${isParent() ? `<button class="btn ${S.places.some(p => p.name === "Home") ? "" : "solid"}" id="bHome" style="width:100%">🏠 ${S.places.some(p => p.name === "Home") ? "Move the Home area" : "Set the Home area"}</button>` : (S.places.some(p => p.name === "Home") ? "" : '<div class="empty">A parent can set the Home area.</div>')}${places}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}
     <form id="itemForm" style="display:flex;gap:8px"><input class="field" id="itemIn" placeholder="Add to the list" maxlength="120" autocomplete="off" value="${esc(keep)}"><button class="btn" type="submit">Add</button></form>`;
   if (keep) { const i = $("#itemIn"); i.focus(); i.setSelectionRange(keep.length, keep.length); }
 }
@@ -177,7 +182,7 @@ function initMap() {
   if (S.map) return;
   S.map = L.map("map", { zoomControl: false, attributionControl: true }).setView([24, 20], 2);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(S.map);
-  S.map.on("click", e => { if (S.adding) addPlaceDialog(e.latlng); });
+  S.map.on("click", e => { if (S.homing) { S.homing = false; saveHome(e.latlng.lat, e.latlng.lng, S.homeRadius || 200); return; } if (S.adding) addPlaceDialog(e.latlng); });
   new ResizeObserver(() => S.map.invalidateSize()).observe($("#map")); paintLayer();
 }
 const paintLayer = () => $("#map").classList.toggle("dark", mapDark());
@@ -197,7 +202,7 @@ function renderMap() {
   });
   Object.keys(S.markers).forEach(id => { if (!seen.has(+id)) { S.map.removeLayer(S.markers[id]); delete S.markers[id]; } });
   S.circles.forEach(c => S.map.removeLayer(c)); S.circles = [];
-  S.places.forEach(p => { S.circles.push(L.circle([p.lat, p.lng], { radius: p.radius, color: "#2f6df6", weight: 2, opacity: .7, fillColor: "#2f6df6", fillOpacity: .1 }).addTo(S.map).bindTooltip(p.emoji + " " + p.name)); });
+  S.places.forEach(p => { S.circles.push(L.circle([p.lat, p.lng], { radius: p.radius, color: p.name === "Home" ? "#1fa971" : "#2f6df6", weight: p.name === "Home" ? 3 : 2, opacity: .8, fillColor: p.name === "Home" ? "#1fa971" : "#2f6df6", fillOpacity: p.name === "Home" ? .14 : .1 }).addTo(S.map).bindTooltip(p.emoji + " " + p.name)); });
   if (!S.focusedOnce && seen.size) { fitAll(); S.focusedOnce = true; }
 }
 function fitAll() {
@@ -370,7 +375,7 @@ function inviteDialog() {
 /* ---------- where are you? ---------- */
 async function askWhere(m) { try { await api("/api/ping", "POST", { to: m.id }); toast(`Asked ${m.name}. They can answer or say not now.`); } catch (e) { toast(e.message); } }
 function pingDialog(p) {
-  notify(`${p.name} asked where you are`, "Open Homebase to answer");
+  notify(`${p.name} asked where you are`, "Open Homebase to answer", { tag: "ping", urgent: true });
   modal(`<h2>${esc(p.emoji)} ${esc(p.name)} asked where you are</h2><div class="sub">You can share your location this once, or say not now. Either way is fine.</div><div class="foot"><button class="btn" id="pNo">Not now</button><button class="btn solid" id="pYes">Share my location</button></div>`, root => {
     root.querySelector("#pNo").onclick = async () => { closeModal(); await api("/api/ping/" + p.id, "POST", { accept: false }).catch(() => {}); };
     root.querySelector("#pYes").onclick = async () => { closeModal();
@@ -380,7 +385,23 @@ function pingDialog(p) {
 }
 
 /* ---------- events (messages, calls and so on, the moment they happen) ---------- */
-function notify(title, body) { if (document.hidden && "Notification" in window && Notification.permission === "granted") { try { new Notification(title, { body, icon: "/static/web/icon-192.png" }); } catch (e) { /* ignore */ } } }
+function notifyState() { return "Notification" in window ? Notification.permission : "unsupported"; }
+async function askNotify() {
+  if (notifyState() === "unsupported") return toast("This browser cannot show notifications.");
+  const r = await Notification.requestPermission(); renderSide();
+  if (r === "granted") { toast("Notifications are on"); notify("Homebase", "You will see messages and calls like this.", { force: true }); } else toast("Notifications are blocked. You can allow them from the lock icon in the address bar.");
+}
+/** A desktop notification like any other app: it shows for new messages, calls and requests, and clicking it opens that conversation.
+ *  It stays quiet only when you are already looking at that conversation. */
+async function notify(title, body, o = {}) {
+  if (notifyState() !== "granted") return;
+  if (!o.force && document.hasFocus() && !document.hidden && (o.thread === undefined || (S.chatOpen && o.thread === S.thread))) return;
+  const opts = { body, icon: "/static/web/icon-192.png", badge: "/static/web/icon-192.png", tag: o.tag || "hb", renotify: true, requireInteraction: !!o.urgent, data: { thread: o.thread } };
+  try { const reg = "serviceWorker" in navigator && await navigator.serviceWorker.getRegistration(); if (reg && reg.showNotification) return reg.showNotification(title, opts); } catch (e) { /* fall back */ }
+  try { const n = new Notification(title, opts); n.onclick = () => { window.focus(); if (o.thread !== undefined) openThreadFromNotice(o.thread); n.close(); }; } catch (e) { /* ignore */ }
+}
+function openThreadFromNotice(th) { setChat(true); loadThread(th); }
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e => { if (e.data && e.data.type === "open-thread") { window.focus(); if (S.token) openThreadFromNotice(e.data.thread); } });
 async function eventLoop() {
   if (S.cursor < 0) { try { S.cursor = (await api("/api/events?after=-1")).cursor; } catch (e) { S.cursor = load("hb_cursor", 0); } }
   while (S.running && S.token) {
@@ -399,9 +420,14 @@ function handleEvent(ev) {
       if (!list.some(x => x.id === p.id)) list.push(p);
       if (th === S.thread) renderMsgs();
       if (th !== S.thread || document.hidden || !S.chatOpen) { S.unread[th] = (S.unread[th] || 0) + 1; renderThreads(); }
-      if (p.kind !== "system" && !p.quiet) { notify(p.name || "Homebase", p.body || ""); if (p.kind === "sos") toast("🆘 " + (p.name || "Someone") + " needs help", 7000); }
+      if (p.kind !== "system" && !p.quiet) {
+        notify((p.kind === "sos" ? "🆘 " : "") + (p.name || "Homebase"), p.body || "", { thread: th, tag: "msg-" + th, urgent: p.kind === "sos" });
+        if (p.kind === "sos") toast("🆘 " + (p.name || "Someone") + " needs help", 7000);
+        else if (th !== S.thread || !S.chatOpen) toast("💬 " + (p.name || "Someone") + ": " + String(p.body || "").slice(0, 80), 5000);
+      }
       saveSnap(); break; }
     case "member": case "places": refreshFamily(); break;
+    case "nudge": toast("💡 " + p.text, 12000); notify("Time for a break?", p.text, { tag: "nudge", force: false, thread: undefined }); break;
     case "list": refreshItems(); break;
     case "location": { const m = member(p.member); if (m) { m.location = { lat: p.lat, lng: p.lng, acc: p.acc, at: p.at }; m.last_seen = Date.now() / 1000; m.battery = p.battery ?? m.battery; renderMap(); renderSide(); } break; }
     case "battery": { const m = member(p.member); if (m) { m.battery = p.battery; renderSide(); } toast(`🔋 ${p.name} has ${p.battery}% battery`); break; }
@@ -428,12 +454,18 @@ function initChrome() {
     const pause = e.target.closest("[data-pause]"); if (pause) { const v = +pause.dataset.pause; return setSharing(v ? "paused" : "on", v); }
     if (e.target.closest("#tShare")) { return setSharing(me().share === "on" ? "off" : "on"); }
     if (e.target.closest("#bAllow")) { return startGeo(); }
+    if (e.target.closest("#bNotify")) { return askNotify(); }
+    if (e.target.closest("#bHome")) { return homeDialog(); }
+    if (e.target.closest("#bScreen")) { return screenDialog(S.me); }
+    if (e.target.closest("#bRules")) { return rulesDialog(); }
     const el = e.target.closest("[data-act]"); if (!el) return; const id = +el.dataset.id, m = member(id), act = el.dataset.act;
     if (act === "pick") { S.open = S.open === id ? 0 : id; renderSide(); if (S.open) focusMember(id); }
     else if (act === "msg") { setChat(true); loadThread(id); }
     else if (act === "call") window.Calls && window.Calls.start(m);
     else if (act === "ping") askWhere(m);
     else if (act === "trail") showTrail(id);
+    else if (act === "screen") screenDialog(id);
+    else if (act === "lock") lockDialog(id);
     else if (act === "delplace") { if (confirm("Remove this place?")) { await api("/api/places/" + id, "DELETE").catch(err => toast(err.message)); refreshFamily(); } }
     else if (act === "delitem") { await api("/api/list/" + id, "DELETE").catch(err => toast(err.message)); refreshItems(); }
   };
@@ -448,3 +480,118 @@ window.addEventListener("load", () => {
   const m = location.hash.match(/join=([A-Za-z0-9]+)/);
   if (S.token) startApp(); else if (m) showAuth("join", { code: m[1].toUpperCase() }); else showAuth("welcome");
 });
+
+
+/* ---------- screen time: only active playing or watching, and which apps ---------- */
+const fmtDur = sec => { const m = Math.floor(sec / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min` : m >= 1 ? `${m} min` : sec > 0 ? "under a minute" : "0 min"; };
+const CAT = { play: ["🎮", "Playing", "var(--accent)"], watch: ["📺", "Watching", "#e5484d"], social: ["💬", "Scrolling", "#d99a00"] };
+async function screenDialog(id) {
+  const mine = id === S.me, m = member(id) || me();
+  let d; try { d = await api("/api/screentime?member=" + id + "&days=7"); } catch (e) { return toast(e.message); }
+  const days = [...Array(7)].map((_, i) => { const dt = new Date(Date.now() - i * 864e5), key = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0"); return d.days.find(x => x.day === key) || { day: key, total: 0, apps: [] }; });
+  let pick = 0;
+  const label = i => i === 0 ? "Today" : i === 1 ? "Yesterday" : new Date(days[i].day + "T12:00").toLocaleDateString([], { weekday: "long" });
+  const draw = root => {
+    const sel = days[pick], max = Math.max(1, ...days.map(x => x.total)), top = Math.max(1, ...sel.apps.map(a => a.sec));
+    root.querySelector("#stBody").innerHTML = `<div class="sub">${label(pick)}</div><div class="stbig">${fmtDur(sel.total)}</div>
+      <div class="stbars">${[6, 5, 4, 3, 2, 1, 0].map(i => `<button class="stbar ${i === pick ? "sel" : ""}" data-i="${i}" aria-label="${label(i)}: ${fmtDur(days[i].total)}"><i style="height:${8 + 72 * days[i].total / max}px"></i><span>${new Date(days[i].day + "T12:00").toLocaleDateString([], { weekday: "narrow" })}</span></button>`).join("")}</div>
+      <div class="msec">Apps</div>${sel.apps.length ? sel.apps.map(a => { const c = CAT[a.cat] || CAT.play; return `<div class="starow"><span class="stemo">${c[0]}</span><div style="flex:1"><div class="stline"><b>${esc(a.label || a.pkg)}</b><span>${fmtDur(a.sec)}</span></div><div class="sttrack"><i style="width:${100 * a.sec / top}%;background:${c[2]}"></i></div><small>${c[1]}</small></div></div>`; }).join("")
+      : `<div class="empty">${mine ? "Nothing counted for this day yet." : esc(m.name) + " may not have turned tracking on yet. It is their choice."}</div>`}`;
+    root.querySelectorAll(".stbar").forEach(b => b.onclick = () => { pick = +b.dataset.i; draw(root); });
+  };
+  modal(`<h2>${mine ? "Your" : esc(m.name) + "'s"} screen time</h2><div class="sub">Only time spent actively playing or watching. Not when away, idle, or on homework and work.</div><div id="stBody"></div>
+    ${mine ? `<div class="msec">Track this computer</div><div class="sub">Windows: a small program counts your playing and watching here. Android: turn it on in the Homebase app, in Me.</div><div class="seg"><button class="btn sm" id="stAgent">Get the Windows tracker</button><button class="btn sm" id="stDel">Delete my screen time</button></div>` : ""}
+    <div class="foot"><button class="btn solid" id="stDone">Done</button></div>`, root => {
+    draw(root); root.querySelector("#stDone").onclick = closeModal;
+    const a = root.querySelector("#stAgent"); if (a) a.onclick = agentDialog;
+    const x = root.querySelector("#stDel"); if (x) x.onclick = async () => { if (confirm("Delete all your saved screen time?")) { await api("/api/screentime", "DELETE").then(() => { toast("Deleted"); closeModal(); }).catch(e => toast(e.message)); } };
+  });
+}
+function agentDialog() {
+  modal(`<h2>🖥️ Windows screen time</h2><div class="sub">It counts only time you spend <b>playing or watching</b> (games, YouTube, Netflix, TikTok and so on). Not when you are away, locked, or doing homework.</div>
+    <div class="msec">What it sees</div><div class="sub">Which program is in front, the title of its window (to tell YouTube from a homework tab) and how long since you touched the mouse or keyboard. Never your screen, files, passwords or what you type.</div>
+    <div class="msec">How to start</div><div class="sub">1. Download the file below. 2. Right-click it, choose <b>Run with PowerShell</b>. 3. It starts with Windows. You can remove it any time with <code>-Remove</code>. It sends minutes per app to your family. Your parents see them only while "See my screen time" is on in your settings.</div>
+    <div class="foot"><button class="btn" id="agX">Close</button><button class="btn solid" id="agGo">Download for Windows</button></div>`, root => {
+    root.querySelector("#agX").onclick = closeModal;
+    root.querySelector("#agGo").onclick = async () => {
+      try { const r = await fetch("/api/screentime/agent", { headers: { Authorization: "Bearer " + S.token } }); if (!r.ok) throw new Error((await r.json()).error || "Could not download.");
+        const url = URL.createObjectURL(await r.blob()), a = document.createElement("a"); a.href = url; a.download = "Homebase-ScreenTime.ps1"; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); toast("Downloaded. Right-click it and choose Run with PowerShell.", 7000);
+      } catch (e) { toast(e.message); } };
+  });
+}
+
+
+/* ---------- lock a child's devices for a while (a parent's button, four hours a day at most) ---------- */
+const LOCK_CHOICES = [[15, "15 min"], [30, "30 min"], [60, "1 hour"], [90, "1½ hours"], [120, "2 hours"], [180, "3 hours"], [240, "4 hours"]];
+async function lockDialog(id) {
+  const m = member(id); let d;
+  try { d = await api("/api/lock?member=" + id); } catch (e) { return toast(e.message); }
+  const left = Math.floor(d.left / 60), lk = d.lock;
+  modal(`<h2>🔒 Lock ${esc(m.name)}'s devices</h2>
+    <div class="sub">${lk ? `Locked by ${esc(lk.by_name)} until <b>${clock(lk.until)}</b>.` : "Their phone and computer show a lock screen for as long as you choose. They can still send an SOS or ask to be unlocked."}</div>
+    <div class="sub"><b>${left >= 60 ? Math.floor(left / 60) + " h " + (left % 60 ? left % 60 + " min" : "") : left + " min"}</b> of lock time left today (the most is 4 hours a day).</div>
+    ${lk ? `<div class="foot"><button class="btn" id="lkX">Close</button><button class="btn solid" id="lkOff">Unlock now</button></div>` :
+      `<div class="seg" id="lkSeg">${LOCK_CHOICES.map(([mn, t]) => `<button class="btn ${mn > left ? "" : ""}" data-m="${mn}" ${mn > left ? "disabled" : ""}>${t}</button>`).join("")}</div>
+       <div class="foot"><button class="btn" id="lkX">Cancel</button></div>`}`, root => {
+    root.querySelector("#lkX").onclick = closeModal;
+    const off = root.querySelector("#lkOff"); if (off) off.onclick = async () => { try { await api("/api/lock/" + id + "/release", "POST"); toast(m.name + " is unlocked"); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } };
+    root.querySelectorAll("#lkSeg [data-m]").forEach(b => b.onclick = async () => {
+      try { const r = await api("/api/lock", "POST", { member: id, minutes: +b.dataset.m }); toast(`${m.name} is locked until ${clock(r.until)}`); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } });
+  });
+}
+const WAIT_IDEAS = ["Ride your bike 🚲", "Read a book 📖", "Bring someone a glass of water 💧", "Go outside for some fresh air 🌳", "Tidy up a little 🧹", "Draw or build something ✏️"];
+let lockTimer = 0;
+/** On a child's laptop: a full-screen lock while a parent has locked it. It always offers a way to ask for early release and to send an SOS. */
+function paintLock() {
+  const m = S.me && me(), lk = m && m.role === "child" && m.lock && m.lock.until > Date.now() / 1000 ? m.lock : null;
+  let ov = document.getElementById("lockov");
+  if (!lk) { if (ov) ov.remove(); clearInterval(lockTimer); return; }
+  if (!ov) {
+    ov = document.createElement("div"); ov.id = "lockov"; ov.setAttribute("role", "alertdialog"); ov.setAttribute("aria-label", "Device locked"); document.body.append(ov);
+    ov.innerHTML = `<div class="lockbox"><div class="lockico">🔒</div><h1>Locked</h1><p id="lkWho"></p><div class="lockleft" id="lkLeft"></div><p class="lockidea" id="lkIdea"></p>
+      <div class="seg" style="justify-content:center"><button class="btn" id="lkAsk">Ask to unlock early</button><button class="btn bad" id="lkSos">🆘 I need help</button></div></div>`;
+    ov.querySelector("#lkIdea").textContent = "While you wait: " + WAIT_IDEAS[Math.floor(Math.random() * WAIT_IDEAS.length)];
+    ov.querySelector("#lkAsk").onclick = async e => { try { await api("/api/lock/ask", "POST"); e.target.textContent = "Asked. They will see it."; e.target.disabled = true; } catch (err) { toast(err.message); } };
+    ov.querySelector("#lkSos").onclick = async () => { if (confirm("Send an SOS to your family?")) { try { await sendMsg("sos", "I need help", where(), 0); toast("SOS sent to everyone"); } catch (e) { toast(e.message); } } };
+  }
+  ov.querySelector("#lkWho").textContent = `${lk.by_name} locked this device until ${clock(lk.until)}.`;
+  clearInterval(lockTimer);
+  const tick = () => { const s = Math.max(0, Math.round(lk.until - Date.now() / 1000)); const el = document.getElementById("lkLeft"); if (el) el.textContent = s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor(s % 3600 / 60)} min left` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} left`; if (s <= 0) { clearInterval(lockTimer); refreshFamily().catch(() => {}); } };
+  tick(); lockTimer = setInterval(tick, 1000);
+}
+
+
+/* ---------- the Home area: one special place per family ---------- */
+async function saveHome(lat, lng, radius) {
+  try { await api("/api/home", "POST", { lat, lng, radius }); toast("🏠 Home area saved"); closeModal(); await refreshFamily(); S.map.flyTo([lat, lng], 17); } catch (e) { toast(e.message); }
+}
+function homeDialog() {
+  S.homeRadius = 200;
+  modal(`<h2>🏠 Home area</h2><div class="sub">Everyone is told when someone gets home or leaves, and each person shows <b>At home</b> while inside this area.</div>
+    <div class="msec">How big</div><div class="seg" id="hmSeg">${[[100, "Small, 100 m"], [200, "Normal, 200 m"], [400, "Big, 400 m"]].map(([r, t]) => `<button class="btn ${r === 200 ? "sel" : ""}" data-r="${r}">${t}</button>`).join("")}</div>
+    <div class="msec">Where</div><div class="seg"><button class="btn solid" id="hmHere">Use this computer's location</button><button class="btn" id="hmPick">Click on the map</button></div>
+    <div class="foot"><button class="btn" id="hmX">Cancel</button></div>`, root => {
+    root.querySelector("#hmX").onclick = closeModal;
+    root.querySelectorAll("#hmSeg [data-r]").forEach(b => b.onclick = () => { S.homeRadius = +b.dataset.r; root.querySelectorAll("#hmSeg .btn").forEach(x => x.classList.toggle("sel", x === b)); });
+    root.querySelector("#hmPick").onclick = () => { closeModal(); S.homing = true; toast("Click the map where home is", 6000); };
+    root.querySelector("#hmHere").onclick = () => navigator.geolocation ? navigator.geolocation.getCurrentPosition(p => saveHome(p.coords.latitude, p.coords.longitude, S.homeRadius), () => toast("Could not get this computer's location. Click the map instead."), { timeout: 10000 }) : toast("Click the map instead.");
+  });
+}
+
+
+/* ---------- rules: house rules and a daily play/watch limit per child (parents edit, children read) ---------- */
+async function rulesDialog() {
+  let d; try { d = await api("/api/rules"); } catch (e) { return toast(e.message); }
+  const parent = isParent(), mine = d.limits[S.me];
+  modal(`<h2>📋 Family rules</h2><div class="sub">${parent ? "Everyone in the family can read these. Changing them is told to the family." : "These are your family's rules. Your parents set them."}</div>
+    ${parent ? `<textarea class="field" id="ruText" rows="6" maxlength="1500" placeholder="e.g. Homework before games. Phones off at dinner. Bed at 9.">${esc(d.text)}</textarea>
+      <div class="msec">Daily playing and watching limit</div><div class="sub">You and they get a friendly nudge when the limit is reached, and the family is told. Leave empty for no limit.</div>
+      ${d.children.map(c => `<div class="sw"><div><b>${esc(c.emoji)} ${esc(c.name)}</b></div><span><input class="field" type="number" min="0" max="720" step="5" data-kid="${c.id}" value="${d.limits[c.id] || ""}" placeholder="minutes" style="width:110px"> min</span></div>`).join("") || '<div class="empty">No children in the family yet.</div>'}`
+      : `<div class="rulesbox">${d.text ? esc(d.text).replace(/\n/g, "<br>") : "<i>No rules written yet.</i>"}</div>${mine ? `<div class="sub"><b>Your daily limit:</b> ${mine} minutes of playing and watching.</div>` : ""}`}
+    <div class="foot"><button class="btn" id="ruX">${parent ? "Cancel" : "Close"}</button>${parent ? '<button class="btn solid" id="ruSave">Save</button>' : ""}</div>`, root => {
+    root.querySelector("#ruX").onclick = closeModal;
+    const save = root.querySelector("#ruSave"); if (save) save.onclick = async () => {
+      const limits = {}; root.querySelectorAll("[data-kid]").forEach(i => { limits[i.dataset.kid] = +i.value || 0; });
+      try { await api("/api/rules", "POST", { text: root.querySelector("#ruText").value, limits }); toast("Rules saved"); closeModal(); } catch (e) { toast(e.message); } };
+  });
+}
