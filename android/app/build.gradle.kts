@@ -13,7 +13,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        ndk { abiFilters += (if (project.hasProperty("withX86")) listOf("x86_64") else listOf("arm64-v8a", "armeabi-v7a")) }
         buildConfigField("String", "DEFAULT_SERVER", "\"${project.findProperty("homebaseServer") ?: "https://homebase-family.onrender.com"}\"")
     }
     buildTypes { release { isMinifyEnabled = false } }

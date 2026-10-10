@@ -185,7 +185,9 @@ class HomebaseService : Service() {
             }
             "call" -> {
                 val id = p.int("id")
-                withContext(Dispatchers.Main) {
+                // We may be catching up after being offline: only ring for a call that is still ringing.
+                val live = runCatching { app.api.callState(id).status == "ringing" }.getOrDefault(true)
+                if (live) withContext(Dispatchers.Main) {
                     app.calls.onIncoming(id, p.int("from"), p.str("name"), p.str("emoji"), p.str("offer"), p.flag("urgent"))
                     if (app.state.call.value?.id == id) Notifications.incomingCall(this@HomebaseService, p.str("name"), p.flag("urgent"))
                 }

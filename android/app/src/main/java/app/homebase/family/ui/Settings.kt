@@ -80,7 +80,7 @@ fun SettingsScreen(nav: Nav) {
         Heading("Settings")
         OutlinedTextField(name, { name = it }, label = { Text("Your name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         SoftButton("Save name") { ctx.hb.scope.launch { runCatching { ctx.hb.api.patchMe("name" to name) }.onSuccess { ctx.hb.store.myName = name; ctx.hb.state.refreshFamily(); toast(ctx, "Saved") } } }
-        SoftButton("Let Homebase ring when the tablet is idle") { askBatteryExemption(ctx) }
+        SoftButton("Let Homebase ring when the device is idle") { askBatteryExemption(ctx) }
         SoftButton("Check for a newer version") {
             ctx.hb.scope.launch {
                 runCatching { ctx.hb.api.config() }.onSuccess { c ->

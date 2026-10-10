@@ -83,7 +83,7 @@ fun ConsentScreen(nav: Nav, s: Screen.Consent) {
         SoftCard(tint = RoseSoft) {
             Text("Homebase will never", style = MaterialTheme.typography.titleMedium)
             Gap(6)
-            Bullets(listOf("Hide itself, or share anything in secret", "Read your other apps, browsing or private messages", "Switch on your microphone or camera by itself", "Lock your tablet or limit your screen time"), "✕")
+            Bullets(listOf("Hide itself, or share anything in secret", "Read your other apps, browsing or private messages", "Switch on your microphone or camera by itself", "Lock your device or limit your screen time"), "✕")
         }
         Gap(12)
         SoftCard {

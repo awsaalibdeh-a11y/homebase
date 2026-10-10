@@ -53,9 +53,9 @@ fun MapTab(nav: Nav) {
                     }
                     if (m.id != me) {
                         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            TextButton({ nav.go(Screen.Thread(m.id)) }) { Text("Message") }
-                            TextButton({ call(m, false) }) { Text("Call") }
-                            TextButton({ askWhere(ctx, m) }) { Text("Where?") }
+                            TextButton({ nav.go(Screen.Thread(m.id)) }, enabled = canDo(m, "messages")) { Text("Message") }
+                            TextButton({ call(m, false) }, enabled = canDo(m, "calls")) { Text("Call") }
+                            TextButton({ askWhere(ctx, m) }, enabled = canDo(m, "ping")) { Text("Where?") }
                         }
                     }
                 }

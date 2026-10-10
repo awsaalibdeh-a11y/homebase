@@ -89,6 +89,7 @@ fun MeTab(nav: Nav) {
 
         SectionLabel("More")
         SoftButton("What my family can see") { nav.go(Screen.Transparency) }
+        if (!ctx.hb.store.isParent) SoftButton("What parents can do") { nav.go(Screen.Perms) }
         SoftButton("Family list") { nav.go(Screen.Lists) }
         SoftButton("Saved places") { nav.go(Screen.Places) }
         SoftButton("Settings") { nav.go(Screen.Settings) }

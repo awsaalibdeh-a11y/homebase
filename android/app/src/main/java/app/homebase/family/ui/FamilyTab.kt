@@ -55,9 +55,9 @@ fun FamilyTab(nav: Nav) {
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
                     if (m.id != me.myId) {
-                        TextButton({ nav.go(Screen.Thread(m.id)) }) { Text("Message") }
-                        TextButton({ call(m, false) }) { Text("Call") }
-                        TextButton({ askWhere(ctx, m) }) { Text("Where?") }
+                        TextButton({ nav.go(Screen.Thread(m.id)) }, enabled = canDo(m, "messages")) { Text("Message") }
+                        TextButton({ call(m, false) }, enabled = canDo(m, "calls")) { Text("Call") }
+                        TextButton({ askWhere(ctx, m) }, enabled = canDo(m, "ping")) { Text("Where?") }
                     }
                     if (m.id == me.myId || (me.isParent && !m.isParent)) TextButton({ nav.go(Screen.History(m.id)) }) { Text("Trail") }
                 }

@@ -18,6 +18,7 @@ sealed interface Screen {
     data object Lists : Screen
     data object Settings : Screen
     data object Transparency : Screen
+    data object Perms : Screen
     data object Invite : Screen
 }
 

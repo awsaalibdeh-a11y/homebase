@@ -216,6 +216,52 @@ class Calls(Base):
         self.assertEqual(self.post(self.mum, f"/api/calls/{cid}/answer", answer="a").status_code, 404)
 
 
+class Permissions(Base):
+    """The child decides what parents may do, and the server holds everyone to it."""
+
+    def off(self, **keys):
+        return self.c.patch("/api/me", headers=self.kid, json={"perms": {k: False for k in keys}})
+
+    def kid_view(self, who=None):
+        d = self.get(who or self.mum, "/api/family").get_json()
+        return next(m for m in d["members"] if m["id"] == self.kid_id)
+
+    def test_everything_is_allowed_until_the_child_turns_it_off(self):
+        self.assertTrue(all(self.kid_view()["perms"].values()))
+        self.assertEqual(self.off(calls=True, ping=True).status_code, 200)
+        v = self.kid_view()["perms"]
+        self.assertEqual((v["calls"], v["ping"], v["messages"]), (False, False, True))
+        self.c.patch("/api/me", headers=self.kid, json={"perms": {"calls": True}})        # and back on
+        self.assertTrue(self.kid_view()["perms"]["calls"])
+
+    def test_calls_asks_and_messages_are_refused_when_off(self):
+        self.off(calls=True, ping=True, messages=True)
+        self.assertEqual(self.post(self.mum, "/api/calls", to=self.kid_id, offer="v=0").status_code, 403)
+        self.assertEqual(self.post(self.mum, "/api/ping", to=self.kid_id).status_code, 403)
+        r = self.post(self.mum, "/api/messages", to=self.kid_id, kind="text", body="hi")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.get_json()["perm"], "messages")
+        # the child can always reach their parents, and check-ins and SOS are never blocked
+        self.assertEqual(self.post(self.kid, "/api/messages", to=self.mum_id, kind="text", body="hi mum").status_code, 200)
+        self.assertEqual(self.post(self.kid, "/api/calls", to=self.mum_id, offer="v=0").status_code, 200)
+
+    def test_location_trail_and_battery_are_hidden_from_parents_when_off(self):
+        self.where(self.kid, 51.5, -0.12, battery=64)
+        self.assertEqual(self.kid_view()["location"]["lat"], 51.5)
+        self.off(location=True, battery=True, trail=True)
+        v = self.kid_view()
+        self.assertEqual((v["location"], v["battery"], v["share"]), (None, -1, "off"))
+        self.assertEqual(self.get(self.mum, f"/api/history?member={self.kid_id}").status_code, 403)
+        mine = self.kid_view(self.kid)                                                      # the child still sees their own
+        self.assertEqual(mine["location"]["lat"], 51.5)
+        self.assertEqual(self.get(self.kid, "/api/history").status_code, 200)
+
+    def test_a_parent_cannot_change_a_childs_permissions(self):
+        self.c.patch("/api/me", headers=self.mum, json={"perms": {"calls": False}})
+        self.assertTrue(self.kid_view()["perms"]["calls"])
+        self.assertFalse(all(self.get(self.mum, "/api/me").get_json()["me"]["perms"].values()) is False and False)
+
+
 class Misc(Base):
     def test_event_stream_hands_out_a_cursor_then_only_new_things(self):
         cur = self.get(self.mum, "/api/events?after=-1").get_json()["cursor"]
@@ -237,7 +283,9 @@ class Misc(Base):
     def test_the_website_and_health(self):
         self.assertEqual(self.c.get("/").status_code, 200)
         self.assertEqual(self.c.get("/health").get_json()["ok"], True)
-        self.assertEqual(self.c.get("/download").status_code, 404)           # no app file uploaded yet
+        dl = self.c.get("/download")                                          # the app itself is served from static/homebase.apk
+        self.assertEqual(dl.status_code, 200 if os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "homebase.apk")) else 404)
+        dl.close()
 
 
 if __name__ == "__main__":

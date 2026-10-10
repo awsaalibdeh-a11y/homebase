@@ -56,7 +56,7 @@ fun PermissionsScreen(nav: Nav) {
         Reason("📍", "Location", "So your family can see you on the map. Choose \"Allow all the time\" so it keeps working when the screen is off. You can pause sharing any time.")
         Reason("🔔", "Notifications", "For messages, check-ins, and the ring of an incoming call.")
         Reason("🎙️", "Microphone", "Only used while you are on a call you answered or made. Never otherwise.")
-        Reason("🔋", "Battery", "Tell Android not to put Homebase to sleep, so a call can ring when the tablet is idle.")
+        Reason("🔋", "Battery", "Tell Android not to put Homebase to sleep, so a call can ring when the device is idle.")
         Gap(16)
         BigButton("Allow") {
             val list = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.RECORD_AUDIO)

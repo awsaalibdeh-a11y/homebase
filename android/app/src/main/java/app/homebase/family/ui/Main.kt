@@ -16,6 +16,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -40,7 +44,14 @@ fun memberLine(m: Member): String {
 fun MainScreen(nav: Nav, initialTab: Int = 0) {
     var tab by remember { mutableIntStateOf(initialTab) }
     val state = LocalContext.current.hb.state
-    LaunchedEffect(Unit) { state.refreshFamily(); state.refreshItems() }
+    val owner = LocalLifecycleOwner.current
+    // Keep the map fresh while the screen is visible; nothing runs in the background.
+    LaunchedEffect(owner) {
+        owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            state.refreshItems()
+            while (true) { state.refreshFamily(); delay(10_000) }
+        }
+    }
     Scaffold(containerColor = Bg, bottomBar = {
         NavigationBar(containerColor = Color.White) {
             val items = listOf("Map" to Icons.Filled.Place, "Family" to Icons.Filled.People, "Chat" to Icons.Filled.Chat, "Me" to Icons.Filled.Home)

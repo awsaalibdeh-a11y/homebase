@@ -19,8 +19,11 @@ data class Member(
     @SerialName("last_seen") val lastSeen: Double = 0.0,
     val quiet: Boolean = false,
     val location: Spot? = null,
+    val perms: Map<String, Boolean> = emptyMap(),
 ) {
     val isParent get() = role == "parent"
+    /** Whether a parent may do [key] with this person. Everything is allowed until they turn it off. */
+    fun allows(key: String) = perms[key] != false
 }
 
 @Serializable

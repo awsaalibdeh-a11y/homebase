@@ -62,6 +62,11 @@ class Api(private val store: Store) {
     suspend fun patchMe(vararg pairs: Pair<String, Any>) {
         raw("PATCH", "/api/me", obj { pairs.forEach { (k, v) -> if (v is Number) put(k, v) else put(k, v.toString()) } })
     }
+    suspend fun setPerms(perms: Map<String, Boolean>) {
+        raw("PATCH", "/api/me", kotlinx.serialization.json.buildJsonObject {
+            put("perms", kotlinx.serialization.json.buildJsonObject { perms.forEach { (k, v) -> put(k, kotlinx.serialization.json.JsonPrimitive(v)) } })
+        })
+    }
     suspend fun leave() { raw("DELETE", "/api/me") }
 
     // location

@@ -26,6 +26,7 @@ members = Table("members", meta,
     Column("quiet_from", Integer, default=-1), Column("quiet_to", Integer, default=-1),      # minutes after midnight, -1 = none
     Column("tz_offset", Integer, default=0),                       # minutes, as the phone reports it
     Column("low_sent", Boolean, default=False),
+    Column("perms", Text, default=""),                               # JSON {key: false} of what parents may NOT do; the child edits it
     Column("last_lat", Float), Column("last_lng", Float), Column("last_acc", Float), Column("last_at", Float, default=0))
 invites = Table("invites", meta,
     Column("code", String(12), primary_key=True), Column("family_id", Integer), Column("role", String(8)), Column("created_by", Integer),
@@ -57,6 +58,11 @@ lists = Table("lists", meta,
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("text", String(120)), Column("done", Boolean, default=False),
     Column("added_by", Integer), Column("done_by", Integer, default=0), Column("created", Float))
 meta.create_all(engine)
+try:                                                                  # older databases get the new column
+    with engine.begin() as _c:
+        _c.exec_driver_sql("ALTER TABLE members ADD COLUMN perms TEXT DEFAULT ''")
+except Exception:
+    pass
 
 
 def run(stmt):

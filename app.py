@@ -109,12 +109,41 @@ def in_quiet(m, now=None):
     return (a <= local < b) if a < b else (local >= a or local < b)
 
 
-def member_view(m):
+PERMS = {"location": "see where they are", "trail": "see their location trail", "battery": "see their battery level",
+         "messages": "send them messages", "calls": "call them", "ping": 'ask "Where are you?"'}
+
+
+def perms_of(m):
+    """What parents may do with this member. Everything is allowed until the member turns it off."""
+    try:
+        off = json.loads(m["perms"] or "{}")
+    except ValueError:
+        off = {}
+    return {k: off.get(k) is not False for k in PERMS}
+
+
+def parent_may(sender, target, key):
+    """Only a parent acting on a child is limited; the child's own choices are the limit."""
+    return not (sender["role"] == "parent" and target["role"] == "child" and not perms_of(target)[key])
+
+
+def denied(target, key):
+    return err(f"{target['name']} has turned off: {PERMS[key]}.", 403, perm=key)
+
+
+def member_view(m, viewer=None):
     state = sharing_state(m)
+    perms = perms_of(m)
+    gated = bool(viewer) and viewer["role"] == "parent" and m["role"] == "child" and viewer["id"] != m["id"]
     out = {"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "battery": m["battery"], "share": state,
-           "paused_until": m["paused_until"] if state == "paused" else 0, "last_seen": m["last_seen"], "quiet": m["quiet_from"] >= 0, "location": None}
-    if state == "on" and m["last_lat"] is not None:
+           "paused_until": m["paused_until"] if state == "paused" else 0, "last_seen": m["last_seen"], "quiet": m["quiet_from"] >= 0,
+           "location": None, "perms": perms}
+    if state == "on" and m["last_lat"] is not None and not (gated and not perms["location"]):
         out["location"] = {"lat": m["last_lat"], "lng": m["last_lng"], "acc": m["last_acc"], "at": m["last_at"]}
+    if gated and not perms["location"]:
+        out["share"] = "off"
+    if gated and not perms["battery"]:
+        out["battery"] = -1
     return out
 
 
@@ -207,6 +236,9 @@ def patch_me():
             vals[k] = max(-1, min(1439, int(b[k]))) if str(b[k]).lstrip("-").isdigit() else -1
     if "tz_offset" in b and str(b["tz_offset"]).lstrip("-").isdigit():
         vals["tz_offset"] = max(-840, min(840, int(b["tz_offset"])))
+    if isinstance(b.get("perms"), dict):
+        off = {k: False for k, v in {**perms_of(g.m), **{k: bool(v) for k, v in b["perms"].items() if k in PERMS}}.items() if not v}
+        vals["perms"] = json.dumps(off)
     if vals:
         db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(**vals))
         push_family(g.m["family_id"], "member", {"id": g.m["id"]}, skip=g.m["id"])
@@ -242,7 +274,7 @@ def leave():
 def get_family():
     m = g.m
     places = db.many(select(db.places).where(db.places.c.family_id == m["family_id"]).order_by(db.places.c.id))
-    return jsonify(family=family_view(m), me=m["id"], members=[member_view(x) for x in family_members(m["family_id"])],
+    return jsonify(family=family_view(m), me=m["id"], members=[member_view(x, m) for x in family_members(m["family_id"])],
                    places=[{k: p[k] for k in ("id", "name", "emoji", "lat", "lng", "radius")} for p in places], ice_servers=ice_servers(), version_code=VERSION_CODE)
 
 
@@ -336,6 +368,8 @@ def history():
         return err("Not found.", 404)
     if target["id"] != g.m["id"] and not (g.m["role"] == "parent" and target["role"] == "child"):
         return err("You can only see your own trail, or a child's if you are a parent.", 403)
+    if not parent_may(g.m, target, "trail"):
+        return denied(target, "trail")
     hours = max(1, min(24, qint("hours", 12)))
     rows = db.many(select(db.locations).where(db.locations.c.member_id == target["id"], db.locations.c.at > time.time() - hours * 3600).order_by(db.locations.c.at))
     if len(rows) > 300:
@@ -373,6 +407,8 @@ def send_message():
         return err("Not found.", 404)
     if kind == "text" and not body:
         return err("Write something first.")
+    if to_id and kind in ("text", "heart") and not parent_may(m, same_family(to_id), "messages"):
+        return denied(same_family(to_id), "messages")
     if limited(f"msg:{m['id']}", 120):
         return err("Slow down a little.", 429)
     lat = float(b["lat"]) if kind in ("checkin", "sos") and b.get("lat") is not None else None
@@ -383,6 +419,8 @@ def send_message():
     row = db.one(select(db.messages).where(db.messages.c.id == mid))
     for x in family_members(m["family_id"]):
         if x["id"] == m["id"] or (to_id and x["id"] != to_id):
+            continue
+        if kind in ("text", "heart") and not parent_may(m, x, "messages"):
             continue
         push(x["id"], "message", {**msg_view(row), "name": m["name"], "emoji": m["emoji"], "quiet": in_quiet(x) and kind != "sos", "urgent": kind == "sos"})
     return jsonify(message=msg_view(row))
@@ -410,6 +448,8 @@ def ask_where():
     target = same_family(b.get("to"))
     if not target or target["id"] == m["id"]:
         return err("Not found.", 404)
+    if not parent_may(m, target, "ping"):
+        return denied(target, "ping")
     if limited(f"ping:{m['id']}:{target['id']}", 6):
         return err("You asked a few times already. Give them a moment.", 429)
     pid = db.run(insert(db.pings).values(family_id=m["family_id"], from_id=m["id"], to_id=target["id"], status="pending", created=time.time()))
@@ -565,6 +605,8 @@ def start_call():
     offer = str(b.get("offer") or "")[:20000]
     if not callee or callee["id"] == m["id"] or not offer:
         return err("Pick someone to call.")
+    if not parent_may(m, callee, "calls"):
+        return denied(callee, "calls")
     urgent = bool(b.get("urgent"))
     if in_quiet(callee) and not urgent:
         return err(f"{callee['name']} has quiet hours on right now. You can ring anyway if it is important.", 409, quiet=True)
