@@ -283,6 +283,14 @@ class Misc(Base):
     def test_the_website_and_health(self):
         self.assertEqual(self.c.get("/").status_code, 200)
         self.assertEqual(self.c.get("/health").get_json()["ok"], True)
+        web = self.c.get("/app")                                              # the laptop version
+        self.assertEqual(web.status_code, 200)
+        self.assertIn(b"Homebase", web.data)
+        web.close()
+        for asset in ("web.js", "calls.js", "web.css"):
+            r = self.c.get("/static/web/" + asset)
+            self.assertEqual(r.status_code, 200, asset)
+            r.close()
         dl = self.c.get("/download")                                          # the app itself is served from static/homebase.apk
         self.assertEqual(dl.status_code, 200 if os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "homebase.apk")) else 404)
         dl.close()

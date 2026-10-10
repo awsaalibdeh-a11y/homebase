@@ -684,6 +684,12 @@ def home():
     return render_template("index.html", has_apk=has_apk, version=VERSION_CODE)
 
 
+@app.get("/app")
+def web_app():
+    """Homebase on a laptop: the same family, map, chat and calls in a browser."""
+    return send_from_directory(os.path.join(BASE, "static", "web"), "index.html")
+
+
 @app.get("/download")
 def download():
     path = os.path.join(BASE, "static")
@@ -695,6 +701,13 @@ def download():
 @app.get("/health")
 def health():
     return jsonify(ok=True, version=VERSION_CODE)
+
+
+@app.after_request
+def fresh_web_client(resp):
+    if request.path == "/app" or request.path.startswith("/static/web/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 if __name__ == "__main__":

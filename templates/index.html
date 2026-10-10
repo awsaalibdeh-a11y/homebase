@@ -28,8 +28,8 @@
   <div class="logo"><i>🏠</i> Homebase</div>
   <h1>Stay close. <em>Stay yourself.</em></h1>
   <p class="lead">A family app that lets your parents see where you are, message you and call you, and that is honest about all of it. Everything it shares is on your screen, you can pause it whenever you need, and it never spies.</p>
-  {% if has_apk %}<p><a class="btn" href="/download">⬇ Download for Android</a> <span class="muted">Version {{ version }} · Android 8 or newer</span></p>
-  {% else %}<p><span class="btn off">Android app coming soon</span></p>{% endif %}
+  {% if has_apk %}<p><a class="btn" href="/download">⬇ Download for Android</a> <a class="btn" href="/app">💻 Use it on your laptop</a> <span class="muted">Version {{ version }} · Android 8 or newer</span></p>
+  {% else %}<p><span class="btn off">Android app coming soon</span> <a class="btn" href="/app">💻 Use it on your laptop</a></p>{% endif %}
 
   <div class="grid">
     <div class="card"><span>📍</span><b>Location you can see</b>Parents see you on a map. A notification on your tablet always says it is on, and you can pause it.</div>

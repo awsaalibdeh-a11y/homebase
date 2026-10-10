@@ -5,6 +5,7 @@ A family app for Android (location, messages, calls that ring) that is built to 
 - `app.py`, `db.py`: the server (Flask, SQLite locally, Postgres via `DATABASE_URL`). Messages and calls reach phones through a long-poll event queue, so no Firebase or Google account is needed.
 - `android/`: the app (Kotlin, Jetpack Compose, WebRTC audio calls, OpenStreetMap). Build with `./gradlew assembleDebug -PhomebaseServer=https://your-server`.
 - `static/homebase.apk`: the build served from `/download`.
+- `static/web/`: Homebase on a laptop, served at `/app` (same accounts, map, chat, check-ins, permissions and WebRTC calls, in a browser).
 
 ## Principles
 - Everything shared is visible on the child's screen. There is no hidden mode.
