@@ -71,7 +71,7 @@ class Family(Base):
     def test_the_family_sees_everyone_and_defaults_are_fair(self):
         fam = self.get(self.kid, "/api/family").get_json()
         by = {m["name"]: m for m in fam["members"]}
-        self.assertEqual((by["Sam"]["share"], by["Mum"]["share"]), ("on", "off"))          # parents are not tracked unless they choose to
+        self.assertEqual((by["Sam"]["share"], by["Mum"]["share"]), ("on", "on"))           # everyone starts on the map, and anyone can switch it off
         self.assertEqual(self.get(self.kid, "/api/me").get_json()["me"]["role"], "child")
 
 
@@ -287,7 +287,13 @@ class Misc(Base):
         self.assertEqual(web.status_code, 200)
         self.assertIn(b"Homebase", web.data)
         web.close()
-        for asset in ("web.js", "calls.js", "web.css"):
+        sw = self.c.get("/sw.js")                                             # the offline worker, served from the root so it covers the site
+        self.assertEqual((sw.status_code, sw.headers.get("Service-Worker-Allowed")), (200, "/"))
+        sw.close()
+        mf = self.c.get("/manifest.webmanifest")
+        self.assertEqual((mf.status_code, mf.get_json()["start_url"]), (200, "/app"))
+        mf.close()
+        for asset in ("web.js", "calls.js", "web.css", "icon-192.png"):
             r = self.c.get("/static/web/" + asset)
             self.assertEqual(r.status_code, 200, asset)
             r.close()

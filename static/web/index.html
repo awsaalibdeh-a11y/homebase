@@ -3,9 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0b">
+<meta name="theme-color" content="#2f6df6">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Homebase</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2716%27 fill=%27%23111113%27/%3E%3Cpath d=%27M14 34 32 18l18 16v14H14z%27 fill=%27none%27 stroke=%27%23fff%27 stroke-width=%273.5%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/web/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/web/icon-192.png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="/static/web/web.css">
 </head>
@@ -14,34 +18,32 @@
 <div id="auth" class="hidden"><div class="authbox" id="authbox"></div></div>
 
 <div id="app" class="hidden">
-  <header class="top">
-    <div class="brand">🏠 Homebase <small id="famname"></small></div>
+  <div id="map"></div>
+  <div class="topbar">
+    <div class="pill brand">🏠 <b>Homebase</b> <small id="famname"></small></div>
     <div class="grow"></div>
-    <div class="pillgroup">
-      <button class="btn sm" id="bOk" title="Tell everyone you are OK">✅ <span>I'm OK</span></button>
-      <button class="btn sm" id="bLate" title="Running late">⏰ <span>Late</span></button>
-      <button class="btn sm bad" id="bSos" title="Hold for 2 seconds">🆘 <span>SOS (hold)</span></button>
+    <div class="pill actions">
+      <button id="bOk" title="Tell everyone you are OK">✅ <span>I'm OK</span></button>
+      <button id="bLate" title="Running late">⏰ <span>Late</span></button>
+      <button id="bSos" class="sos" title="Hold for 2 seconds">🆘 <span>SOS</span></button>
+      <i class="sep"></i>
+      <button id="bInvite">＋ <span>Invite</span></button>
+      <button id="bMe" title="Settings">☰ <span>Menu</span></button>
     </div>
-    <button class="btn sm" id="bInvite">＋ Invite</button>
-    <button class="btn sm" id="bMe">☰ Me</button>
-  </header>
-  <main class="layout" id="layout" data-tab="map">
-    <aside class="col" id="side"></aside>
-    <section id="mapwrap">
-      <div id="map"></div>
-      <div class="maptools">
-        <button class="btn sm" id="bFit">Show everyone</button>
-        <button class="btn sm" id="bAddPlace">＋ Place</button>
-        <button class="btn sm" id="bTheme" title="Switch the map between dark and light">◐ Map</button>
-      </div>
-    </section>
-    <aside class="col" id="chat">
-      <div class="thr" id="thr"></div>
-      <div id="msgs"></div>
-      <form class="composer" id="composer"><input class="field" id="msgIn" placeholder="Write a message" autocomplete="off" maxlength="600"><button class="btn solid" type="submit">Send</button></form>
-    </aside>
-  </main>
-  <nav class="tabs" id="tabs"><button data-t="map" class="on">Map</button><button data-t="family">Family</button><button data-t="chat">Chat</button></nav>
+  </div>
+  <aside class="panel" id="side"></aside>
+  <aside class="panel hidden" id="chat">
+    <div class="chathead"><h2>Messages</h2><button class="btn sm" id="chatX" aria-label="Close messages">✕</button></div>
+    <div class="thr" id="thr"></div>
+    <div id="msgs"></div>
+    <form class="composer" id="composer"><input class="field" id="msgIn" placeholder="Write a message" autocomplete="off" maxlength="600"><button class="btn solid" type="submit">Send</button></form>
+  </aside>
+  <div class="pill dock">
+    <button class="sq" id="bZoomOut" aria-label="Zoom out">−</button><button class="sq" id="bZoomIn" aria-label="Zoom in">+</button>
+    <button id="bFit">Show everyone</button><button id="bAddPlace">＋ Place</button><button id="bLayer" title="Map style">◐ Map</button>
+  </div>
+  <button class="fab" id="chatFab">💬 <span class="t">Messages</span> <span class="n hidden" id="fabN"></span></button>
+  <div id="offline" class="hidden"></div>
 </div>
 
 <div id="over"></div>

@@ -25,6 +25,9 @@ class Store(context: Context) {
     var familyName: String
         get() = p.getString("familyName", "") ?: ""
         set(v) = p.edit().putString("familyName", v).apply()
+    var familyCache: String
+        get() = p.getString("familyCache", "") ?: ""
+        set(v) = p.edit().putString("familyCache", v).apply()
     var cursor: Int
         get() = p.getInt("cursor", -1)
         set(v) = p.edit().putInt("cursor", v).apply()

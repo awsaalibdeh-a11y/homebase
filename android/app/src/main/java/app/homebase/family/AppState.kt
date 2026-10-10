@@ -26,9 +26,14 @@ data class CallUi(
     val note: String = "",
 )
 
+/** Whether the phone could reach the server the last time it tried. Read by the screens to say "Last known" instead of "Live". */
+object Connectivity { @Volatile var online = true }
+
 /** The family as this phone knows it right now. The service and the screens both read and write it. */
 class AppState(val store: Store, val api: Api) {
-    val family = MutableStateFlow<FamilyResp?>(null)
+    private val cacheJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    val family = MutableStateFlow<FamilyResp?>(runCatching { store.familyCache.takeIf { it.isNotEmpty() }?.let { cacheJson.decodeFromString<FamilyResp>(it) } }.getOrNull())   // what we saw last, so the map is never empty offline
+    val online = MutableStateFlow(true)
     val threads = MutableStateFlow<Map<Int, List<Message>>>(emptyMap())
     val items = MutableStateFlow<List<Item>>(emptyList())
     val call = MutableStateFlow<CallUi?>(null)
@@ -40,10 +45,17 @@ class AppState(val store: Store, val api: Api) {
     val me: Member? get() = family.value?.members?.firstOrNull { it.id == store.myId }
     fun member(id: Int): Member? = family.value?.members?.firstOrNull { it.id == id }
 
-    suspend fun refreshFamily(): Boolean = runCatching { api.family() }.onSuccess {
-        family.value = it
-        store.familyName = it.family.name
-    }.isSuccess
+    suspend fun refreshFamily(): Boolean {
+        val r = runCatching { api.family() }
+        Connectivity.online = r.isSuccess
+        online.value = r.isSuccess
+        r.onSuccess {
+            family.value = it
+            store.familyName = it.family.name
+            runCatching { store.familyCache = cacheJson.encodeToString(FamilyResp.serializer(), it) }
+        }
+        return r.isSuccess
+    }
 
     suspend fun loadThread(with: Int) {
         runCatching { api.messages(with, 0) }.onSuccess { list -> threads.update { it + (with to list) } }

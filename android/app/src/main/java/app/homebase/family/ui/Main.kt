@@ -24,9 +24,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import app.homebase.family.Connectivity
 import app.homebase.family.Member
 import app.homebase.family.hb
 
@@ -34,7 +41,7 @@ fun memberLine(m: Member): String {
     val where = when {
         m.share == "paused" -> "Location paused"
         m.share == "off" -> "Not sharing location"
-        m.location != null -> "Seen ${timeAgo(m.location.at)}"
+        m.location != null -> (if (Connectivity.online && System.currentTimeMillis() / 1000.0 - m.lastSeen < 150) "Live · " else "Last known · ") + timeAgo(m.location.at)
         else -> "Waiting for a location"
     }
     val line = if (m.battery in 0..100) "$where · 🔋 ${m.battery}%" else where
@@ -73,6 +80,9 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
                 2 -> ChatTab(nav)
                 else -> MeTab(nav)
             }
+            val online by state.online.collectAsState()
+            if (!online) Text("📡 Offline · showing the last update", color = Color.White, style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp).background(Color(0xFF1C2230), RoundedCornerShape(99.dp)).padding(horizontal = 16.dp, vertical = 8.dp))
         }
     }
 }

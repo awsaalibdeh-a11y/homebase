@@ -163,7 +163,7 @@ def ice_servers():
 def new_member(fid, name, role, emoji):
     token = secrets.token_urlsafe(32)
     mid = db.run(insert(db.members).values(family_id=fid, name=clean(name, 40) or "Me", role=role, emoji=clean(emoji, 8) or ("🧒" if role == "child" else "🧑"),
-                                           token_hash=db.hash_token(token), created=time.time(), share_state="on" if role == "child" else "off"))
+                                           token_hash=db.hash_token(token), created=time.time(), share_state="on"))                  # everyone starts on the map; each person still chooses what their device sends
     return token, db.one(select(db.members).where(db.members.c.id == mid))
 
 
@@ -688,6 +688,20 @@ def home():
 def web_app():
     """Homebase on a laptop: the same family, map, chat and calls in a browser."""
     return send_from_directory(os.path.join(BASE, "static", "web"), "index.html")
+
+
+@app.get("/sw.js")
+def service_worker():
+    """The offline worker lives at the root so it can cover the whole site."""
+    resp = send_from_directory(os.path.join(BASE, "static", "web"), "sw.js", mimetype="text/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.get("/manifest.webmanifest")
+def web_manifest():
+    return send_from_directory(os.path.join(BASE, "static", "web"), "manifest.webmanifest", mimetype="application/manifest+json")
 
 
 @app.get("/download")
