@@ -11,6 +11,8 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 url = os.environ.get("DATABASE_URL", f"sqlite:///{os.path.join(BASE, 'homebase.db')}")
 if url.startswith("postgres://"):
     url = url.replace("postgres://", "postgresql://", 1)
+if url.startswith("postgresql://"):                                    # name the driver we install; newer SQLAlchemy defaults to psycopg 3
+    url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
 engine = create_engine(url, pool_pre_ping=True, **({} if url.startswith("sqlite") else {"pool_size": 5, "max_overflow": 10}))
 meta = MetaData()
 
