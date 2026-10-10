@@ -178,6 +178,12 @@ fun ScreenTimeCard(nav: Nav) {
         }
         TextButton({ nav.go(Screen.ScreenTime(store.myId)) }) { Text("See details") }
     }
+    val famNow by ctx.hb.state.family.collectAsState()
+    val mine = famNow?.members?.firstOrNull { it.id == store.myId }?.blocks.orEmpty()
+    if (mine.isNotEmpty()) SoftCard {
+        Text("🚫 Grounded apps", style = MaterialTheme.typography.titleMedium)
+        mine.forEach { b -> Text("${b.label} until ${clockOf(b.until)}", color = Muted) }
+    }
     if (!android.provider.Settings.canDrawOverlays(ctx)) SoftCard {
         Text("Parent locks", style = MaterialTheme.typography.titleMedium)
         Text("A parent can lock your device for a while (never more than 4 hours a day). To show the lock over other apps, allow \"Display over other apps\" for Homebase. You can always ask to be unlocked or send an SOS.", color = Muted)

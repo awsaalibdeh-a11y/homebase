@@ -43,6 +43,8 @@ class HomebaseService : Service() {
     private var lastSent: Location? = null
     private var lastSentAt = 0L
     private var screenJob: Job? = null
+    private var guardJob: Job? = null
+    private val blockGuard by lazy { BlockGuard(this) }
     private val lockOverlay by lazy {
         app.homebase.family.ui.LockOverlay(this, onAsk = { scope.launch { runCatching { hb.api.askUnlock() } } },
             onSos = { scope.launch { runCatching { hb.api.send("sos", "I need help", 0) } } })
@@ -56,6 +58,15 @@ class HomebaseService : Service() {
         goForeground()
         if (loop?.isActive != true) loop = scope.launch { eventLoop() }
         if (watchers?.isActive != true) watchers = scope.launch { watchState() }
+        if (guardJob?.isActive != true) guardJob = scope.launch {
+            while (isActive) {
+                runCatching {
+                    val me = hb.state.family.value?.members?.firstOrNull { it.id == hb.store.myId }
+                    blockGuard.tick(if (hb.store.isParent) emptyList() else me?.blocks.orEmpty())
+                }
+                delay(2500)
+            }
+        }
         if (screenJob?.isActive != true) screenJob = scope.launch { while (isActive) { runCatching { screenTracker.tick() }; delay(30_000) } }
         return START_STICKY
     }

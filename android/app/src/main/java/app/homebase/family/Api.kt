@@ -90,6 +90,11 @@ class Api(private val store: Store) {
     suspend fun choreApprove(id: Int, ok: Boolean) { raw("POST", "/api/chores/$id/approve", obj { put("ok", ok) }) }
     suspend fun choreDelete(id: Int) { raw("DELETE", "/api/chores/$id") }
     suspend fun summary(member: Int): SummaryResp = ask("GET", "/api/summary?member=$member")
+    suspend fun blocks(member: Int): BlocksResp = ask("GET", "/api/blocks?member=$member")
+    suspend fun ground(member: Int, minutes: Int, apps: List<String>) {
+        raw("POST", "/api/blocks", obj { put("member", member); put("minutes", minutes); put("apps", kotlinx.serialization.json.buildJsonArray { apps.forEach { a -> add(buildJsonObject { put("key", a.trim().lowercase()); put("label", a.trim()) }) } }) })
+    }
+    suspend fun liftBlock(id: Int) { raw("DELETE", "/api/blocks/$id") }
     suspend fun history(member: Int, hours: Int = 12): HistoryResp = ask("GET", "/api/history?member=$member&hours=$hours")
 
     suspend fun deleteHistory() { raw("DELETE", "/api/history") }

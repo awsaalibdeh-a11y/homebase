@@ -169,7 +169,7 @@ function renderSide() {
   const people = others.map(m => {
     const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
     const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>Trail</button>${m.role === "child" && isParent() ? `<button class="btn sm" data-act="ground" data-id="${m.id}">${(m.blocks || []).length ? "🚫 Grounded (" + m.blocks.length + ")" : "Ground apps"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="lock" data-id="${m.id}">${m.lock ? "🔒 Locked" : "Lock device"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="screen" data-id="${m.id}" ${may(m, "screentime") ? "" : "disabled"}>Screen time</button>` : ""}</div>` : "";
-    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${esc(m.emoji)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small></span>${m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`}</button>${offTags(m)}${acts}</div>`;
+    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${esc(m.emoji)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${deviceLine(m)}</span>${m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`}</button>${offTags(m)}${acts}</div>`;
   }).join("") || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press Invite to add someone." : ""}</div>`;
   const places = S.places.map(p => `<div class="place"><span>${esc(p.emoji)} ${esc(p.name)} <small>${p.radius} m</small></span>${isParent() ? `<button class="btn sm" data-act="delplace" data-id="${p.id}">Remove</button>` : ""}</div>`).join("") || `<div class="empty">No saved places yet.${isParent() ? " Press ＋ Place on the map." : ""}</div>`;
   const items = S.items.map(i => `<label class="item ${i.done ? "done" : ""}"><input type="checkbox" data-act="tick" data-id="${i.id}" ${i.done ? "checked" : ""}><span style="flex:1">${esc(i.text)}</span><button class="link" data-act="delitem" data-id="${i.id}" title="Delete" aria-label="Delete">✕</button></label>`).join("");
@@ -659,4 +659,12 @@ async function groundDialog(id) {
       if (!list.length) return toast("Pick at least one app.");
       try { await api("/api/blocks", "POST", { member: id, minutes: mins, apps: list.map(n => ({ key: n.toLowerCase(), label: n })) }); toast(m.name + " is grounded from " + list.join(", ")); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } };
   });
+}
+
+
+/* ---------- linked computers: when each last reported, so a switched-off tracker is noticed ---------- */
+function deviceLine(m) {
+  const ds = m.devices || []; if (!ds.length) return "";
+  const now = Date.now() / 1000;
+  return ds.map(d => { const quiet = now - d.last_seen > 20 * 60; return `<small class="${quiet ? "devwarn" : ""}">${d.kind === "windows" ? "💻" : "📱"} ${esc(d.name)} · ${d.last_seen ? (quiet ? "quiet for " : "reported ") + ago(d.last_seen) : "not reported yet"}</small>`; }).join("");
 }

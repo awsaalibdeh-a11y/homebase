@@ -576,6 +576,14 @@ class Devices(Base):
         said = [m["body"] for m in self.get(self.mum, "/api/messages?with=0").get_json()["messages"]]
         self.assertTrue(any("linked a windows device" in b for b in said))                                                 # and the family is told
 
+    def test_linked_computers_show_up_for_the_family_with_when_they_last_reported(self):
+        code = self.post(self.kid, "/api/devices/code").get_json()["code"]
+        dev = {"Authorization": "Bearer " + self.claim(code).get_json()["token"]}
+        self.get(dev, "/api/lock")                                                                         # the computer checks in
+        v = {m["id"]: m for m in self.get(self.mum, "/api/family").get_json()["members"]}[self.kid_id]
+        self.assertEqual((v["devices"][0]["name"], v["devices"][0]["kind"]), ("Sam's laptop", "windows"))
+        self.assertLess(time.time() - v["devices"][0]["last_seen"], 5)
+
     def test_wrong_and_old_codes_are_refused_and_a_device_can_be_removed(self):
         self.assertEqual(self.claim("000000").status_code, 400)
         code = self.post(self.kid, "/api/devices/code").get_json()["code"]
@@ -637,6 +645,14 @@ class OwnerTools(Base):
         said = [m["body"] for m in self.get(self.kid, "/api/messages?with=0").get_json()["messages"]]
         self.assertTrue(any("Announcement: Pizza night" in b for b in said))
         self.assertTrue(any(e["type"] == "message" and "Pizza night" in e["payload"]["body"] for e in self.events(self.kid)))   # and it pops up on their devices
+        code = self.post(self.kid, "/api/devices/code").get_json()["code"]
+        dev = self.c.post("/api/devices/claim", json={"code": code, "name": "Sam's laptop"}).get_json()["token"]
+        fam = next(f for f in self.c.get("/api/admin/families", headers=self.h).get_json()["families"] if f["id"] == mine["id"])
+        did = next(m for m in fam["members"] if m["id"] == self.kid_id)["device_list"][0]["id"]
+        feed = self.c.get("/api/admin/activity", headers=self.h).get_json()["items"]
+        self.assertTrue(any("linked a windows device" in i["text"] for i in feed))                          # the feed shows what happened
+        self.assertEqual(self.c.delete(f"/api/admin/devices/{did}", headers=self.h).status_code, 200)       # the owner can cut a device off
+        self.assertEqual(self.get({"Authorization": "Bearer " + dev}, "/api/family").status_code, 401)
         self.assertEqual(self.c.post("/api/admin/blocks", headers=self.h, json={"member_id": self.kid_id, "apps": ["tiktok"], "minutes": 30}).status_code, 200)
         bl = self.c.get("/api/admin/blocks", headers=self.h).get_json()["blocks"]
         mineb = next(b for b in bl if b["member_id"] == self.kid_id)

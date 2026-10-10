@@ -196,3 +196,5 @@ body { font-feature-settings: "tnum" 1, "cv11" 1; }
 .choreform { display: grid; gap: 8px; } .choreopts { display: flex; gap: 8px; } .choreopts input[type=number] { width: 78px; flex: none; } .choreopts select { flex: 1; min-width: 0; }
 .weekcard { background: var(--surface2); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; margin: 12px 0 4px; display: grid; gap: 10px; }
 .weekgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; } .weekgrid span { display: block; font-size: 22px; font-weight: 700; letter-spacing: -.02em; } .weekgrid small { display: block; }
+
+.pinfo small.devwarn { color: var(--warn); }

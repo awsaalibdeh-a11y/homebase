@@ -158,6 +158,9 @@ def member_view(m, viewer=None):
         out["share"] = "off"
     if gated and not perms["battery"]:
         out["battery"] = -1
+    if m["role"] == "child" and viewer and (viewer["id"] == m["id"] or viewer["role"] == "parent"):          # a linked computer that goes quiet is visible to the family
+        out["devices"] = [{"id": d["id"], "name": d["name"], "kind": d["kind"], "last_seen": d["last_seen"]}
+                          for d in db.many(select(db.devices).where(db.devices.c.member_id == m["id"]).order_by(db.devices.c.id))]
     return out
 
 
@@ -866,7 +869,8 @@ def admin_families():
     for f in db.many(select(db.families).order_by(db.families.c.id.desc())):
         ms = family_members(f["id"])
         out.append({"id": f["id"], "name": f["name"], "created": f["created"], "members": [{"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "last_seen": m["last_seen"],
-                    "devices": len(db.many(select(db.devices.c.id).where(db.devices.c.member_id == m["id"]))), "lock": lock_view(m), "blocks": block_views(m)} for m in ms]})
+                    "devices": len(db.many(select(db.devices.c.id).where(db.devices.c.member_id == m["id"]))), "device_list": [{"id": d["id"], "name": d["name"], "kind": d["kind"], "last_seen": d["last_seen"]} for d in db.many(select(db.devices).where(db.devices.c.member_id == m["id"]))],
+                    "lock": lock_view(m), "blocks": block_views(m)} for m in ms]})
     return jsonify(families=out, now=time.time())
 
 
@@ -943,6 +947,31 @@ def admin_lift_block(bid):
     db.run(update(db.blocks).where(db.blocks.c.id == bid).values(ended=time.time()))
     push_family(r["family_id"], "member", {"id": r["member_id"], "blocks": True})
     return jsonify(ok=True)
+
+
+@app.delete("/api/admin/devices/<int:did>")
+def admin_remove_device(did):
+    if (bad := admin_gate()):
+        return bad
+    d = db.one(select(db.devices).where(db.devices.c.id == did))
+    if not d:
+        return err("No such device.", 404)
+    m = db.one(select(db.members).where(db.members.c.id == d["member_id"]))
+    db.run(delete(db.devices).where(db.devices.c.id == did))
+    if m:
+        say(m["family_id"], m["id"], f"The owner removed {m['name']}'s device: {d['name']}")
+    return jsonify(ok=True)
+
+
+@app.get("/api/admin/activity")
+def admin_activity():
+    """The latest things that happened in any family (check-ins, locks, jobs, grounding, linked devices...), newest first."""
+    if (bad := admin_gate()):
+        return bad
+    names = {f["id"]: f["name"] for f in db.many(select(db.families))}
+    who = {m["id"]: m["name"] for m in db.many(select(db.members))}
+    rows = db.many(select(db.messages).where(db.messages.c.kind.in_(["system", "sos", "late", "checkin"])).order_by(db.messages.c.id.desc()).limit(60))
+    return jsonify(items=[{"at": r["created"], "family": names.get(r["family_id"], "?"), "kind": r["kind"], "who": who.get(r["from_id"], ""), "text": r["body"]} for r in rows])
 
 
 @app.get("/api/admin/locks")

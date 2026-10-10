@@ -22,6 +22,7 @@ data class Member(
     val perms: Map<String, Boolean> = emptyMap(),
     val home: Boolean = false,
     val lock: LockInfo? = null,
+    val blocks: List<BlockInfo> = emptyList(),
 ) {
     val isParent get() = role == "parent"
     /** Whether a parent may do [key] with this person. Everything is allowed until they turn it off. */
@@ -127,6 +128,12 @@ data class RuleKid(val id: Int, val name: String = "", val emoji: String = "🙂
 
 @Serializable
 data class RulesResp(val text: String = "", val limits: Map<String, Int> = emptyMap(), val children: List<RuleKid> = emptyList())
+
+@Serializable
+data class BlockInfo(val id: Int = 0, val key: String = "", val label: String = "", val until: Double = 0.0)
+
+@Serializable
+data class BlocksResp(val blocks: List<BlockInfo> = emptyList())
 
 @Serializable
 data class LockInfo(val id: Int = 0, val until: Double = 0.0, @SerialName("by_name") val byName: String = "a parent")
