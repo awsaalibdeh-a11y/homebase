@@ -57,6 +57,7 @@ class App : ApplicationContext
     string token { get { return cur == null ? "" : cur.Token; } }
     Control sync;                                                            // lets the background loop open windows on the UI thread
     DateTime lastPrompt = DateTime.MinValue; bool wasAway; DateTime lastApps = DateTime.MinValue;
+    volatile string nowDoing = "nothing yet";
     string TodayFile { get { return Path.Combine(Dir, "today_" + Regex.Replace(cur == null ? "x" : cur.Name, "[^A-Za-z0-9]", "_") + ".txt"); } }
     NotifyIcon tray;
     Dictionary<string, string[]> apps = new Dictionary<string, string[]>();      // key -> label, category, seconds
@@ -96,6 +97,7 @@ class App : ApplicationContext
         string code = null;
         for (int i = 0; i < args.Length; i++)
         {
+            if (args[i] == "--selftest") { SelfTest(); Environment.Exit(0); }
             if (args[i] == "--remove") { Remove(true); Environment.Exit(0); }
             if (args[i] == "--code" && i + 1 < args.Length) code = args[i + 1];
             if (args[i] == "--server" && i + 1 < args.Length) server = args[i + 1].TrimEnd('/');
@@ -118,6 +120,7 @@ class App : ApplicationContext
         if (profiles.Count > 1) PickPerson(false);                              // two kids, one laptop: ask who is sitting down
         LoadToday();
         MakeTray();
+        Say("Homebase is on", (cur == null ? "" : cur.Name + ": ") + "counting only playing and watching. Your family sees the same numbers.");
         Microsoft.Win32.SystemEvents.SessionSwitch += delegate (object o, Microsoft.Win32.SessionSwitchEventArgs e) { if (profiles.Count > 1 && (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock || e.Reason == Microsoft.Win32.SessionSwitchReason.SessionLogon)) sync.BeginInvoke(new Action(delegate { PickPerson(false); })); };
         new Thread(Loop) { IsBackground = true }.Start();
     }
@@ -275,6 +278,9 @@ class App : ApplicationContext
         ToolStripMenuItem today = new ToolStripMenuItem("Today: counting...");
         m.Opening += delegate { who.Text = cur == null ? "Homebase screen time is on" : "Counting for " + cur.Name; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
         m.Items.Add(today);
+        ToolStripMenuItem doing = new ToolStripMenuItem("What am I counting now?");
+        doing.Click += delegate { tray.ShowBalloonTip(6000, "Right now", nowDoing, ToolTipIcon.Info); };
+        m.Items.Add(doing);
         m.Items.Add("Who is using this computer...", null, delegate { sync.BeginInvoke(new Action(delegate { PickPerson(true); })); });
         m.Items.Add("Open Homebase", null, delegate { try { Process.Start(server + "/app"); } catch { } });
         m.Items.Add(new ToolStripSeparator());
@@ -390,7 +396,62 @@ class App : ApplicationContext
         if (wasAway && idleNow < 20 && profiles.Count > 1) { wasAway = false; sync.BeginInvoke(new Action(delegate { PickPerson(false); })); }
         if (locked) return;
         try { Count(elapsed); } catch (Exception e) { Log("count: " + e.Message); }
-        if (dirty && (now - lastSend).TotalSeconds >= (Environment.GetEnvironmentVariable("HB_TICK") != null ? 1 : 120)) { if (Send()) { dirty = false; lastSend = now; } SaveToday(); }
+        if (dirty && (now - lastSend).TotalSeconds >= (Environment.GetEnvironmentVariable("HB_TICK") != null ? 1 : 25)) { if (Send()) { dirty = false; lastSend = now; } SaveToday(); }
+    }
+
+    static void SelfTest()
+    {
+        var cases = new object[][] {
+            // procName, procTitle, groundKey, groundLabel, shouldMatch
+            new object[] { "RobloxPlayerBeta", "Roblox", "robloxplayerlauncher", "Roblox", true },   // launcher grounded, game process running
+            new object[] { "RobloxPlayerBeta", "Roblox", "roblox", "Roblox", true },
+            new object[] { "javaw", "Minecraft 1.21", "minecraft", "Minecraft", true },               // Minecraft runs as javaw, matched by title
+            new object[] { "FortniteClient-Win64-Shipping", "Fortnite", "fortnite", "Fortnite", true },
+            new object[] { "Discord", "general - Discord", "discord", "Discord", true },
+            new object[] { "notepad", "Untitled - Notepad", "notepad", "Notepad", true },
+            new object[] { "steamwebhelper", "Steam", "steam", "Steam", true },
+            new object[] { "Code", "file.cs - Visual Studio Code", "roblox", "Roblox", false },        // homework app not grounded
+            new object[] { "WINWORD", "Essay - Word", "minecraft", "Minecraft", false },
+            new object[] { "chrome", "Homework - Google Docs", "roblox", "Roblox", false },
+        };
+        int ok = 0;
+        foreach (var c in cases)
+        {
+            bool got = MatchesBlock((string)c[0], (string)c[1], (string)c[2], (string)c[3]);
+            bool want = (bool)c[4];
+            Console.WriteLine((got == want ? "PASS " : "FAIL ") + c[0] + " + ground[" + c[3] + "] -> " + got + " (want " + want + ")");
+            if (got == want) ok++;
+        }
+        Console.WriteLine(ok + "/" + cases.Length + " passed");
+    }
+
+    // only letters and digits, lower case: so "Google Chrome", "google-chrome" and "GoogleChrome" all compare the same
+    static string Norm(string s) { if (s == null) return ""; var sb = new StringBuilder(); foreach (char ch in s.ToLower()) if (char.IsLetterOrDigit(ch)) sb.Append(ch); return sb.ToString(); }
+
+    // the words in a label worth matching on, e.g. "Roblox Player" -> {roblox, player}; drops tiny/common words
+    static List<string> Words(string label)
+    {
+        var outp = new List<string>();
+        if (label == null) return outp;
+        foreach (string w in label.ToLower().Split(new[] { ' ', '-', '_', '.', ':', '(', ')', '[', ']', '/' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string n = Norm(w);
+            if (n.Length >= 3 && n != "app" && n != "the" && n != "for" && n != "pro" && n != "launcher" && n != "player" && n != "beta" && n != "game" && n != "client" && n != "desktop") outp.Add(n);
+        }
+        return outp;
+    }
+
+    // Does a running process (its exe name + window title) belong to a grounded app (its key + friendly label)?
+    // Forgiving on purpose: a launcher and the game it starts often have different exe names (Roblox -> RobloxPlayerBeta),
+    // so we also match on the app's name words and on the window title.
+    public static bool MatchesBlock(string procName, string procTitle, string key, string label)
+    {
+        string pn = Norm(procName), pt = Norm(procTitle), kn = Norm(key);
+        if (kn.Length >= 3 && pn.Length >= 3 && (pn.Contains(kn) || kn.Contains(pn))) return true;     // exe names overlap
+        if (kn.Length >= 4 && pt.Contains(kn)) return true;                                            // the window is titled like the app
+        foreach (string w in Words(label))
+            if (pn.Contains(w) || (pt.Length > 0 && pt.Contains(w))) return true;                       // the app's name shows up in the process or its window
+        return false;
     }
 
     // grounded apps: close them (or minimise a grounded website) and say why
@@ -399,18 +460,25 @@ class App : ApplicationContext
         int st; string txt = Http("GET", "/api/blocks", null, out st); if (st != 200) return;
         var d = Json.Deserialize<Dictionary<string, object>>(txt);
         if (!d.ContainsKey("blocks")) return;
+        Process[] procs = Process.GetProcesses();
         foreach (object o in (System.Collections.ArrayList)d["blocks"])
         {
-            var b = (Dictionary<string, object>)o; string key = Convert.ToString(b["key"]).ToLower(), label = Convert.ToString(b["label"]);
+            var b = (Dictionary<string, object>)o; string key = Convert.ToString(b["key"]), label = Convert.ToString(b["label"]);
             DateTime until = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(Convert.ToDouble(b["until"])).ToLocalTime();
             bool hit = false;
-            foreach (Process p in Process.GetProcesses())
+            foreach (Process p in procs)
             {
                 try
                 {
-                    string name = p.ProcessName.ToLower(), title = (p.MainWindowTitle ?? "").ToLower();
-                    if (Array.IndexOf(Browsers, name) >= 0) { if (title.Contains(key) && p.MainWindowHandle != IntPtr.Zero) { Native.ShowWindow(p.MainWindowHandle, 6); hit = true; } }
-                    else if (name.Contains(key) || (title != "" && title.Contains(key) && p.MainWindowHandle != IntPtr.Zero)) { p.Kill(); hit = true; }
+                    string name = p.ProcessName, title = p.MainWindowTitle ?? "";
+                    if (name.Equals("explorer", StringComparison.OrdinalIgnoreCase) || p.Id == Process.GetCurrentProcess().Id) continue;
+                    bool browser = Array.IndexOf(Browsers, name.ToLower()) >= 0;
+                    if (browser)
+                    {
+                        // a grounded website: minimise the browser only when its current tab is the grounded one
+                        if (p.MainWindowHandle != IntPtr.Zero && (Norm(title).Contains(Norm(key)) || Words(label).Exists(w => Norm(title).Contains(w)))) { Native.ShowWindow(p.MainWindowHandle, 6); hit = true; }
+                    }
+                    else if (MatchesBlock(name, title, key, label)) { try { p.Kill(); hit = true; } catch (Exception ke) { Log("kill " + name + ": " + ke.Message); } }
                 }
                 catch { }
             }
@@ -433,9 +501,12 @@ class App : ApplicationContext
             try { path = p.MainModule.FileName; } catch { }
         }
         if (name == "LockApp" || name == "LogonUI" || name == "SearchHost" || name == "explorer") return;
-        string[] c = Classify(name, title, path); if (c == null) return;
-        bool active = c[2] == "watch" ? (idle <= ActiveSeconds || full) : idle <= ActiveSeconds;
-        if (!active) return;
+        string[] c = Classify(name, title, path);
+        bool active = c != null && (c[2] == "watch" ? (idle <= ActiveSeconds || full) : idle <= ActiveSeconds);
+        if (Environment.GetEnvironmentVariable("HB_DEBUG") != null) Log("fg=" + name + " title=\"" + title + "\" idle=" + (int)idle + " full=" + full + " class=" + (c == null ? "none" : c[2]) + " active=" + active);
+        if (c == null) { nowDoing = name + " - not counted (not a game or video)"; return; }
+        if (!active) { nowDoing = c[1] + " - open but idle, not counting"; return; }
+        nowDoing = "counting " + c[1] + " (" + c[2] + ")";
         string[] cur; int sec = 0;
         if (apps.TryGetValue(c[0], out cur)) int.TryParse(cur[2], out sec);
         apps[c[0]] = new[] { c[1], c[2], (sec + (int)elapsed).ToString() }; dirty = true;
