@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Homebase · stay close, stay yourself</title>
+  <meta name="description" content="A family app for location sharing, messages and calls that is honest about what it shares and never spies.">
+  <meta name="theme-color" content="#eef6ff">
+  <style>
+    :root { --ink: #16213a; --muted: #5f6b86; --blue: #2f7df6; --blue-d: #1b57c4; --card: #fff; --bg: #f2f7ff; --mint: #1fb88a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: radial-gradient(900px 500px at 10% -10%, #dcebff, transparent 60%), radial-gradient(800px 500px at 100% 0, #ffe8ef, transparent 55%), var(--bg); }
+    main { max-width: 52rem; margin: 0 auto; padding: 2.2rem 1.2rem 4rem; }
+    .logo { display: inline-flex; align-items: center; gap: .6rem; font-weight: 800; font-size: 1.4rem; } .logo i { display: grid; place-items: center; width: 2.6rem; height: 2.6rem; border-radius: 0.9rem; background: linear-gradient(135deg, #5aa2ff, #2f7df6); color: #fff; font-style: normal; font-size: 1.4rem; }
+    h1 { margin: 1.4rem 0 .6rem; font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; letter-spacing: -0.02em; } h1 em { font-style: normal; color: var(--blue); }
+    .lead { color: var(--muted); max-width: 38rem; font-size: 1.1rem; }
+    .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .85rem 1.5rem; border-radius: 999px; background: linear-gradient(135deg, #4d97ff, #2f7df6); color: #fff; font-weight: 700; text-decoration: none; box-shadow: 0 14px 28px -14px rgba(47, 125, 246, .9); }
+    .btn.off { background: #cfd8ea; box-shadow: none; }
+    .grid { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin: 2rem 0; }
+    .card { padding: 1.1rem 1.2rem; border-radius: 1.3rem; background: var(--card); box-shadow: 0 1px 2px rgba(30, 50, 100, .06), 0 18px 40px -26px rgba(40, 70, 160, .4); } .card b { display: block; margin-bottom: .2rem; } .card span { font-size: 1.6rem; }
+    h2 { margin: 2.4rem 0 .6rem; font-size: 1.5rem; } ul { padding-left: 1.2rem; } li { margin: .35rem 0; } .muted { color: var(--muted); }
+    .promise { padding: 1.2rem 1.4rem; border-radius: 1.4rem; background: linear-gradient(135deg, #e6fbf3, #eaf3ff); box-shadow: inset 0 0 0 1.5px #bfe9d8; }
+    ol li { margin: .5rem 0; } code { padding: .1rem .4rem; border-radius: .4rem; background: #e6eefc; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="logo"><i>🏠</i> Homebase</div>
+  <h1>Stay close. <em>Stay yourself.</em></h1>
+  <p class="lead">A family app that lets your parents see where you are, message you and call you, and that is honest about all of it. Everything it shares is on your screen, you can pause it whenever you need, and it never spies.</p>
+  {% if has_apk %}<p><a class="btn" href="/download">⬇ Download for Android</a> <span class="muted">Version {{ version }} · Android 8 or newer</span></p>
+  {% else %}<p><span class="btn off">Android app coming soon</span></p>{% endif %}
+
+  <div class="grid">
+    <div class="card"><span>📍</span><b>Location you can see</b>Parents see you on a map. A notification on your tablet always says it is on, and you can pause it.</div>
+    <div class="card"><span>💬</span><b>Messages that ring</b>Text each other, send check-ins, and get a proper ring when someone calls.</div>
+    <div class="card"><span>📞</span><b>Real calls</b>Voice calls over Wi-Fi or data. Quiet hours keep it calm, and an emergency can still get through.</div>
+    <div class="card"><span>🙋</span><b>Ask, don't track</b>"Where are you?" is a request you can answer or say not now to.</div>
+  </div>
+
+  <div class="promise">
+    <h2 style="margin-top:0">What Homebase will never do</h2>
+    <ul>
+      <li>Hide itself or share anything in secret.</li>
+      <li>Read your other apps, your browsing or your private messages.</li>
+      <li>Switch on your microphone or camera by itself.</li>
+      <li>Lock your tablet or limit your screen time.</li>
+    </ul>
+    <p class="muted" style="margin-bottom:0">Location is kept for 7 days, then deleted. Leave the family any time and everything you shared is removed.</p>
+  </div>
+
+  <h2>Set it up in three minutes</h2>
+  <ol>
+    <li>On a parent's phone: install, choose <b>Create a family</b>, then <b>Invite</b> to get a code.</li>
+    <li>On the tablet: install, choose <b>Join with a code</b>, read what is shared, and say yes.</li>
+    <li>Allow location, notifications and the microphone, and turn off battery saving for Homebase so it can ring.</li>
+  </ol>
+  <p class="muted">Installing from outside the Play Store: when Android asks, allow <code>Install unknown apps</code> for your browser.</p>
+</main>
+</body>
+</html>
