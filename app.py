@@ -832,19 +832,36 @@ def get_screentime():
 
 
 CMD_HEAD = """@echo off
+rem Reopens itself in a window that stays open, so nothing can vanish before it is read.
+if not "%~1"=="stay" if not defined HB_NO_STAY (
+  cmd /k ""%~f0" stay"
+  exit /b
+)
 setlocal
 title Homebase screen time
-set "DIR=%APPDATA%\\Homebase"
+echo.
+echo   Homebase screen time
+echo   Setting up. This window stays open so you can read everything.
+echo.
+set "DIR=%APPDATA%\Homebase"
 if not exist "%DIR%" mkdir "%DIR%"
-set "PS=%DIR%\\Homebase-ScreenTime.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText('%~f0'); $m='#'+'#PS1'; $i=$t.IndexOf($m); if($i -lt 0){throw 'Could not read the installer.'}; $j=$t.IndexOf([char]10,$i); [IO.File]::WriteAllText('%PS%', $t.Substring($j+1), (New-Object Text.UTF8Encoding($true)))"
+set "PS=%DIR%\Homebase-ScreenTime.ps1"
+set "LOG=%DIR%\setup.log"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText('%~f0'); $m='#'+'#PS1'; $i=$t.IndexOf($m); if($i -lt 0){throw 'Could not read the installer.'}; $j=$t.IndexOf([char]10,$i); [IO.File]::WriteAllText('%PS%', $t.Substring($j+1), (New-Object Text.UTF8Encoding($true)))" 2>>"%LOG%"
 if errorlevel 1 goto :fail
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PS%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS%" 2>>"%LOG%"
 if errorlevel 1 goto :fail
+echo.
+echo   All done. You can close this window now.
+pause
 exit /b 0
 :fail
 echo.
 echo   Something went wrong. Take a photo of this window and show a parent.
+echo   Details are saved in %LOG%
+echo.
+type "%LOG%" 2>nul
+echo.
 pause
 exit /b 1
 ##PS1
