@@ -529,12 +529,12 @@ async function screenDialog(id) {
 function agentDialog() {
   modal(`<h2>🖥️ Windows screen time</h2><div class="sub">It counts only time you spend <b>playing or watching</b> (games, YouTube, Netflix, TikTok and so on). Not when you are away, locked, or doing homework.</div>
     <div class="msec">What it sees</div><div class="sub">Which program is in front, the title of its window (to tell YouTube from a homework tab) and how long since you touched the mouse or keyboard. Never your screen, files, passwords or what you type.</div>
-    <div class="msec">How to start</div><div class="sub">1. Download the file below. 2. Right-click it, choose <b>Run with PowerShell</b>. 3. It starts with Windows. You can remove it any time with <code>-Remove</code>. It sends minutes per app to your family. Your parents see them only while "See my screen time" is on in your settings.</div>
+    <div class="msec">How to start</div><div class="sub">1. Download the file below. 2. Double-click it. If Windows says it protected your PC, press <b>More info</b>, then <b>Run anyway</b> (and <b>Keep</b> if your browser asks). 3. It starts with Windows. You can remove it any time with <code>-Remove</code>. It sends minutes per app to your family. Your parents see them only while "See my screen time" is on in your settings.</div>
     <div class="foot"><button class="btn" id="agX">Close</button><button class="btn solid" id="agGo">Download for Windows</button></div>`, root => {
     root.querySelector("#agX").onclick = closeModal;
     root.querySelector("#agGo").onclick = async () => {
       try { const r = await fetch("/api/screentime/agent", { headers: { Authorization: "Bearer " + S.token } }); if (!r.ok) throw new Error((await r.json()).error || "Could not download.");
-        const url = URL.createObjectURL(await r.blob()), a = document.createElement("a"); a.href = url; a.download = "Homebase-ScreenTime.ps1"; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); toast("Downloaded. Right-click it and choose Run with PowerShell.", 7000);
+        const url = URL.createObjectURL(await r.blob()), a = document.createElement("a"); a.href = url; a.download = "Homebase-ScreenTime.cmd"; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); toast("Downloaded. Double-click Homebase-ScreenTime.cmd to start it.", 7000);
       } catch (e) { toast(e.message); } };
   });
 }

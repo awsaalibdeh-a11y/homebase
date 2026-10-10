@@ -831,10 +831,31 @@ def get_screentime():
                    updated=max([r["updated"] for r in rows], default=0))
 
 
+CMD_HEAD = """@echo off
+setlocal
+title Homebase screen time
+set "DIR=%APPDATA%\\Homebase"
+if not exist "%DIR%" mkdir "%DIR%"
+set "PS=%DIR%\\Homebase-ScreenTime.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText('%~f0'); $m='#'+'#PS1'; $i=$t.IndexOf($m); if($i -lt 0){throw 'Could not read the installer.'}; $j=$t.IndexOf([char]10,$i); [IO.File]::WriteAllText('%PS%', $t.Substring($j+1), (New-Object Text.UTF8Encoding($true)))"
+if errorlevel 1 goto :fail
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS%"
+if errorlevel 1 goto :fail
+exit /b 0
+:fail
+echo.
+echo   Something went wrong. Take a photo of this window and show a parent.
+pause
+exit /b 1
+##PS1
+"""
+
+
 @app.get("/api/screentime/agent")
 @need
 def screentime_agent():
-    """The Windows screen-time tracker, made for this child (it carries their own key, so it is only for them)."""
+    """The Windows screen-time tracker, made for this child (it carries their own key, so it is only for them).
+    Default is a .cmd you can double-click (it works around Windows blocking downloaded scripts); ?format=ps1 gives the bare script."""
     if g.m["role"] != "child":
         return err("Screen time is for children's devices.", 403)
     token = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
@@ -842,7 +863,10 @@ def screentime_agent():
     scheme = (request.headers.get("X-Forwarded-Proto") or request.scheme).split(",")[0].strip()
     server = f"{scheme}://{request.host}"
     body = src.replace("{{SERVER}}", server).replace("{{TOKEN}}", token)
-    return app.response_class("\ufeff" + body, mimetype="text/plain", headers={"Content-Disposition": 'attachment; filename="Homebase-ScreenTime.ps1"', "Cache-Control": "no-store"})
+    if request.args.get("format") == "ps1":
+        return app.response_class("\ufeff" + body, mimetype="text/plain", headers={"Content-Disposition": 'attachment; filename="Homebase-ScreenTime.ps1"', "Cache-Control": "no-store"})
+    text = (CMD_HEAD + body).replace("\r\n", "\n").replace("\n", "\r\n")                  # batch files need Windows line endings
+    return app.response_class(text, mimetype="application/octet-stream", headers={"Content-Disposition": 'attachment; filename="Homebase-ScreenTime.cmd"', "Cache-Control": "no-store"})
 
 
 @app.delete("/api/screentime")

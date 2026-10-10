@@ -350,7 +350,7 @@ class ScreenTime(Base):
         self.assertTrue(any("bike" in t for t in texts) and any("book" in t for t in texts))
 
     def test_the_windows_tracker_is_made_for_the_child_with_their_own_key(self):
-        r = self.get(self.kid, "/api/screentime/agent")
+        r = self.get(self.kid, "/api/screentime/agent?format=ps1")
         text = r.get_data(as_text=True)
         self.assertEqual(r.status_code, 200)
         self.assertIn(self.kid["Authorization"].split()[1], text)
@@ -358,8 +358,19 @@ class ScreenTime(Base):
         self.assertNotIn("{{SERVER}}", text)
         self.assertEqual(self.get(self.mum, "/api/screentime/agent").status_code, 403)         # parents are not tracked
 
+    def test_the_download_is_a_double_clickable_cmd_that_carries_the_script(self):
+        r = self.get(self.kid, "/api/screentime/agent")
+        raw = r.get_data()
+        self.assertIn("Homebase-ScreenTime.cmd", r.headers["Content-Disposition"])
+        self.assertTrue(raw.startswith(b"@echo off\r\n"))                                              # a real batch file with Windows line endings
+        self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))
+        self.assertIn(b"-ExecutionPolicy Bypass", raw)                                                 # so a blocked download still runs
+        self.assertIn(b"\r\n##PS1\r\n", raw)                                                         # the marker the launcher cuts the script out at
+        self.assertIn(self.kid["Authorization"].split()[1].encode(), raw)
+        raw.decode("ascii")                                                                            # plain ASCII, nothing a console can mangle
+
     def test_the_tracker_posts_to_https_when_the_proxy_says_so(self):
-        r = self.c.get("/api/screentime/agent", headers={**self.kid, "X-Forwarded-Proto": "https"})
+        r = self.c.get("/api/screentime/agent?format=ps1", headers={**self.kid, "X-Forwarded-Proto": "https"})
         self.assertIn('$Server = "https://', r.get_data(as_text=True))
 
     def test_junk_numbers_do_not_crash_it(self):

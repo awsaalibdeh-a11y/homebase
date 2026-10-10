@@ -24,7 +24,8 @@ $Token  = "{{TOKEN}}"
 $Dir     = Join-Path $env:APPDATA "Homebase"
 $Self    = Join-Path $Dir "Homebase-ScreenTime.ps1"
 $State   = Join-Path $Dir "today.json"
-$Startup = Join-Path ([Environment]::GetFolderPath("Startup")) "Homebase screen time.lnk"
+$StartupDir = if ($env:HB_STARTUP) { $env:HB_STARTUP } else { [Environment]::GetFolderPath("Startup") }     # HB_STARTUP and HB_NO_START exist only for tests
+$Startup = Join-Path $StartupDir "Homebase screen time.lnk"
 $ActiveSeconds = 150
 $Tick = if ($env:HB_TICK) { [int]$env:HB_TICK } else { 10 }      # seconds between looks (only changed by tests)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -34,16 +35,26 @@ function Stop-Tracker {
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+function Fail($e) {
+    Write-Host ""; Write-Host "  Something went wrong:" -ForegroundColor Red; Write-Host "  $($e.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Show this to a parent, or try again." -ForegroundColor DarkGray
+    try { New-Item -ItemType Directory -Force $Dir | Out-Null; ("$(Get-Date) $($e.Exception.Message)") | Add-Content (Join-Path $Dir "screentime.log") } catch { }
+    Read-Host "  Press Enter to close"
+}
+
 if ($Remove) {
+    try {
     Stop-Tracker
     Remove-Item $Startup -Force -ErrorAction SilentlyContinue
     Remove-Item $Dir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "Homebase screen time is removed from this computer." -ForegroundColor Green
     Read-Host "Press Enter to close"
+    } catch { Fail $_ }
     exit
 }
 
 if (-not $Run) {
+  try {
     # first run: install quietly for this user, start with Windows, and begin
     Write-Host ""
     Write-Host "  Homebase screen time" -ForegroundColor Cyan
@@ -51,7 +62,7 @@ if (-not $Run) {
     Write-Host "  It sends minutes per app to your Homebase family. It never sees what is on your screen."
     Write-Host ""
     New-Item -ItemType Directory -Force $Dir | Out-Null
-    Copy-Item $MyInvocation.MyCommand.Path $Self -Force
+    if ($MyInvocation.MyCommand.Path -ne $Self) { Copy-Item $MyInvocation.MyCommand.Path $Self -Force }
     Stop-Tracker
     $ws = New-Object -ComObject WScript.Shell
     $lnk = $ws.CreateShortcut($Startup)
@@ -59,11 +70,12 @@ if (-not $Run) {
     $lnk.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Self`" -Run"
     $lnk.WindowStyle = 7
     $lnk.Save()
-    Start-Process powershell.exe -ArgumentList "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", "`"$Self`"", "-Run"
+    if (-not $env:HB_NO_START) { Start-Process powershell.exe -ArgumentList "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", "`"$Self`"", "-Run" }
     Write-Host "  Done. It is running now and starts with Windows." -ForegroundColor Green
     Write-Host "  To remove it later: run  $Self -Remove" -ForegroundColor DarkGray
     Write-Host ""
     Read-Host "  Press Enter to close this window"
+  } catch { Fail $_ }
     exit
 }
 
