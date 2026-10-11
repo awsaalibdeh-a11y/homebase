@@ -361,7 +361,7 @@ def get_family():
 
 @app.get("/api/config")
 def config():
-    return jsonify(ice_servers=ice_servers(), version_code=VERSION_CODE, apk_url=f"{request.host_url.rstrip('/')}/download")
+    return jsonify(ice_servers=ice_servers(), version_code=VERSION_CODE, apk_url=f"{request.host_url.rstrip('/')}/update")
 
 
 # ---------------------------------------------------------------- sharing a location (always the owner's choice)
@@ -1623,6 +1623,11 @@ def service_worker():
 @app.get("/manifest.webmanifest")
 def web_manifest():
     return send_from_directory(os.path.join(BASE, "static", "web"), "manifest.webmanifest", mimetype="application/manifest+json")
+
+
+@app.get("/update")
+def update_page():
+    return render_template("update.html", version=VERSION_CODE)
 
 
 @app.get("/download")

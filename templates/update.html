@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Update Homebase</title>
+  <meta name="theme-color" content="#0a0a0b">
+  <style>
+    :root { --bg:#0a0a0b; --surface:#121214; --surface2:#1b1b1f; --line:#26262b; --ink:#ececf0; --muted:#8d8d96; --accent:#5b93ff; --accent-ink:#08101f; --ok:#3dd49b; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:17px/1.55 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
+    main { max-width:34rem; margin:0 auto; padding:1.6rem 1rem 3rem; }
+    h1 { font-size:1.7rem; margin:.4rem 0; letter-spacing:-.02em; }
+    h2 { font-size:1.1rem; margin:0 0 .6rem; }
+    p { color:var(--muted); margin:.3rem 0 1rem; }
+    .card { background:var(--surface); border:1px solid var(--line); border-radius:1.2rem; padding:1.1rem 1.2rem; margin:1rem 0; }
+    .card.best { border-color:rgba(91,147,255,.5); }
+    .btn { display:block; text-align:center; padding:1rem; border-radius:.9rem; background:var(--accent); color:var(--accent-ink); font-weight:700; text-decoration:none; margin:.8rem 0 .2rem; }
+    .btn.alt { background:var(--surface2); color:var(--ink); border:1px solid var(--line); }
+    ol { margin:.4rem 0 0; padding-left:1.3rem; } li { margin:.55rem 0; }
+    b { color:#fff; } .tag { display:inline-block; font-size:.78rem; padding:.1rem .55rem; border-radius:99px; background:rgba(61,212,155,.15); color:var(--ok); margin-left:.4rem; vertical-align:middle; }
+    footer { color:var(--muted); font-size:.85rem; margin-top:2rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>🏠 Update Homebase</h1>
+  <p>A newer Homebase is ready, with <b>screen time on the Family tab</b> and everything in just two tabs. Pick one way below. Your family, places and settings stay exactly as they are.</p>
+
+  <div class="card best">
+    <h2>Way 1: Use the web version <span class="tag">never needs updating</span></h2>
+    <p>Always the newest, and it updates itself. You only do this once.</p>
+    <ol>
+      <li>Open <b>Chrome</b> on your phone and go to <b>homebase-family.onrender.com/app</b></li>
+      <li>Sign in with your family code or your account.</li>
+      <li>Tap the <b>⋮ menu</b> (top right), then <b>Add to Home screen</b>, then <b>Install</b>.</li>
+      <li>Open the new <b>Homebase</b> icon. You can remove the old app.</li>
+    </ol>
+    <a class="btn" href="/app">Open the web version</a>
+  </div>
+
+  <div class="card">
+    <h2>Way 2: Install the new Android app</h2>
+    <p>Does a bit more in the background (location, grounded apps). Updates after this are one tap.</p>
+    <ol>
+      <li>Tap <b>Download the new app</b> below.</li>
+      <li>When it finishes, tap <b>Open</b> on the download (or open it from your notifications or the Files app).</li>
+      <li>If Android asks, tap <b>Settings</b>, allow <b>Install unknown apps</b> for this browser, then go back.</li>
+      <li>Tap <b>Install</b> or <b>Update</b>. It installs over the old one, so you stay signed in.</li>
+    </ol>
+    <a class="btn alt" href="/download">Download the new app (version {{ version }})</a>
+  </div>
+
+  <footer>Made by Aws, with Claude's help.</footer>
+</main>
+</body>
+</html>
