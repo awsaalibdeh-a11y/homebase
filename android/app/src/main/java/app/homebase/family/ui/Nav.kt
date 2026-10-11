@@ -21,6 +21,8 @@ sealed interface Screen {
     data object Perms : Screen
     data class Controls(val memberId: Int) : Screen
     data object Rules : Screen
+    data object MapFull : Screen
+    data object ChatFull : Screen
     data object Chores : Screen
     data class ScreenTime(val memberId: Int) : Screen
     data object Tour : Screen

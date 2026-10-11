@@ -88,6 +88,8 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
             is Screen.Chores -> app.homebase.family.ui.ChoresScreen(nav)
             is Screen.Controls -> app.homebase.family.ui.ControlsScreen(nav, s.memberId)
             Screen.Rules -> app.homebase.family.ui.RulesScreen(nav)
+            Screen.MapFull -> app.homebase.family.ui.WithBack(nav) { app.homebase.family.ui.MapTab(nav) }
+            Screen.ChatFull -> app.homebase.family.ui.WithBack(nav) { app.homebase.family.ui.ChatTab(nav) }
             is Screen.ScreenTime -> app.homebase.family.ui.ScreenTimeScreen(nav, s.memberId)
             Screen.Places -> PlacesScreen(nav)
             Screen.AddPlace -> AddPlaceScreen(nav)

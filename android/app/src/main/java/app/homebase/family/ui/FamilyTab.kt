@@ -1,6 +1,7 @@
 package app.homebase.family.ui
 
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -40,6 +41,29 @@ fun FamilyTab(nav: Nav) {
     val call = rememberCaller()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Heading(fam?.family?.name ?: me.familyName.ifBlank { "Family" }, "${fam?.members?.size ?: 1} people")
+        if (me.isParent) {
+            val kids = fam?.members.orEmpty().filter { !it.isParent }
+            if (kids.isNotEmpty()) SoftCard(tint = BlueSoft) {
+                Text("⏱️ Screen time today", style = MaterialTheme.typography.titleMedium)
+                kids.forEach { k ->
+                    val sc = k.screen
+                    Row(Modifier.fillMaxWidth().clickable { nav.go(Screen.ScreenTime(k.id)) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        MemberAvatar(k, 36, Surface2)
+                        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                            Text(k.name, style = MaterialTheme.typography.titleSmall)
+                            Text(if (sc == null) "Not linked yet" else if (sc.hidden) "Switched off by ${k.name}" else if (sc.top.isNotBlank()) "Most on ${sc.top}" else "Nothing counted yet", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(if (sc == null || sc.hidden) "–" else app.homebase.family.durationText(sc.today), style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+                Text("Tap a child for the full list of apps", color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SoftButton("🗺️ Map", Modifier.weight(1f)) { nav.go(Screen.MapFull) }
+            SoftButton("💬 Chat", Modifier.weight(1f)) { nav.go(Screen.ChatFull) }
+            if (me.isParent) SoftButton("📋 Rules", Modifier.weight(1f)) { nav.go(Screen.Rules) }
+        }
         fam?.members.orEmpty().forEach { m ->
             SoftCard {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

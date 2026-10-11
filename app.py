@@ -23,7 +23,7 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "1"))
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "2"))
 KEEP_LOCATIONS_DAYS = 7
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _hits = defaultdict(list)

@@ -13,6 +13,8 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -61,6 +63,15 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
     var tab by remember { mutableIntStateOf(initialTab) }
     val state = LocalContext.current.hb.state
     val owner = LocalLifecycleOwner.current
+    val ctxU = LocalContext.current
+    var newApk by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { runCatching { ctxU.hb.api.config() }.onSuccess { c -> if (c.versionCode > app.homebase.family.BuildConfig.VERSION_CODE) newApk = c.apkUrl } }
+    newApk?.let { url ->
+        androidx.compose.material3.AlertDialog(onDismissRequest = { newApk = null }, title = { Text("A new Homebase is ready") },
+            text = { Text("Tap Update, then open the file when it finishes downloading. Your family, places and settings stay as they are.") },
+            confirmButton = { TextButton({ ctxU.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); newApk = null }) { Text("Update") } },
+            dismissButton = { TextButton({ newApk = null }) { Text("Later") } })
+    }
     // Keep the map fresh while the screen is visible; nothing runs in the background.
     LaunchedEffect(owner) {
         owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -70,8 +81,7 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
     }
     Scaffold(containerColor = Bg, bottomBar = {
         NavigationBar(containerColor = Surface) {
-            val items = listOfNotNull("Map" to Icons.Filled.Place, "Family" to Icons.Filled.People, "Chat" to Icons.Filled.Chat,
-                if (LocalContext.current.hb.store.isParent) "Rules" to Icons.Filled.Edit else null, "Me" to Icons.Filled.Home)
+            val items = listOf("Family" to Icons.Filled.People, "Me" to Icons.Filled.Home)
             items.forEachIndexed { i, (label, icon) ->
                 NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icon, label) }, label = { Text(label) },
                     colors = NavigationBarItemDefaults.colors(selectedIconColor = Blue, selectedTextColor = Blue, indicatorColor = BlueSoft))
@@ -85,16 +95,19 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
         Box(Modifier.padding(pad).fillMaxSize()) {
             if (myLock != null && myLock.until * 1000 > nowMs) { LockedScreen(myLock); return@Box }
             val isParent = LocalContext.current.hb.store.isParent
-            when {
-                tab == 0 -> MapTab(nav)
-                tab == 1 -> FamilyTab(nav)
-                tab == 2 -> ChatTab(nav)
-                tab == 3 && isParent -> RulesTab()
-                else -> MeTab(nav)
-            }
+            if (tab == 0) FamilyTab(nav) else MeTab(nav)
             val online by state.online.collectAsState()
             if (!online) Text("📡 Offline · showing the last update", color = Color.White, style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp).background(Color(0xFF1C2230), RoundedCornerShape(99.dp)).padding(horizontal = 16.dp, vertical = 8.dp))
         }
+    }
+}
+
+/** A full-screen page opened from the Family tab, with a Back button on top. */
+@Composable
+fun WithBack(nav: Nav, content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        TextButton({ nav.back() }, Modifier.padding(start = 8.dp, top = 8.dp)) { Text("Back") }
+        Box(Modifier.weight(1f)) { content() }
     }
 }
