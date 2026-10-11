@@ -159,6 +159,14 @@ def member_view(m, viewer=None):
         out["share"] = "off"
     if gated and not perms["battery"]:
         out["battery"] = -1
+    if m["role"] == "child" and viewer and (viewer["id"] == m["id"] or viewer["role"] == "parent"):
+        # today's screen time, right on the card, so a parent does not have to open anything. If the child switched it off, say so plainly.
+        if gated and not perms["screentime"]:
+            out["screen"] = {"hidden": True, "today": 0, "top": ""}
+        else:
+            day = time.strftime("%Y-%m-%d", time.gmtime(time.time() - (m["tz_offset"] or 0) * 60))
+            rows = db.many(select(db.screentime).where(db.screentime.c.member_id == m["id"], db.screentime.c.day == day).order_by(db.screentime.c.sec.desc()))
+            out["screen"] = {"hidden": False, "today": sum(r["sec"] for r in rows), "top": (rows[0]["label"] or rows[0]["pkg"]) if rows else ""}
     if m["role"] == "child" and viewer and (viewer["id"] == m["id"] or viewer["role"] == "parent"):          # a linked computer that goes quiet is visible to the family
         out["devices"] = [{"id": d["id"], "name": d["name"], "kind": d["kind"], "last_seen": d["last_seen"], "status": d["status"] or "", "version": d["version"] or ""}
                           for d in db.many(select(db.devices).where(db.devices.c.member_id == m["id"]).order_by(db.devices.c.id))]

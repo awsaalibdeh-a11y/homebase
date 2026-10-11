@@ -24,6 +24,8 @@ data class Member(
     val lock: LockInfo? = null,
     val blocks: List<BlockInfo> = emptyList(),
     val avatar: String? = null,
+    val screen: ScreenToday? = null,
+    val devices: List<DeviceInfo> = emptyList(),
 ) {
     val isParent get() = role == "parent"
     /** Whether a parent may do [key] with this person. Everything is allowed until they turn it off. */
@@ -129,6 +131,12 @@ data class RuleKid(val id: Int, val name: String = "", val emoji: String = "🙂
 
 @Serializable
 data class RulesResp(val text: String = "", val limits: Map<String, Int> = emptyMap(), val children: List<RuleKid> = emptyList())
+
+@Serializable
+data class ScreenToday(val hidden: Boolean = false, val today: Int = 0, val top: String = "")
+
+@Serializable
+data class DeviceInfo(val id: Int = 0, val name: String = "", val kind: String = "windows", @SerialName("last_seen") val lastSeen: Double = 0.0, val status: String = "", val version: String = "")
 
 @Serializable
 data class BlockInfo(val id: Int = 0, val key: String = "", val label: String = "", val until: Double = 0.0, @SerialName("active_at") val activeAt: Double = 0.0)

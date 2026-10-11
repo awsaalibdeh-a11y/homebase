@@ -611,6 +611,29 @@ class DeviceStatus(Base):
         self.assertEqual((v["devices"][0]["status"], v["devices"][0]["version"]), ("counting Minecraft (play)", "1.5"))
 
 
+class ScreenOnTheCard(Base):
+    def card(self, who):
+        return {m["id"]: m for m in self.get(who, "/api/family").get_json()["members"]}[self.kid_id]["screen"]
+
+    def test_a_parent_sees_todays_minutes_and_top_app_on_the_childs_card(self):
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        self.post(self.kid, "/api/screentime", day=today, apps=[{"pkg": "roblox", "label": "Roblox", "cat": "play", "sec": 2400}, {"pkg": "yt", "label": "YouTube", "cat": "watch", "sec": 600}])
+        c = self.card(self.mum)
+        self.assertEqual((c["hidden"], c["today"], c["top"]), (False, 3000, "Roblox"))
+        self.assertEqual(self.card(self.kid)["today"], 3000)                                                  # the child sees the same number
+
+    def test_when_the_child_hides_it_the_parent_is_told_so_not_shown_zero(self):
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        self.post(self.kid, "/api/screentime", day=today, apps=[{"pkg": "roblox", "label": "Roblox", "cat": "play", "sec": 2400}])
+        self.c.patch("/api/me", headers=self.kid, json={"perms": {"screentime": False}})
+        c = self.card(self.mum)
+        self.assertEqual((c["hidden"], c["today"]), (True, 0))
+        self.assertEqual(self.card(self.kid)["today"], 2400)                                                  # the child still sees their own
+
+    def test_a_day_with_nothing_is_zero_not_missing(self):
+        self.assertEqual((self.card(self.mum)["hidden"], self.card(self.mum)["today"], self.card(self.mum)["top"]), (False, 0, ""))
+
+
 class AppReporting(Base):
     def test_a_device_reports_its_apps_for_the_picker(self):
         code = self.post(self.kid, "/api/devices/code").get_json()["code"]

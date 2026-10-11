@@ -191,7 +191,7 @@ function peopleHtml() {
     const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
     const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>💬 Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>📞 Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>📍 Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>🧭 Trail</button>${m.role === "child" && isParent() ? `<button class="btn sm solid" data-act="tocontrols">🎛️ Controls</button>` : ""}</div>` : "";
     const chip = m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`;
-    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${deviceLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
+    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${screenLine(m)}${deviceLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
   }).join("");
   return rows || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press <b>Invite</b> at the top to add someone." : ""}</div>`;
 }
@@ -208,7 +208,7 @@ function controlsHtml() {
       const dv = m.devices || [], dtxt = dv.length ? dv.map(d => d.name).join(", ") : "None linked yet";
       return `<section class="ctl"><div class="head"><span class="ava">${avaInner(m)}</span><div><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small></div></div>
         <div class="tiles">
-          ${tile("screen", m.id, "⏱️", "Screen time", may(m, "screentime") ? "Minutes and apps" : "Switched off by " + esc(m.name), !may(m, "screentime"))}
+          ${tile("screen", m.id, "⏱️", "Screen time", screenSub(m), !may(m, "screentime"))}
           ${tile("lock", m.id, "🔒", "Lock device", lock)}
           ${tile("ground", m.id, "🚫", "Ground apps", gr)}
           ${tile("rules", m.id, "📋", "Rules and limit", "House rules, daily limit")}
@@ -789,3 +789,12 @@ function devicesDialog(id) {
     root.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => { if (!confirm("Remove this computer? Its tracker stops working.")) return; try { await api("/api/devices/" + b.dataset.rm, "DELETE"); toast("Removed"); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } });
   });
 }
+
+
+/* ---------- today's screen time on a child's card ---------- */
+function screenLine(m) {
+  const s = m.screen; if (!s) return "";
+  if (s.hidden) return `<small class="devwarn">⏱ ${esc(m.name)} has switched screen time off</small>`;
+  return `<small>⏱ ${fmtDur(s.today)} today${s.top ? " · most on " + esc(s.top) : ""}</small>`;
+}
+function screenSub(m) { const s = m.screen; if (!s) return "Minutes and apps"; if (s.hidden) return "Switched off by " + esc(m.name); return s.today ? `Today ${fmtDur(s.today)}${s.top ? " · " + esc(s.top) : ""}` : "Nothing counted today"; }

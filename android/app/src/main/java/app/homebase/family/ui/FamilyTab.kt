@@ -38,8 +38,6 @@ fun FamilyTab(nav: Nav) {
     val fam by ctx.hb.state.family.collectAsState()
     val me = ctx.hb.store
     val call = rememberCaller()
-    var lockFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Member?>(null) }
-    var groundFor by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Member?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Heading(fam?.family?.name ?: me.familyName.ifBlank { "Family" }, "${fam?.members?.size ?: 1} people")
         fam?.members.orEmpty().forEach { m ->
@@ -56,6 +54,7 @@ fun FamilyTab(nav: Nav) {
                         }
                     }
                 }
+                if (!m.isParent) screenLine(m)?.let { Text(it, Modifier.padding(top = 2.dp), color = if (m.screen?.hidden == true) Sun else Ink, style = MaterialTheme.typography.bodyMedium) }
                 Row(Modifier.fillMaxWidth()) {
                     if (m.id != me.myId) {
                         TextButton({ nav.go(Screen.Thread(m.id)) }, enabled = canDo(m, "messages")) { Text("Message", maxLines = 1, softWrap = false) }
@@ -64,11 +63,8 @@ fun FamilyTab(nav: Nav) {
                     }
                     if (m.id == me.myId || (me.isParent && !m.isParent)) TextButton({ nav.go(Screen.History(m.id)) }) { Text("Trail", maxLines = 1, softWrap = false) }
                 }
-                if (!m.isParent && (m.id == me.myId || me.isParent)) Row(Modifier.fillMaxWidth()) {
-                    if (me.isParent) TextButton({ lockFor = m }) { Text(if (m.lock != null) "🔒 Locked" else "Lock", maxLines = 1, softWrap = false) }
-                    if (me.isParent) TextButton({ groundFor = m }) { Text(if (m.blocks.isNotEmpty()) "🚫 Grounded (${m.blocks.size})" else "Ground apps", maxLines = 1, softWrap = false) }
-                    TextButton({ nav.go(Screen.ScreenTime(m.id)) }, enabled = canDo(m, "screentime")) { Text("Screen time", maxLines = 1, softWrap = false) }
-                }
+                if (!m.isParent && me.isParent) BigButton("🎛️ Controls: screen time, lock, ground apps") { nav.go(Screen.Controls(m.id)) }
+                if (!m.isParent && m.id == me.myId) TextButton({ nav.go(Screen.ScreenTime(m.id)) }) { Text("My screen time", maxLines = 1, softWrap = false) }
             }
         }
         if (me.isParent) {
@@ -79,6 +75,4 @@ fun FamilyTab(nav: Nav) {
         SoftButton("Family list") { nav.go(Screen.Lists) }
         Gap(8)
     }
-    lockFor?.let { LockDialog(it) { lockFor = null } }
-    groundFor?.let { GroundDialog(it) { groundFor = null } }
 }

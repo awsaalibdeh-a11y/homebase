@@ -70,3 +70,13 @@ fun RulesTab() {
         Gap(8)
     }
 }
+
+
+/** The same rules editor as the Rules tab, as its own screen with a Back button (opened from a child's Controls). */
+@Composable
+fun RulesScreen(nav: Nav) {
+    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
+        androidx.compose.material3.TextButton({ nav.back() }, Modifier.padding(start = 8.dp, top = 8.dp)) { androidx.compose.material3.Text("Back") }
+        RulesTab()
+    }
+}
