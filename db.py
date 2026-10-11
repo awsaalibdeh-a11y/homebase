@@ -53,7 +53,7 @@ calls = Table("calls", meta,
     Column("id", Integer, primary_key=True), Column("family_id", Integer), Column("caller_id", Integer), Column("callee_id", Integer),
     Column("status", String(10), default="ringing"),               # ringing | active | declined | ended | missed
     Column("urgent", Boolean, default=False), Column("created", Float), Column("answered", Float, default=0), Column("ended", Float, default=0),
-    Column("offer", Text), Column("answer", Text))
+    Column("offer", Text), Column("answer", Text), Column("web_seen", Boolean, default=False))
 pings = Table("pings", meta,
     Column("id", Integer, primary_key=True), Column("family_id", Integer), Column("from_id", Integer), Column("to_id", Integer),
     Column("status", String(10), default="pending"),               # pending | shared | declined
@@ -90,7 +90,7 @@ try:                                                                  # older da
         _c.exec_driver_sql("ALTER TABLE members ADD COLUMN perms TEXT DEFAULT ''")
 except Exception:
     pass
-for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE families ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN apps TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN status VARCHAR(160) DEFAULT ''", "ALTER TABLE devices ADD COLUMN version VARCHAR(12) DEFAULT ''", "ALTER TABLE members ADD COLUMN avatar TEXT DEFAULT ''", "ALTER TABLE members ADD COLUMN avatar_at FLOAT DEFAULT 0"):
+for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE families ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN apps TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN status VARCHAR(160) DEFAULT ''", "ALTER TABLE devices ADD COLUMN version VARCHAR(12) DEFAULT ''", "ALTER TABLE calls ADD COLUMN web_seen BOOLEAN DEFAULT FALSE", "ALTER TABLE members ADD COLUMN avatar TEXT DEFAULT ''", "ALTER TABLE members ADD COLUMN avatar_at FLOAT DEFAULT 0"):
     try:
         with engine.begin() as _c:
             _c.exec_driver_sql(_sql)

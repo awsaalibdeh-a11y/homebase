@@ -127,6 +127,7 @@ async function startApp(fresh) {
   if (!loadSnap() && !fresh) { /* first run: nothing to show yet */ }
   try { await refreshFamily(); } catch (e) { if (!e.offline) return; }
   loadThread(0); refreshItems(); refreshChores(); flushOutbox();
+  const ans = location.hash.match(/answer=(\d+)/); if (ans) { history.replaceState(null, "", location.pathname); setTimeout(() => window.Calls && window.Calls.answerNow(+ans[1]), 600); }
   if (!S.running) { S.running = true; eventLoop(); }
   setInterval(() => { if (!document.hidden && S.token && S.online) refreshFamily().catch(() => {}); }, 12000);
   setInterval(() => { if (S.token && S.online) flushOutbox(); }, 15000);
@@ -171,64 +172,57 @@ function youCard() {
     ${on || paused ? `<div class="quick">Pause for <button class="btn sm" data-pause="15">15 min</button><button class="btn sm" data-pause="60">1 hour</button>${paused ? `<button class="btn sm" data-pause="0">Resume</button>` : ""}</div>` : ""}</section>`;
 }
 /* ---------- the left panel: five clearly labelled tabs instead of one long scroll ---------- */
-const TABS = [["people", "👥", "People"], ["controls", "🎛️", "Controls"], ["jobs", "✅", "Jobs"], ["places", "📍", "Places"], ["me", "🙂", "Me"]];
-function curTab() { const t = S.tab || localStorage.getItem("hb_tab") || "people"; return TABS.some(x => x[0] === t) ? t : "people"; }
+const TABS = [["family", "👨‍👩‍👧", "Family"], ["me", "🙂", "Me"]];
+const LEGACY_TAB = { people: "family", controls: "family", jobs: "family", places: "family" };
+function curTab() { let t = S.tab || localStorage.getItem("hb_tab") || "family"; t = LEGACY_TAB[t] || t; return TABS.some(x => x[0] === t) ? t : "family"; }
 function setTab(t) { S.tab = t; try { localStorage.setItem("hb_tab", t); } catch (e) { /* private mode */ } renderSide(); const bd = $("#side .tabbody"); if (bd) bd.scrollTop = 0; }
 
+/* the small collapsible rows under the people (Jobs, Places, Rules): closed by default, remembered */
+S.acc = (() => { try { return JSON.parse(localStorage.getItem("hb_acc") || "{}"); } catch (e) { return {}; } })();
+function toggleAcc(id) { S.acc[id] = !S.acc[id]; try { localStorage.setItem("hb_acc", JSON.stringify(S.acc)); } catch (e) { /* ignore */ } renderSide(); }
+function accordion(id, icon, title, sub, body, alert) {
+  const open = !!S.acc[id];
+  return `<div class="acc ${open ? "open" : ""}"><button class="acchead" data-acc="${id}" aria-expanded="${open}"><span class="accl"><span class="acci">${icon}</span><b>${title}</b>${alert ? `<i class="tb">${alert}</i>` : ""}</span><small>${sub}</small><span class="accv">▾</span></button>${open ? `<div class="accbody">${body}</div>` : ""}</div>`;
+}
+
+function jobsAlert() { return S.chores.filter(c => isParent() ? c.status === "done" : (c.status === "open" && (!c.to || c.to === S.me))).length; }
 function tabBadge(t) {
-  if (t === "jobs") { const n = S.chores.filter(c => isParent() ? c.status === "done" : (c.status === "open" && (!c.to || c.to === S.me))).length; return n ? `<i class="tb">${n}</i>` : ""; }
-  if (t === "controls") { const kids = S.members.filter(m => m.role === "child"); const on = isParent() ? kids.some(m => m.lock || (m.blocks || []).length) : (me().lock || (me().blocks || []).length); return on ? '<i class="tb dot"></i>' : ""; }
+  if (t === "family") { const kids = S.members.filter(m => m.role === "child"); const on = isParent() && kids.some(m => m.lock || (m.blocks || []).length); const n = jobsAlert(); return n ? `<i class="tb">${n}</i>` : on ? '<i class="tb dot"></i>' : ""; }
+  if (t === "me") { const m = me(); return m && m.role === "child" && (m.lock || (m.blocks || []).length) ? '<i class="tb dot"></i>' : ""; }
   return "";
 }
 function tabsBar() {
   const t = curTab();
-  return `<nav class="stabs" role="tablist" aria-label="Sections">${TABS.map(([k, e, n]) => `<button role="tab" class="${t === k ? "on" : ""}" aria-selected="${t === k}" data-tab="${k}"><span class="ti">${e}</span><span class="tn">${n}</span>${tabBadge(k)}</button>`).join("")}</nav>`;
-}
-
-function peopleHtml() {
-  const others = S.members.filter(m => m.id !== S.me);
-  const rows = others.map(m => {
-    const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
-    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>💬 Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>📞 Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>📍 Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>🧭 Trail</button>${m.role === "child" && isParent() ? `<button class="btn sm solid" data-act="tocontrols">🎛️ Controls</button>` : ""}</div>` : "";
-    const chip = m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`;
-    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${screenLine(m)}${deviceLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
-  }).join("");
-  return rows || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press <b>Invite</b> at the top to add someone." : ""}</div>`;
+  return `<nav class="stabs two" role="tablist" aria-label="Sections">${TABS.map(([k, e, n]) => `<button role="tab" class="${t === k ? "on" : ""}" aria-selected="${t === k}" data-tab="${k}"><span class="ti">${e}</span><span class="tn">${n}</span>${tabBadge(k)}</button>`).join("")}</nav>`;
 }
 
 function tile(act, id, emoji, title, sub, off) {
   return `<button class="tile" data-act="${act}" data-id="${id}" ${off ? "disabled" : ""}><span class="te">${emoji}</span><b>${title}</b><small>${sub}</small></button>`;
 }
-function controlsHtml() {
-  const kids = S.members.filter(m => m.role === "child");
-  if (isParent()) {
-    if (!kids.length) return `<div class="empty">No children in the family yet. Press <b>Invite</b> at the top to add one.</div>`;
-    return `<p class="tabhelp">Everything for each child, in one place. Tap a tile.</p>` + kids.map(m => {
-      const lock = m.lock ? `Locked until ${clock(m.lock.until)}` : "Lock their devices", gr = (m.blocks || []).length ? `${m.blocks.length} grounded now` : "Block certain apps";
-      const dv = m.devices || [], dtxt = dv.length ? dv.map(d => d.name).join(", ") : "None linked yet";
-      return `<section class="ctl"><div class="head"><span class="ava">${avaInner(m)}</span><div><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small></div></div>
-        <div class="tiles">
-          ${tile("screen", m.id, "⏱️", "Screen time", screenSub(m), !may(m, "screentime"))}
-          ${tile("lock", m.id, "🔒", "Lock device", lock)}
-          ${tile("ground", m.id, "🚫", "Ground apps", gr)}
-          ${tile("rules", m.id, "📋", "Rules and limit", "House rules, daily limit")}
-          ${tile("devices", m.id, "💻", "Computers", dtxt)}
-          ${tile("week", m.id, "📊", "This week", "Summary")}
-        </div></section>`;
-    }).join("");
-  }
-  const m = me();
-  if (m.role !== "child") return `<div class="empty">Nothing to set up here.</div>`;
-  const bl = m.blocks || [];
-  return `<p class="tabhelp">Everything about your screen time, in one place. You can always see what your family sees.</p>
-    <div class="tiles">
-      ${tile("screen", m.id, "⏱️", "My screen time", "Only playing and watching")}
-      ${tile("myperms", m.id, "🎚️", "What parents can do", "You choose")}
-      ${tile("rules", m.id, "📋", "Family rules", "What you agreed")}
-      ${tile("devices", m.id, "💻", "My computers", (m.devices || []).length ? (m.devices || []).map(d => d.name).join(", ") : "Link a Windows computer")}
-    </div>
-    ${m.lock ? `<div class="note-card warn">🔒 Locked by ${esc(m.lock.by_name)} until ${clock(m.lock.until)}</div>` : ""}
-    ${bl.length ? `<div class="note-card warn"><b>🚫 Grounded apps</b><br>${bl.map(b => esc(b.label) + " until " + clock(b.until)).join("<br>")}</div>` : ""}`;
+/* a parent's controls for one child: the tiles that show right inside that child's card */
+function kidTiles(m) {
+  const lock = m.lock ? `Locked until ${clock(m.lock.until)}` : "Lock their devices", gr = (m.blocks || []).length ? `${m.blocks.length} grounded now` : "Block certain apps";
+  const dv = m.devices || [], dtxt = dv.length ? dv.map(d => esc(d.name)).join(", ") : "None linked yet";
+  return `<div class="tiles">
+      ${tile("screen", m.id, "⏱️", "Screen time", screenSub(m), !may(m, "screentime"))}
+      ${tile("lock", m.id, "🔒", "Lock device", lock)}
+      ${tile("ground", m.id, "🚫", "Ground apps", gr)}
+      ${tile("rules", m.id, "📋", "Rules and limit", "House rules, daily limit")}
+      ${tile("devices", m.id, "💻", "Computers", dtxt)}
+      ${tile("week", m.id, "📊", "This week", "Summary")}
+    </div>`;
+}
+
+function peopleHtml() {
+  const others = S.members.filter(m => m.id !== S.me);
+  if (!S.openSet && isParent()) { const k = others.find(m => m.role === "child"); if (k) S.open = k.id; S.openSet = true; }      // a parent lands with the first child already open, so the controls are right there
+  const rows = others.map(m => {
+    const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
+    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>💬 Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>📞 Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>📍 Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>🧭 Trail</button></div>${m.role === "child" && isParent() ? `<div class="ctlwrap">${kidTiles(m)}</div>` : (m.role === "child" ? `<div class="ctlwrap"><p class="tabhelp">${esc(screenLine(m).replace(/<[^>]+>/g, "")) || ""}</p></div>` : "")}` : "";
+    const chip = m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`;
+    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${screenLine(m)}${deviceLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
+  }).join("");
+  return rows || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press <b>Invite</b> at the top to add someone." : ""}</div>`;
 }
 
 function placesHtml() {
@@ -239,13 +233,37 @@ function placesHtml() {
 function jobsHtml() {
   const items = S.items.map(i => `<label class="item ${i.done ? "done" : ""}"><input type="checkbox" data-act="tick" data-id="${i.id}" ${i.done ? "checked" : ""}><span style="flex:1">${esc(i.text)}</span><button class="link" data-act="delitem" data-id="${i.id}" title="Delete" aria-label="Delete">✕</button></label>`).join("");
   const keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  return `<div class="sechead"><h3>Jobs and points</h3></div>${choresHtml()}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}
+  return `${choresHtml()}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}
     <form id="itemForm" style="display:flex;gap:8px"><input class="field" id="itemIn" placeholder="Add to the list" maxlength="120" autocomplete="off" value="${esc(keep)}"><button class="btn" type="submit">Add</button></form>`;
+}
+
+/* the Family tab: people first (their controls open right inside each card), then three small rows */
+function familyHtml() {
+  const n = jobsAlert(), hasHome = S.places.some(p => p.name === "Home");
+  return peopleHtml()
+    + accordion("jobs", "✅", "Jobs and list", n ? (isParent() ? n + " to approve" : n + " to do") : "Points and the family list", jobsHtml(), n)
+    + accordion("places", "📍", "Places and Home", hasHome ? S.places.length + " saved" : "Set the Home area", placesHtml())
+    + accordion("rules", "📋", "Family rules", "What the family agreed", `<p class="tabhelp">${isParent() ? "Write the house rules and set each child's daily limit." : "Read what your family agreed."}</p><button class="btn solid" data-act="rules" data-id="0">${isParent() ? "Edit the rules" : "Read the rules"}</button>`);
+}
+
+/* the Me tab: your own switches, then (for a child) everything about your own screen time in one place */
+function myControlsHtml() {
+  const m = me(); if (!m || m.role !== "child") return "";
+  const bl = m.blocks || [];
+  return `<div class="sechead"><h3>My screen time and controls</h3></div>
+    <div class="tiles">
+      ${tile("screen", m.id, "⏱️", "My screen time", screenSub(m))}
+      ${tile("myperms", m.id, "🎚️", "What parents can do", "You choose")}
+      ${tile("rules", m.id, "📋", "Family rules", "What you agreed")}
+      ${tile("devices", m.id, "💻", "My computers", (m.devices || []).length ? (m.devices || []).map(d => esc(d.name)).join(", ") : "Link a Windows computer")}
+    </div>
+    ${m.lock ? `<div class="note-card warn">🔒 Locked by ${esc(m.lock.by_name)} until ${clock(m.lock.until)}</div>` : ""}
+    ${bl.length ? `<div class="note-card warn"><b>🚫 Grounded apps</b><br>${bl.map(b => esc(b.label) + " until " + clock(b.until)).join("<br>")}</div>` : ""}`;
 }
 
 function renderSide() {
   const t = curTab(), keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  const body = { people: peopleHtml, controls: controlsHtml, jobs: jobsHtml, places: placesHtml, me: youCard }[t]();
+  const body = t === "me" ? youCard() + myControlsHtml() : familyHtml();
   const scroll = $("#side .tabbody") ? $("#side .tabbody").scrollTop : 0;
   $("#side").innerHTML = tabsBar() + `<div class="tabbody">${body}</div>`;
   const bd = $("#side .tabbody"); if (bd) bd.scrollTop = scroll;
@@ -536,6 +554,7 @@ function initChrome() {
   $("#msgs").onclick = e => { const b = e.target.closest("[data-lat]"); if (b) { S.map.flyTo([+b.dataset.lat, +b.dataset.lng], 16); L.popup().setLatLng([+b.dataset.lat, +b.dataset.lng]).setContent("📍 Here").openOn(S.map); } };
   $("#side").onclick = async e => {
     const tb = e.target.closest("[data-tab]"); if (tb) return setTab(tb.dataset.tab);
+    const ac = e.target.closest("[data-acc]"); if (ac) return toggleAcc(ac.dataset.acc);
     const tc = e.target.closest('[data-act="tocontrols"]'); if (tc) return setTab("controls");
     const pause = e.target.closest("[data-pause]"); if (pause) { const v = +pause.dataset.pause; return setSharing(v ? "paused" : "on", v); }
     if (e.target.closest("#tShare")) { return setSharing(me().share === "on" ? "off" : "on"); }

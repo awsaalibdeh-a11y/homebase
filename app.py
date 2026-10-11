@@ -1530,7 +1530,22 @@ def get_call(cid):
     c = my_call(cid)
     if not c:
         return err("Not found.", 404)
-    return jsonify(id=cid, status=c["status"], answer=c["answer"] if c["caller_id"] == g.m["id"] else None)
+    out = {"id": cid, "status": c["status"], "answer": c["answer"] if c["caller_id"] == g.m["id"] else None, "web_seen": bool(c["web_seen"])}
+    if c["callee_id"] == g.m["id"] and c["status"] == "ringing":                 # the person being called can pick the call up from anywhere (e.g. the ringing window on a computer)
+        who = db.one(select(db.members).where(db.members.c.id == c["caller_id"]))
+        out.update(offer=c["offer"], **{"from": c["caller_id"]}, name=who["name"] if who else "Someone", emoji=who["emoji"] if who else "🙂", urgent=bool(c["urgent"]))
+    return jsonify(out)
+
+
+@app.post("/api/calls/<int:cid>/seen")
+@need
+def call_seen(cid):
+    """A Homebase web page says it is ringing for this call, so a computer's own ringing window does not ring a second time."""
+    c = my_call(cid)
+    if not c or c["callee_id"] != g.m["id"]:
+        return err("Not found.", 404)
+    db.run(update(db.calls).where(db.calls.c.id == cid).values(web_seen=True))
+    return jsonify(ok=True)
 
 
 @app.post("/api/calls/<int:cid>/answer")

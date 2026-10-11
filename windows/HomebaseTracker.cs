@@ -90,6 +90,74 @@ class Toast : Form
     }
 }
 
+/// <summary>
+/// An incoming call, the way a phone does it: a big window in the middle of the screen, always on top, with a real ring sound that
+/// loops until the call is answered, declined, or goes unanswered. (A notification is easy to miss; this is not.)
+/// </summary>
+class RingWindow : Form
+{
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int a, int b, int c, int d, int e, int f);
+    readonly System.Windows.Forms.Timer life = new System.Windows.Forms.Timer(), pulse = new System.Windows.Forms.Timer();
+    SoundPlayer ring; int tick;
+    public bool Answered;
+
+    // two short warble bursts, then a pause: the classic phone ring, made in memory so nothing needs installing
+    static MemoryStream MakeRing()
+    {
+        int rate = 16000, secs = 4; short[] pcm = new short[rate * secs];
+        double[] starts = { 0.0, 0.55 }; double len = 0.4;
+        foreach (double st in starts)
+            for (int i = 0; i < (int)(len * rate); i++)
+            {
+                double t = (double)i / rate, env = Math.Min(1.0, Math.Min(t / 0.02, (len - t) / 0.03));
+                double v = 0.55 * Math.Sin(2 * Math.PI * 440 * t) + 0.45 * Math.Sin(2 * Math.PI * 480 * t);
+                pcm[(int)(st * rate) + i] = (short)(v * env * 16000);
+            }
+        MemoryStream ms = new MemoryStream(); BinaryWriter w = new BinaryWriter(ms);
+        int bytes = pcm.Length * 2;
+        w.Write(Encoding.ASCII.GetBytes("RIFF")); w.Write(36 + bytes); w.Write(Encoding.ASCII.GetBytes("WAVEfmt ")); w.Write(16); w.Write((short)1); w.Write((short)1);
+        w.Write(rate); w.Write(rate * 2); w.Write((short)2); w.Write((short)16); w.Write(Encoding.ASCII.GetBytes("data")); w.Write(bytes);
+        foreach (short p in pcm) w.Write(p);
+        w.Flush(); ms.Position = 0; return ms;
+    }
+
+    public RingWindow(string name, bool urgent, Action onAnswer, Action onDecline, Func<bool> stillRinging)
+    {
+        AutoScaleDimensions = new SizeF(96f, 96f); AutoScaleMode = AutoScaleMode.Dpi;
+        FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = true; TopMost = true; StartPosition = FormStartPosition.CenterScreen;
+        BackColor = Color.FromArgb(14, 14, 16); ForeColor = Color.White; Width = 420; Height = 330; Text = "Homebase call";
+        Label top = new Label { Text = urgent ? "URGENT HOMEBASE CALL" : "HOMEBASE CALL", Left = 0, Top = 22, Width = 420, Height = 22, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.FromArgb(140, 140, 150), Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+        Label who = new Label { Text = name, Left = 10, Top = 100, Width = 400, Height = 48, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI Emoji", 22f, FontStyle.Bold) };
+        Label sub = new Label { Text = "is calling you…", Left = 0, Top = 150, Width = 420, Height = 26, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.FromArgb(170, 170, 180), Font = new Font("Segoe UI", 11f) };
+        Controls.Add(top); Controls.Add(who); Controls.Add(sub);
+        Button no = new Button { Text = "Decline", Left = 40, Top = 230, Width = 150, Height = 54, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(255, 107, 116), ForeColor = Color.White, Font = new Font("Segoe UI", 13f, FontStyle.Bold) };
+        Button yes = new Button { Text = "Answer", Left = 230, Top = 230, Width = 150, Height = 54, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(61, 212, 155), ForeColor = Color.FromArgb(8, 16, 31), Font = new Font("Segoe UI", 13f, FontStyle.Bold) };
+        no.FlatAppearance.BorderSize = 0; yes.FlatAppearance.BorderSize = 0;
+        no.Click += delegate { try { onDecline(); } catch { } Close(); };
+        yes.Click += delegate { Answered = true; try { onAnswer(); } catch { } Close(); };
+        Controls.Add(no); Controls.Add(yes); AcceptButton = yes; CancelButton = no;
+        Shown += delegate
+        {
+            try { Region = System.Drawing.Region.FromHrgn(CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 28, 28)); } catch { }
+            try { ring = new SoundPlayer(MakeRing()); ring.PlayLooping(); } catch { }                 // loops until the window closes
+            Activate(); BringToFront();
+        };
+        // a soft pulse around the caller so it is obviously alive; and check every 2 s that the call is still ringing
+        pulse.Interval = 120; pulse.Tick += delegate { tick++; Invalidate(new Rectangle(110, 40, 200, 60)); }; pulse.Start();
+        life.Interval = 2000; life.Tick += delegate { if (tick > 400 || !stillRinging()) Close(); }; life.Start();
+        FormClosed += delegate { try { if (ring != null) ring.Stop(); } catch { } pulse.Stop(); life.Stop(); };
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        float r = 22 + (tick % 10) * 2.4f, a = Math.Max(0, 200 - (tick % 10) * 22);
+        using (Pen p = new Pen(Color.FromArgb((int)a, 61, 212, 155), 3f)) e.Graphics.DrawEllipse(p, 210 - r, 72 - r, r * 2, r * 2);
+        using (Brush b = new SolidBrush(Color.FromArgb(27, 27, 31))) e.Graphics.FillEllipse(b, 210 - 24, 72 - 24, 48, 48);
+        using (Font f = new Font("Segoe UI Emoji", 18f)) using (Brush t = new SolidBrush(Color.White)) { SizeF sz = e.Graphics.MeasureString("\U0001F4DE", f); e.Graphics.DrawString("\U0001F4DE", f, t, 210 - sz.Width / 2, 72 - sz.Height / 2); }
+    }
+}
+
 static class Native
 {
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
@@ -108,7 +176,7 @@ static class Native
 
 class App : ApplicationContext
 {
-    public const int Build = 17;                                              // bump with windows/BUILD on the server; computers update themselves when the server's is higher
+    public const int Build = 18;                                              // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -157,6 +225,15 @@ class App : ApplicationContext
         {
             Toast.Choose("Who is using this computer?", "So the right person is counted and locked.", 8, new[] { "✓ Aws", "Laith", "Link someone else..." }, delegate (int i) { });
             System.Windows.Forms.Timer sn = new System.Windows.Forms.Timer { Interval = 1200 }; sn.Tick += delegate { sn.Stop(); Toast.Snapshots(Environment.GetEnvironmentVariable("HB_SNAP") ?? Path.GetTempPath()); Application.Exit(); }; sn.Start();
+            Application.Run(); return;
+        }
+        if (args.Length > 0 && args[0] == "--ringtest")                                // shows the ringing window for a few seconds
+        {
+            RingWindow rw = new RingWindow("Mum \U0001F469", false, delegate { }, delegate { }, delegate { return true; });
+            rw.Show();
+            System.Windows.Forms.Timer sn = new System.Windows.Forms.Timer { Interval = 1500 }; sn.Tick += delegate { sn.Stop(); try { using (Bitmap bmp = new Bitmap(rw.Width, rw.Height)) { rw.DrawToBitmap(bmp, new Rectangle(0, 0, rw.Width, rw.Height)); bmp.Save(Path.Combine(Environment.GetEnvironmentVariable("HB_SNAP") ?? Path.GetTempPath(), "ring.png")); } } catch { } };
+            sn.Start();
+            System.Windows.Forms.Timer t = new System.Windows.Forms.Timer { Interval = 6000 }; t.Tick += delegate { Application.Exit(); }; t.Start();
             Application.Run(); return;
         }
         if (args.Length > 0 && args[0] == "--popuptest")                                // shows the pop-ups for a few seconds so they can be seen
@@ -386,6 +463,13 @@ class App : ApplicationContext
     static void SetShownBuild(int b) { try { File.WriteAllText(ShownFile, b.ToString()); } catch { } }
     string pendingOpen;
     DateTime lastUpdateCheck = DateTime.MinValue;
+    readonly HashSet<string> bgRunning = new HashSet<string>();
+    // slow jobs (scanning installed apps, downloading an update) run on their own thread, one at a time each, so the main loop keeps answering calls and enforcing locks
+    void Background(string name, Action work)
+    {
+        lock (bgRunning) { if (!bgRunning.Add(name)) return; }
+        new Thread(delegate () { try { work(); } catch (Exception e) { Log(name + ": " + e.Message); } finally { lock (bgRunning) bgRunning.Remove(name); } }) { IsBackground = true }.Start();
+    }
 
     // Ask the server for the newest build; if it is newer, download it, swap the files and restart. Nobody has to re-download again.
     void CheckUpdate()
@@ -421,23 +505,47 @@ class App : ApplicationContext
     }
     void Open(string path) { try { Process.Start(server + path); } catch { } }
 
-    // a call ringing on this computer: beep a ring pattern and show a balloon you can click to answer in the web app
-    void Ring(int callId, string who)
+    // A call ringing on this computer: open the ringing window (unless the Homebase web page is already open, which rings by itself).
+    // Answer opens Homebase at #answer=<id>, which picks the call up and connects the audio; Decline hangs up.
+    RingWindow ringWin;
+    void Ring(int callId, string who, bool urgent)
     {
         if (ringingCall == callId) return;
-        ringingCall = callId; pendingOpen = "/app";
-        Say("\U0001F4DE " + who + " is calling", "Homebase call", 30, "Answer in Homebase", delegate { Open("/app"); });
+        ringingCall = callId;
         new Thread(delegate ()
         {
-            DateTime start = DateTime.Now;
-            while (!stopping && ringingCall == callId && (DateTime.Now - start).TotalSeconds < 35)
+            Thread.Sleep(1500);                                                       // give an open Homebase page a moment to say it is ringing, so it never rings twice
+            try
             {
-                try { Console.Beep(880, 350); Thread.Sleep(180); Console.Beep(660, 350); } catch { try { SystemSounds.Exclamation.Play(); } catch { } }
-                Thread.Sleep(1600);
-                try { int st; string txt = Http("GET", "/api/calls/" + callId, null, out st); var d = Json.Deserialize<Dictionary<string, object>>(txt); if (!d.ContainsKey("status") || Convert.ToString(d["status"]) != "ringing") break; } catch { }
+                int st; var d = Json.Deserialize<Dictionary<string, object>>(Http("GET", "/api/calls/" + callId, null, out st));
+                if (!d.ContainsKey("status") || Convert.ToString(d["status"]) != "ringing") { ringingCall = 0; return; }
+                if (d.ContainsKey("web_seen") && Convert.ToBoolean(d["web_seen"]) && BrowserHasHomebaseOpen()) { Log("call " + callId + ": the Homebase page on this computer is ringing"); return; }
             }
-            if (ringingCall == callId) ringingCall = 0;
+            catch (Exception e) { Log("ring check: " + e.Message); }                 // if in doubt, ring: a call that rings nowhere is the worst outcome
+            if (Environment.GetEnvironmentVariable("HB_DEBUG") != null) Log("ring: opening window for call " + callId + " sync=" + (sync != null) + " handle=" + (sync != null && sync.IsHandleCreated));
+            if (sync == null || !sync.IsHandleCreated) { Log("ring: no UI thread handle, cannot show the window"); return; }
+            sync.BeginInvoke(new Action(delegate
+            {
+                try
+                {
+                    if (ringWin != null && !ringWin.IsDisposed) ringWin.Close();
+                    ringWin = new RingWindow(who, urgent,
+                        delegate { Open("/app#answer=" + callId); },
+                        delegate { try { int st2; Http("POST", "/api/calls/" + callId + "/decline", new Dictionary<string, object>(), out st2); } catch { } },
+                        delegate { try { int st3; string txt = Http("GET", "/api/calls/" + callId, null, out st3); var d2 = Json.Deserialize<Dictionary<string, object>>(txt); return d2.ContainsKey("status") && Convert.ToString(d2["status"]) == "ringing"; } catch { return true; } });
+                    ringWin.FormClosed += delegate { if (ringingCall == callId) ringingCall = 0; };
+                    ringWin.Show();
+                }
+                catch (Exception e) { Log("ring: " + e.Message); ringingCall = 0; }
+            }));
         }) { IsBackground = true }.Start();
+    }
+
+    // is a browser window titled "Homebase" open? Then the page itself is ringing and a second ring would double up.
+    static bool BrowserHasHomebaseOpen()
+    {
+        try { foreach (Process p in Process.GetProcesses()) { try { if (Array.IndexOf(Browsers, p.ProcessName.ToLower()) >= 0) { string t = (p.MainWindowTitle ?? "").Trim(); if (t == "Homebase" || t.StartsWith("Homebase - ")) return true; } } catch { } } } catch { }
+        return false;
     }
 
     void Quit() { stopping = true; if (tray != null) { tray.Visible = false; tray.Dispose(); } Application.Exit(); }
@@ -469,12 +577,13 @@ class App : ApplicationContext
         while (!stopping)
         {
             Thread.Sleep(tick * 1000);
-            try { Step(); } catch (Exception e) { Log("step: " + e.Message); }
+            try { Step(); } catch (Exception e) { Log("step: " + e); }
         }
     }
 
     void Step()
     {
+        if (Environment.GetEnvironmentVariable("HB_DEBUG") != null) Log("step cursor=" + cursor);
         DateTime now = DateTime.Now; double elapsed = Math.Min(45, (now - lastTick).TotalSeconds); lastTick = now;
         string today = now.ToString("yyyy-MM-dd");
         if (today != day) { if (dirty) Send(); day = today; apps.Clear(); dirty = false; }
@@ -520,16 +629,17 @@ class App : ApplicationContext
                         else if (type == "call" && pl != null)
                         {
                             int cid = pl.ContainsKey("id") ? Convert.ToInt32(pl["id"]) : 0;
-                            if (cid > 0 && seenCalls.Add(cid)) Ring(cid, pl.ContainsKey("name") ? Convert.ToString(pl["name"]) : "Someone");
+                            if (Environment.GetEnvironmentVariable("HB_DEBUG") != null) Log("event: call " + cid);
+                            if (cid > 0 && seenCalls.Add(cid)) Ring(cid, pl.ContainsKey("name") ? Convert.ToString(pl["name"]) : "Someone", pl.ContainsKey("urgent") && Convert.ToBoolean(pl["urgent"]));
                         }
                     }
                 }
         }
         catch (Exception e) { Log("events: " + e.Message); }
         try { EnforceBlocks(); } catch (Exception e) { Log("blocks: " + e.Message); }
-        if ((hbDirIsNull() || Environment.GetEnvironmentVariable("HB_UPDATE") != null) && (now - lastUpdateCheck).TotalMinutes > 20) { lastUpdateCheck = now; try { CheckUpdate(); } catch (Exception e) { Log("update: " + e.Message); } }
+        if ((hbDirIsNull() || Environment.GetEnvironmentVariable("HB_UPDATE") != null) && (now - lastUpdateCheck).TotalMinutes > 20) { lastUpdateCheck = now; Background("update", CheckUpdate); }
         if ((now - lastBeat).TotalSeconds > 30) { lastBeat = now; try { int hs; Http("POST", "/api/devices/status", new Dictionary<string, object> { { "status", nowDoing }, { "version", "b" + Build } }, out hs); } catch (Exception e) { Log("beat: " + e.Message); } }
-        if ((now - lastApps).TotalMinutes > 60) { lastApps = now; try { ReportApps(); } catch (Exception e) { Log("apps: " + e.Message); } }
+        if ((now - lastApps).TotalMinutes > 60) { lastApps = now; Background("apps", ReportApps); }
         double idleNow = Native.Idle();
         if (idleNow > 1800) wasAway = true;                                           // away for 30+ minutes: someone else may sit down next
         if (wasAway && idleNow < 20 && profiles.Count > 1) { wasAway = false; sync.BeginInvoke(new Action(delegate { PickPerson(false); })); }

@@ -93,7 +93,7 @@ window.Calls = (() => {
     try { if ((await api("/api/calls/" + p.id)).status !== "ringing") return; } catch (e) { return; }
     if (C.status) { api(`/api/calls/${p.id}/decline`, "POST").catch(() => {}); return; }
     C.id = p.id; C.peer = { id: p.from, name: p.name, emoji: p.emoji }; C.incoming = true; C.offer = p.offer;
-    setStatus("ringing"); ringStart(); notify(`${p.name} is calling`, "Open Homebase to answer");
+    setStatus("ringing"); ringStart(); api(`/api/calls/${p.id}/seen`, "POST").catch(() => {}); notify(`${p.name} is calling`, "Open Homebase to answer");
     C.timeout = setTimeout(() => { if (C.status === "ringing") finish("Missed call from " + p.name); }, 46000);
   }
   async function accept() {
@@ -107,6 +107,17 @@ window.Calls = (() => {
   }
   function decline() { if (C.id) api(`/api/calls/${C.id}/decline`, "POST").catch(() => {}); finish(); }
   function hangup() { if (C.id) api(`/api/calls/${C.id}/end`, "POST").catch(() => {}); finish(); }
+
+  // Pick up a call that is already ringing (the Windows ringing window opens the app at #answer=ID): fetch it, then answer straight away
+  async function answerNow(id) {
+    try {
+      const d = await api("/api/calls/" + id);
+      if (d.status !== "ringing" || !d.offer) return toast("That call is over.");
+      if (C.status) return;
+      C.id = id; C.peer = { id: d.from, name: d.name, emoji: d.emoji }; C.incoming = true; C.offer = d.offer;
+      setStatus("ringing"); await accept();
+    } catch (e) { toast("Could not pick up the call."); }
+  }
 
   async function onEvent(type, p) {
     if (type === "call") return incoming(p);
@@ -122,5 +133,5 @@ window.Calls = (() => {
       else if (p.status === "ended") finish("Call ended");
     }
   }
-  return { start, onEvent };
+  return { start, onEvent, answerNow };
 })();

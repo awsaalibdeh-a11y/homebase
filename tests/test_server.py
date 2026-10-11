@@ -644,6 +644,26 @@ class AppReporting(Base):
         self.assertEqual(sorted(a["key"] for a in avail), ["chrome", "roblox"])                         # the 1-letter key is dropped
 
 
+class CallHandoff(Base):
+    OFFER = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+
+    def test_a_web_page_can_say_it_is_ringing_so_a_computer_does_not_ring_twice(self):
+        cid = self.post(self.mum, "/api/calls", to=self.kid_id, offer=self.OFFER).get_json()["id"]
+        self.assertFalse(self.get(self.kid, f"/api/calls/{cid}").get_json()["web_seen"])
+        self.assertEqual(self.post(self.mum, f"/api/calls/{cid}/seen").status_code, 404)             # only the person being called
+        self.assertEqual(self.post(self.kid, f"/api/calls/{cid}/seen").status_code, 200)
+        self.assertTrue(self.get(self.kid, f"/api/calls/{cid}").get_json()["web_seen"])
+
+    def test_the_person_being_called_can_fetch_the_call_to_answer_it_from_anywhere(self):
+        cid = self.post(self.mum, "/api/calls", to=self.kid_id, offer=self.OFFER).get_json()["id"]
+        d = self.get(self.kid, f"/api/calls/{cid}").get_json()
+        self.assertEqual((d["status"], d["name"], d["from"], d["offer"]), ("ringing", "Mum", self.mum_id, self.OFFER))
+        c = self.get(self.mum, f"/api/calls/{cid}").get_json()                                       # the caller does not get their own offer echoed back
+        self.assertNotIn("offer", c)
+        self.post(self.kid, f"/api/calls/{cid}/decline")
+        self.assertNotIn("offer", self.get(self.kid, f"/api/calls/{cid}").get_json())               # and once it is over there is nothing to answer
+
+
 class WindowsUpdate(Base):
     def test_the_newest_build_is_published_for_self_update(self):
         d = self.c.get("/api/windows/version").get_json()                                              # no sign-in needed: a computer asks before it is signed in
