@@ -4,58 +4,94 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Homebase · stay close, stay yourself</title>
-  <meta name="description" content="A family app for location sharing, messages and calls that is honest about what it shares and never spies.">
-  <meta name="theme-color" content="#eef6ff">
+  <meta name="description" content="A family app for location sharing, messages, calls and screen time that is honest about what it shares and never spies.">
+  <meta name="theme-color" content="#0a0a0b">
   <style>
-    :root { --ink: #16213a; --muted: #5f6b86; --blue: #2f7df6; --blue-d: #1b57c4; --card: #fff; --bg: #f2f7ff; --mint: #1fb88a; }
+    :root { --bg: #0a0a0b; --surface: #121214; --surface2: #1b1b1f; --line: #26262b; --ink: #ececf0; --muted: #8d8d96; --accent: #5b93ff; --accent-ink: #08101f; --ok: #3dd49b; --warn: #f0b429; color-scheme: dark; }
     * { box-sizing: border-box; }
-    body { margin: 0; font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: radial-gradient(900px 500px at 10% -10%, #dcebff, transparent 60%), radial-gradient(800px 500px at 100% 0, #ffe8ef, transparent 55%), var(--bg); }
-    main { max-width: 52rem; margin: 0 auto; padding: 2.2rem 1.2rem 4rem; }
-    .logo { display: inline-flex; align-items: center; gap: .6rem; font-weight: 800; font-size: 1.4rem; } .logo i { display: grid; place-items: center; width: 2.6rem; height: 2.6rem; border-radius: 0.9rem; background: linear-gradient(135deg, #5aa2ff, #2f7df6); color: #fff; font-style: normal; font-size: 1.4rem; }
-    h1 { margin: 1.4rem 0 .6rem; font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; letter-spacing: -0.02em; } h1 em { font-style: normal; color: var(--blue); }
-    .lead { color: var(--muted); max-width: 38rem; font-size: 1.1rem; }
-    .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .85rem 1.5rem; border-radius: 999px; background: linear-gradient(135deg, #4d97ff, #2f7df6); color: #fff; font-weight: 700; text-decoration: none; box-shadow: 0 14px 28px -14px rgba(47, 125, 246, .9); }
-    .btn.off { background: #cfd8ea; box-shadow: none; }
-    .grid { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin: 2rem 0; }
-    .card { padding: 1.1rem 1.2rem; border-radius: 1.3rem; background: var(--card); box-shadow: 0 1px 2px rgba(30, 50, 100, .06), 0 18px 40px -26px rgba(40, 70, 160, .4); } .card b { display: block; margin-bottom: .2rem; } .card span { font-size: 1.6rem; }
-    h2 { margin: 2.4rem 0 .6rem; font-size: 1.5rem; } ul { padding-left: 1.2rem; } li { margin: .35rem 0; } .muted { color: var(--muted); }
-    .promise { padding: 1.2rem 1.4rem; border-radius: 1.4rem; background: linear-gradient(135deg, #e6fbf3, #eaf3ff); box-shadow: inset 0 0 0 1.5px #bfe9d8; }
-    ol li { margin: .5rem 0; } code { padding: .1rem .4rem; border-radius: .4rem; background: #e6eefc; }
+    html { background: var(--bg); }
+    body { margin: 0; font: 17px/1.6 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: radial-gradient(800px 420px at 50% -8%, rgba(91,147,255,.10), transparent 65%), var(--bg); -webkit-font-smoothing: antialiased; }
+    main { max-width: 56rem; margin: 0 auto; padding: 2.4rem 1.2rem 4.5rem; }
+    .logo { display: inline-flex; align-items: center; gap: .65rem; font-weight: 700; font-size: 1.25rem; letter-spacing: -.01em; }
+    .logo i { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: .85rem; background: var(--surface2); border: 1px solid var(--line); font-style: normal; font-size: 1.3rem; }
+    h1 { margin: 1.6rem 0 .7rem; font-size: clamp(2.1rem, 6vw, 3.4rem); line-height: 1.06; letter-spacing: -.03em; font-weight: 750; } h1 em { font-style: normal; color: var(--accent); }
+    .lead { color: var(--muted); max-width: 40rem; font-size: 1.1rem; }
+    .cta { display: flex; flex-wrap: wrap; gap: .7rem; margin: 1.6rem 0 .6rem; align-items: center; }
+    .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .8rem 1.35rem; border-radius: .9rem; background: var(--surface2); border: 1px solid var(--line); color: var(--ink); font-weight: 650; text-decoration: none; font-size: .98rem; transition: background .15s, border-color .15s; }
+    .btn:hover { background: #26262d; border-color: #3a3a42; }
+    .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; } .btn.primary:hover { filter: brightness(1.1); background: var(--accent); }
+    .btn.off { opacity: .55; }
+    .muted { color: var(--muted); } .small { font-size: .9rem; }
+    h2 { margin: 2.8rem 0 .8rem; font-size: 1.35rem; letter-spacing: -.02em; }
+    .grid { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr)); margin: 1.8rem 0 0; }
+    .card { padding: 1.1rem 1.2rem; border-radius: 1.2rem; background: var(--surface); border: 1px solid var(--line); }
+    .card span { font-size: 1.5rem; display: block; margin-bottom: .35rem; } .card b { display: block; margin-bottom: .2rem; font-size: 1.02rem; } .card p { margin: 0; color: var(--muted); font-size: .96rem; line-height: 1.5; }
+    .two { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); margin-top: 1.2rem; }
+    .box { padding: 1.2rem 1.4rem; border-radius: 1.3rem; border: 1px solid var(--line); background: var(--surface); }
+    .box h3 { margin: 0 0 .6rem; font-size: 1.05rem; } .box ul { margin: 0; padding-left: 1.15rem; } .box li { margin: .4rem 0; color: #cfcfd6; font-size: .98rem; }
+    .box.yes { border-color: rgba(61,212,155,.35); } .box.yes h3 { color: var(--ok); }
+    .box.no { border-color: rgba(240,180,41,.35); } .box.no h3 { color: var(--warn); }
+    ol { padding-left: 1.2rem; } ol li { margin: .55rem 0; color: #cfcfd6; }
+    code { padding: .12rem .42rem; border-radius: .45rem; background: var(--surface2); border: 1px solid var(--line); font-size: .9em; }
+    a { color: var(--accent); }
+    footer { margin-top: 3rem; color: var(--muted); font-size: .9rem; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: .6rem; }
   </style>
 </head>
 <body>
 <main>
   <div class="logo"><i>🏠</i> Homebase</div>
   <h1>Stay close. <em>Stay yourself.</em></h1>
-  <p class="lead">A family app that lets your parents see where you are, message you and call you, and that is honest about all of it. Everything it shares is on your screen, you can pause it whenever you need, and it never spies.</p>
-  {% if has_apk %}<p><a class="btn" href="/download">⬇ Download for Android</a> <a class="btn" href="/app">💻 Use it on your laptop</a> <span class="muted">Version {{ version }} · Android 8 or newer</span></p>
-  {% else %}<p><span class="btn off">Android app coming soon</span> <a class="btn" href="/app">💻 Use it on your laptop</a></p>{% endif %}
+  <p class="lead">A family app where parents can see where you are, message and call you, and help with screen time, and where everything it does is on your screen. Nothing is hidden, and you can always see what your family can see.</p>
+  <div class="cta">
+    {% if has_apk %}<a class="btn primary" href="/download">⬇ Android app</a>{% else %}<span class="btn off">Android app coming soon</span>{% endif %}
+    <a class="btn" href="/app">💻 Use it on your laptop</a>
+    <a class="btn" href="/download/windows">🪟 Windows tracker</a>
+    {% if has_apk %}<span class="muted small">Version {{ version }} · Android 8 or newer</span>{% endif %}
+  </div>
 
   <div class="grid">
-    <div class="card"><span>📍</span><b>Location you can see</b>Parents see you on a map. A notification on your tablet always says it is on, and you can pause it.</div>
-    <div class="card"><span>💬</span><b>Messages that ring</b>Text each other, send check-ins, and get a proper ring when someone calls.</div>
-    <div class="card"><span>📞</span><b>Real calls</b>Voice calls over Wi-Fi or data. Quiet hours keep it calm, and an emergency can still get through.</div>
-    <div class="card"><span>🙋</span><b>Ask, don't track</b>"Where are you?" is a request you can answer or say not now to.</div>
+    <div class="card"><span>📍</span><b>A shared map</b><p>Everyone who is sharing shows up, parents too. If someone goes offline you still see where they last were.</p></div>
+    <div class="card"><span>💬</span><b>Messages and calls</b><p>Texts, check-ins, an SOS, and calls that really ring on phone and computer.</p></div>
+    <div class="card"><span>🎮</span><b>Honest screen time</b><p>Counts only time spent playing or watching, never homework, and shows the child exactly what the family sees.</p></div>
+    <div class="card"><span>🚫</span><b>Grounding and locks</b><p>A parent can lock a device or ground certain apps for a while, with a minute's warning. Everyone sees it in the family chat.</p></div>
+    <div class="card"><span>✅</span><b>Jobs and points</b><p>Parents set jobs, children tick them off, parents approve them for points.</p></div>
+    <div class="card"><span>🙋</span><b>Ask, don't track</b><p>"Where are you?" is a request you can answer or say not now to.</p></div>
   </div>
 
-  <div class="promise">
-    <h2 style="margin-top:0">What Homebase will never do</h2>
-    <ul>
-      <li>Hide itself or share anything in secret.</li>
-      <li>Read your other apps, your browsing or your private messages.</li>
-      <li>Switch on your microphone or camera by itself.</li>
-      <li>Lock your tablet or limit your screen time.</li>
-    </ul>
-    <p class="muted" style="margin-bottom:0">Location is kept for 7 days, then deleted. Leave the family any time and everything you shared is removed.</p>
+  <h2>What is shared, and what never is</h2>
+  <div class="two">
+    <div class="box yes">
+      <h3>What Homebase does</h3>
+      <ul>
+        <li>Shares your location while sharing is on. You can pause any time and your family sees that it is paused.</li>
+        <li>Counts minutes spent playing or watching, per app, if you turn screen time on.</li>
+        <li>Lets a parent lock a device (never more than 4 hours a day) or ground apps for a while. You can always ask to be unlocked or send an SOS.</li>
+        <li>Tells the family whenever a lock, grounding or new device happens, so nothing is a surprise.</li>
+      </ul>
+    </div>
+    <div class="box no">
+      <h3>What it never does</h3>
+      <ul>
+        <li>Hide itself, or do anything in secret. Every device has an icon and every action is announced.</li>
+        <li>Read your messages in other apps, your browsing, your files, or what is on your screen.</li>
+        <li>Switch on your microphone or camera by itself.</li>
+        <li>Count homework or school apps as screen time.</li>
+      </ul>
+    </div>
   </div>
+  <p class="muted small">Location is kept for 7 days, screen time for a month, then both are deleted. You can delete your own data, or leave the family, any time.</p>
 
   <h2>Set it up in three minutes</h2>
   <ol>
-    <li>On a parent's phone: install, choose <b>Create a family</b>, then <b>Invite</b> to get a code.</li>
-    <li>On the tablet: install, choose <b>Join with a code</b>, read what is shared, and say yes.</li>
+    <li>On a parent's phone or laptop: <b>Create a family</b>, then <b>Invite</b> to get a code for each person.</li>
+    <li>On a child's phone: install the Android app, choose <b>Join with a code</b>, read what is shared, and say yes.</li>
+    <li>On a Windows computer: open <b>Menu, Screen time, Link a Windows computer</b>, download the tracker, and type the 6-digit code. If two brothers share one laptop, it asks who is using it.</li>
     <li>Allow location, notifications and the microphone, and turn off battery saving for Homebase so it can ring.</li>
   </ol>
-  <p class="muted">Installing from outside the Play Store: when Android asks, allow <code>Install unknown apps</code> for your browser.</p>
+  <p class="muted small">Installing from outside the Play Store: when Android asks, allow <code>Install unknown apps</code> for your browser. On Windows, if it says it protected your PC, press <b>More info</b>, then <b>Run anyway</b>.</p>
+
+  <footer>Made by Aws, with Claude's help. Built with ChatGPT Agent Builder and the OpenAI API.</footer>
 </main>
 <script src="/static/hub.js" data-app="homebase" defer></script>
 </body>
