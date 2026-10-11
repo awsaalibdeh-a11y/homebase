@@ -168,24 +168,88 @@ function youCard() {
     <div class="shareline"><div><b>Share my location</b><small>${hint}</small></div><button class="tg ${on ? "on" : ""}" id="tShare" aria-label="Share my location"></button></div>
     ${on && !S.geo ? `<button class="btn solid" id="bAllow">Allow this laptop to share</button>` : ""}
     ${notifyState() === "default" ? `<button class="btn" id="bNotify">🔔 Turn on desktop notifications for messages and calls</button>` : ""}
-    <div class="shareline"><div><b>Family rules</b><small>${m.role === "parent" ? "Set the house rules and daily limits." : "What your family agreed."}</small></div><button class="btn sm" id="bRules">${m.role === "parent" ? "Edit" : "Read"}</button></div>
-    ${m.role === "child" && (m.blocks || []).length ? `<div class="shareline"><div><b>🚫 Grounded apps</b><small>${m.blocks.map(b => esc(b.label) + " until " + clock(b.until)).join(" · ")}</small></div></div>` : ""}
-    ${m.role === "child" ? `<div class="shareline"><div><b>Screen time</b><small>Only time spent playing or watching.</small></div><button class="btn sm" id="bScreen">See</button></div>` : ""}
     ${on || paused ? `<div class="quick">Pause for <button class="btn sm" data-pause="15">15 min</button><button class="btn sm" data-pause="60">1 hour</button>${paused ? `<button class="btn sm" data-pause="0">Resume</button>` : ""}</div>` : ""}</section>`;
 }
-function renderSide() {
+/* ---------- the left panel: five clearly labelled tabs instead of one long scroll ---------- */
+const TABS = [["people", "👥", "People"], ["controls", "🎛️", "Controls"], ["jobs", "✅", "Jobs"], ["places", "📍", "Places"], ["me", "🙂", "Me"]];
+function curTab() { const t = S.tab || localStorage.getItem("hb_tab") || "people"; return TABS.some(x => x[0] === t) ? t : "people"; }
+function setTab(t) { S.tab = t; try { localStorage.setItem("hb_tab", t); } catch (e) { /* private mode */ } renderSide(); const bd = $("#side .tabbody"); if (bd) bd.scrollTop = 0; }
+
+function tabBadge(t) {
+  if (t === "jobs") { const n = S.chores.filter(c => isParent() ? c.status === "done" : (c.status === "open" && (!c.to || c.to === S.me))).length; return n ? `<i class="tb">${n}</i>` : ""; }
+  if (t === "controls") { const kids = S.members.filter(m => m.role === "child"); const on = isParent() ? kids.some(m => m.lock || (m.blocks || []).length) : (me().lock || (me().blocks || []).length); return on ? '<i class="tb dot"></i>' : ""; }
+  return "";
+}
+function tabsBar() {
+  const t = curTab();
+  return `<nav class="stabs" role="tablist" aria-label="Sections">${TABS.map(([k, e, n]) => `<button role="tab" class="${t === k ? "on" : ""}" aria-selected="${t === k}" data-tab="${k}"><span class="ti">${e}</span><span class="tn">${n}</span>${tabBadge(k)}</button>`).join("")}</nav>`;
+}
+
+function peopleHtml() {
   const others = S.members.filter(m => m.id !== S.me);
-  const people = others.map(m => {
+  const rows = others.map(m => {
     const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
-    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>Trail</button>${m.role === "child" && isParent() ? `<button class="btn sm" data-act="ground" data-id="${m.id}">${(m.blocks || []).length ? "🚫 Grounded (" + m.blocks.length + ")" : "Ground apps"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="lock" data-id="${m.id}">${m.lock ? "🔒 Locked" : "Lock device"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="screen" data-id="${m.id}" ${may(m, "screentime") ? "" : "disabled"}>Screen time</button>` : ""}</div>` : "";
-    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${deviceLine(m)}</span>${m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`}</button>${offTags(m)}${acts}</div>`;
-  }).join("") || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press Invite to add someone." : ""}</div>`;
-  const places = S.places.map(p => `<div class="place"><span>${esc(p.emoji)} ${esc(p.name)} <small>${p.radius} m</small></span>${isParent() ? `<button class="btn sm" data-act="delplace" data-id="${p.id}">Remove</button>` : ""}</div>`).join("") || `<div class="empty">No saved places yet.${isParent() ? " Press ＋ Place on the map." : ""}</div>`;
+    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>💬 Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>📞 Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>📍 Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>🧭 Trail</button>${m.role === "child" && isParent() ? `<button class="btn sm solid" data-act="tocontrols">🎛️ Controls</button>` : ""}</div>` : "";
+    const chip = m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`;
+    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${deviceLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
+  }).join("");
+  return rows || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press <b>Invite</b> at the top to add someone." : ""}</div>`;
+}
+
+function tile(act, id, emoji, title, sub, off) {
+  return `<button class="tile" data-act="${act}" data-id="${id}" ${off ? "disabled" : ""}><span class="te">${emoji}</span><b>${title}</b><small>${sub}</small></button>`;
+}
+function controlsHtml() {
+  const kids = S.members.filter(m => m.role === "child");
+  if (isParent()) {
+    if (!kids.length) return `<div class="empty">No children in the family yet. Press <b>Invite</b> at the top to add one.</div>`;
+    return `<p class="tabhelp">Everything for each child, in one place. Tap a tile.</p>` + kids.map(m => {
+      const lock = m.lock ? `Locked until ${clock(m.lock.until)}` : "Lock their devices", gr = (m.blocks || []).length ? `${m.blocks.length} grounded now` : "Block certain apps";
+      const dv = m.devices || [], dtxt = dv.length ? dv.map(d => d.name).join(", ") : "None linked yet";
+      return `<section class="ctl"><div class="head"><span class="ava">${avaInner(m)}</span><div><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small></div></div>
+        <div class="tiles">
+          ${tile("screen", m.id, "⏱️", "Screen time", may(m, "screentime") ? "Minutes and apps" : "Switched off by " + esc(m.name), !may(m, "screentime"))}
+          ${tile("lock", m.id, "🔒", "Lock device", lock)}
+          ${tile("ground", m.id, "🚫", "Ground apps", gr)}
+          ${tile("rules", m.id, "📋", "Rules and limit", "House rules, daily limit")}
+          ${tile("devices", m.id, "💻", "Computers", dtxt)}
+          ${tile("week", m.id, "📊", "This week", "Summary")}
+        </div></section>`;
+    }).join("");
+  }
+  const m = me();
+  if (m.role !== "child") return `<div class="empty">Nothing to set up here.</div>`;
+  const bl = m.blocks || [];
+  return `<p class="tabhelp">Everything about your screen time, in one place. You can always see what your family sees.</p>
+    <div class="tiles">
+      ${tile("screen", m.id, "⏱️", "My screen time", "Only playing and watching")}
+      ${tile("myperms", m.id, "🎚️", "What parents can do", "You choose")}
+      ${tile("rules", m.id, "📋", "Family rules", "What you agreed")}
+      ${tile("devices", m.id, "💻", "My computers", (m.devices || []).length ? (m.devices || []).map(d => d.name).join(", ") : "Link a Windows computer")}
+    </div>
+    ${m.lock ? `<div class="note-card warn">🔒 Locked by ${esc(m.lock.by_name)} until ${clock(m.lock.until)}</div>` : ""}
+    ${bl.length ? `<div class="note-card warn"><b>🚫 Grounded apps</b><br>${bl.map(b => esc(b.label) + " until " + clock(b.until)).join("<br>")}</div>` : ""}`;
+}
+
+function placesHtml() {
+  const hasHome = S.places.some(p => p.name === "Home");
+  const places = S.places.map(p => `<div class="place"><span>${esc(p.emoji)} ${esc(p.name)} <small>${p.radius} m</small></span>${isParent() ? `<button class="btn sm" data-act="delplace" data-id="${p.id}">Remove</button>` : ""}</div>`).join("") || `<div class="empty">No saved places yet.${isParent() ? " Press <b>＋ Place</b> under the map." : ""}</div>`;
+  return (isParent() ? `<button class="btn ${hasHome ? "" : "solid"}" id="bHome" style="width:100%">🏠 ${hasHome ? "Move the Home area" : "Set the Home area"}</button>` : (hasHome ? "" : '<div class="empty">A parent can set the Home area.</div>')) + places;
+}
+function jobsHtml() {
   const items = S.items.map(i => `<label class="item ${i.done ? "done" : ""}"><input type="checkbox" data-act="tick" data-id="${i.id}" ${i.done ? "checked" : ""}><span style="flex:1">${esc(i.text)}</span><button class="link" data-act="delitem" data-id="${i.id}" title="Delete" aria-label="Delete">✕</button></label>`).join("");
   const keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  $("#side").innerHTML = youCard() + `<div class="sechead"><h3>People</h3></div>${people}<div class="sechead"><h3>Saved places</h3></div>${isParent() ? `<button class="btn ${S.places.some(p => p.name === "Home") ? "" : "solid"}" id="bHome" style="width:100%">🏠 ${S.places.some(p => p.name === "Home") ? "Move the Home area" : "Set the Home area"}</button>` : (S.places.some(p => p.name === "Home") ? "" : '<div class="empty">A parent can set the Home area.</div>')}${places}<div class="sechead"><h3>Jobs</h3></div>${choresHtml()}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}
+  return `<div class="sechead"><h3>Jobs and points</h3></div>${choresHtml()}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}
     <form id="itemForm" style="display:flex;gap:8px"><input class="field" id="itemIn" placeholder="Add to the list" maxlength="120" autocomplete="off" value="${esc(keep)}"><button class="btn" type="submit">Add</button></form>`;
-  if (keep) { const i = $("#itemIn"); i.focus(); i.setSelectionRange(keep.length, keep.length); }
+}
+
+function renderSide() {
+  const t = curTab(), keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
+  const body = { people: peopleHtml, controls: controlsHtml, jobs: jobsHtml, places: placesHtml, me: youCard }[t]();
+  const scroll = $("#side .tabbody") ? $("#side .tabbody").scrollTop : 0;
+  $("#side").innerHTML = tabsBar() + `<div class="tabbody">${body}</div>`;
+  const bd = $("#side .tabbody"); if (bd) bd.scrollTop = scroll;
+  if (keep) { const i = $("#itemIn"); if (i) { i.focus(); i.setSelectionRange(keep.length, keep.length); } }
 }
 
 /* ---------- map ---------- */
@@ -471,6 +535,8 @@ function initChrome() {
   $("#composer").onsubmit = async e => { e.preventDefault(); const v = $("#msgIn").value.trim(); if (!v) return; $("#msgIn").value = ""; try { await sendMsg("text", v); } catch (err) { toast(err.message); $("#msgIn").value = v; } };
   $("#msgs").onclick = e => { const b = e.target.closest("[data-lat]"); if (b) { S.map.flyTo([+b.dataset.lat, +b.dataset.lng], 16); L.popup().setLatLng([+b.dataset.lat, +b.dataset.lng]).setContent("📍 Here").openOn(S.map); } };
   $("#side").onclick = async e => {
+    const tb = e.target.closest("[data-tab]"); if (tb) return setTab(tb.dataset.tab);
+    const tc = e.target.closest('[data-act="tocontrols"]'); if (tc) return setTab("controls");
     const pause = e.target.closest("[data-pause]"); if (pause) { const v = +pause.dataset.pause; return setSharing(v ? "paused" : "on", v); }
     if (e.target.closest("#tShare")) { return setSharing(me().share === "on" ? "off" : "on"); }
     if (e.target.closest("#bAllow")) { return startGeo(); }
@@ -485,6 +551,10 @@ function initChrome() {
     else if (act === "ping") askWhere(m);
     else if (act === "trail") showTrail(id);
     else if (act === "screen") screenDialog(id);
+    else if (act === "rules") rulesDialog();
+    else if (act === "week") screenDialog(id);
+    else if (act === "devices") devicesDialog(id);
+    else if (act === "myperms") meDialog();
     else if (act === "lock") lockDialog(id);
     else if (act === "ground") groundDialog(id);
     else if (act === "delplace") { if (confirm("Remove this place?")) { await api("/api/places/" + id, "DELETE").catch(err => toast(err.message)); refreshFamily(); } }
@@ -704,5 +774,18 @@ function uploadAvatar(file) {
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("That image could not be read.")); };
     img.src = url;
+  });
+}
+
+
+/* ---------- computers and tablets linked to a person ---------- */
+function devicesDialog(id) {
+  const m = member(id) || me(), mine = id === S.me, ds = m.devices || [], now = Date.now() / 1000;
+  modal(`<h2>💻 ${mine ? "My computers" : esc(m.name) + "'s computers"}</h2><div class="sub">${ds.length ? "These count screen time, follow locks and grounded apps, and show pop-ups." : "No computer is linked yet."}</div>
+    ${ds.map(d => { const quiet = now - d.last_seen > 20 * 60; return `<div class="sw"><div><b>${d.kind === "windows" ? "💻" : "📱"} ${esc(d.name)}</b><span class="${quiet ? "devwarn" : ""}">${d.last_seen ? (quiet ? "Quiet for " : "Reported ") + ago(d.last_seen) : "Not reported yet"}${d.status && !quiet ? " · " + esc(d.status) : ""}${d.version ? " · " + esc(d.version) : ""}</span></div>${mine ? `<button class="btn sm bad" data-rm="${d.id}">Remove</button>` : ""}</div>`; }).join("")}
+    <div class="foot">${mine ? '<button class="btn solid" id="dvAdd">Link a Windows computer</button>' : ""}<button class="btn" id="dvX">Close</button></div>`, root => {
+    root.querySelector("#dvX").onclick = closeModal;
+    const add = root.querySelector("#dvAdd"); if (add) add.onclick = () => { closeModal(); agentDialog(); };
+    root.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => { if (!confirm("Remove this computer? Its tracker stops working.")) return; try { await api("/api/devices/" + b.dataset.rm, "DELETE"); toast("Removed"); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } });
   });
 }

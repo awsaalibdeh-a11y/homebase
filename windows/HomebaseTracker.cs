@@ -36,18 +36,28 @@ class Toast : Form
     protected override CreateParams CreateParams { get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x80 | 0x8; return cp; } }   // no focus steal, not in alt-tab, always on top
     readonly System.Windows.Forms.Timer life = new System.Windows.Forms.Timer();
 
-    public Toast(string title, string body, int seconds, string action, Action onAction)
+    public Toast(string title, string body, int seconds, string action, Action onAction) : this(title, body, seconds, action == null ? null : new[] { action }, action == null ? null : new Action<int>(delegate (int i) { onAction(); })) { }
+
+    public Toast(string title, string body, int seconds, string[] buttons, Action<int> onPick)
     {
         AutoScaleDimensions = new SizeF(96f, 96f); AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
-        BackColor = Color.FromArgb(24, 24, 28); ForeColor = Color.FromArgb(236, 236, 240); Width = 380; Height = action == null ? 96 : 130;
-        Label t = new Label { Text = title, Left = 18, Top = 12, Width = 344, Height = 24, Font = new Font("Segoe UI Emoji", 11f, FontStyle.Bold), ForeColor = Color.White, UseCompatibleTextRendering = false };
-        Label b = new Label { Text = body, Left = 18, Top = 38, Width = 344, Height = 48, Font = new Font("Segoe UI Emoji", 9.5f), ForeColor = Color.FromArgb(180, 180, 190) };
+        BackColor = Color.FromArgb(24, 24, 28); ForeColor = Color.FromArgb(236, 236, 240); Width = 340;
+        int extra = buttons == null ? 0 : (buttons.Length > 2 ? 34 * ((buttons.Length + 1) / 2) + 8 : 42);
+        Height = 78 + extra;
+        Label t = new Label { Text = title, Left = 16, Top = 10, Width = 308, Height = 24, Font = new Font("Segoe UI Emoji", 10.5f, FontStyle.Bold), ForeColor = Color.White, UseCompatibleTextRendering = false };
+        Label b = new Label { Text = body, Left = 16, Top = 34, Width = 308, Height = 38, Font = new Font("Segoe UI Emoji", 9f), ForeColor = Color.FromArgb(170, 170, 180) };
         Controls.Add(t); Controls.Add(b);
-        if (action != null)
+        if (buttons != null)
         {
-            Button go = new Button { Text = action, Left = 18, Top = 90, Width = 230, Height = 30, AutoSize = false, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(91, 147, 255), ForeColor = Color.FromArgb(8, 16, 31), Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
-            go.FlatAppearance.BorderSize = 0; go.Click += delegate { try { onAction(); } catch { } Close(); }; Controls.Add(go);
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                int idx = i; bool two = buttons.Length > 1;
+                int w = buttons.Length == 1 ? 200 : 148, col = buttons.Length == 1 ? 0 : i % 2, row = buttons.Length == 1 ? 0 : i / 2;
+                if (buttons.Length > 2 && buttons.Length % 2 == 1 && i == buttons.Length - 1) { w = 304; col = 0; }
+                Button go = new Button { Text = buttons[i], Left = 16 + col * 156, Top = 74 + row * 34, Width = w, Height = 28, AutoSize = false, FlatStyle = FlatStyle.Flat, BackColor = i == 0 ? Color.FromArgb(91, 147, 255) : Color.FromArgb(40, 40, 46), ForeColor = i == 0 ? Color.FromArgb(8, 16, 31) : Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+                go.FlatAppearance.BorderSize = 0; go.Click += delegate { try { if (onPick != null) onPick(idx); } catch { } Close(); }; Controls.Add(go);
+            }
         }
         Click += delegate { Close(); }; t.Click += delegate { Close(); }; b.Click += delegate { Close(); };
         Shown += delegate { Rounded(); Stack(); };
@@ -67,6 +77,11 @@ class Toast : Form
     public static void Snapshots(string dir)                                              // test helper: draw each pop-up to a picture
     {
         int i = 0; foreach (Toast t in open.ToArray()) { try { using (Bitmap bmp = new Bitmap(t.Width, t.Height)) { t.DrawToBitmap(bmp, new Rectangle(0, 0, t.Width, t.Height)); bmp.Save(Path.Combine(dir, "toast" + (i++) + ".png")); } } catch { } }
+    }
+    public static void Choose(string title, string body, int seconds, string[] buttons, Action<int> onPick)
+    {
+        while (open.Count >= 4) open[0].Close();
+        new Toast(title, body, seconds, buttons, onPick).Show();
     }
     public static void Show(string title, string body, int seconds, string action, Action onAction)
     {
@@ -93,7 +108,7 @@ static class Native
 
 class App : ApplicationContext
 {
-    public const int Build = 16;                                              // bump with windows/BUILD on the server; computers update themselves when the server's is higher
+    public const int Build = 17;                                              // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -110,6 +125,7 @@ class App : ApplicationContext
     string token { get { return cur == null ? "" : cur.Token; } }
     Control sync;                                                            // lets the background loop open windows on the UI thread
     DateTime lastPrompt = DateTime.MinValue; bool wasAway; DateTime lastApps = DateTime.MinValue; DateTime lastBeat = DateTime.MinValue;
+    DateTime quietUntil = DateTime.MinValue;
     volatile string nowDoing = "nothing yet"; volatile string lastFgName = "";
     string TodayFile { get { return Path.Combine(Dir, "today_" + Regex.Replace(cur == null ? "x" : cur.Name, "[^A-Za-z0-9]", "_") + ".txt"); } }
     NotifyIcon tray;
@@ -137,6 +153,12 @@ class App : ApplicationContext
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;           // TLS 1.2
         Application.EnableVisualStyles();
         if (args.Length > 0 && args[0] == "--selftest") { SelfTest(); return; }        // runs even while the real tracker is open
+        if (args.Length > 0 && args[0] == "--choosetest")                               // shows the "who is using this computer?" pop-up so it can be seen
+        {
+            Toast.Choose("Who is using this computer?", "So the right person is counted and locked.", 8, new[] { "✓ Aws", "Laith", "Link someone else..." }, delegate (int i) { });
+            System.Windows.Forms.Timer sn = new System.Windows.Forms.Timer { Interval = 1200 }; sn.Tick += delegate { sn.Stop(); Toast.Snapshots(Environment.GetEnvironmentVariable("HB_SNAP") ?? Path.GetTempPath()); Application.Exit(); }; sn.Start();
+            Application.Run(); return;
+        }
         if (args.Length > 0 && args[0] == "--popuptest")                                // shows the pop-ups for a few seconds so they can be seen
         {
             Toast.Show("🚫 Roblox is grounded", "Closed because it is grounded until 8:51 PM.", 9, null, null);
@@ -193,8 +215,7 @@ class App : ApplicationContext
         if (profiles.Count > 1) PickPerson(false);                              // two kids, one laptop: ask who is sitting down
         LoadToday(); LoadCustom();
         MakeTray();
-        Say("Homebase is on", (cur == null ? "" : cur.Name + ": ") + "counting only playing and watching. Your family sees the same numbers. Right-click the icon near the clock to see what it counts.", 12, null, null);
-        Microsoft.Win32.SystemEvents.SessionSwitch += delegate (object o, Microsoft.Win32.SessionSwitchEventArgs e) { if (profiles.Count > 1 && (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock || e.Reason == Microsoft.Win32.SessionSwitchReason.SessionLogon)) sync.BeginInvoke(new Action(delegate { PickPerson(false); })); };
+        if (LastShownBuild() != Build) { SetShownBuild(Build); Say("Homebase is on", (cur == null ? "" : cur.Name + ": ") + "counting only playing and watching. Right-click the icon near the clock to see what it counts.", 10, null, null); }
         new Thread(Loop) { IsBackground = true }.Start();
     }
 
@@ -204,34 +225,21 @@ class App : ApplicationContext
         if (Test) return;
         if (profiles.Count < 2 && !allowLink) return;
         if ((DateTime.Now - lastPrompt).TotalSeconds < 3) return; lastPrompt = DateTime.Now;
-        Form f = new Form { Text = "Homebase", Width = 380, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterScreen, MaximizeBox = false, MinimizeBox = false, TopMost = true, BackColor = Color.FromArgb(18, 18, 20), ForeColor = Color.FromArgb(236, 236, 240), Font = new Font("Segoe UI", 10f) };
-        Label t = new Label { Text = "Who is using this computer?", Font = new Font("Segoe UI", 14f, FontStyle.Bold), Left = 20, Top = 16, Width = 330, Height = 30 };
-        Label h = new Label { Text = "So the right person gets their screen time, locks and grounded apps.", Left = 20, Top = 48, Width = 330, Height = 36, ForeColor = Color.FromArgb(160, 160, 170) };
-        f.Controls.Add(t); f.Controls.Add(h);
-        int y = 92; Profile chosen = null; bool link = false;
-        foreach (Profile p in profiles)
+        List<string> names = profiles.Select(p => (cur != null && cur.Name == p.Name ? "\u2713 " : "") + p.Name).ToList();
+        if (allowLink) names.Add("Link someone else...");
+        // a small pop-up in the corner with one button per person: it never takes over the screen, and it goes away by itself (keeping the current person)
+        Toast.Choose("Who is using this computer?", "So the right person is counted and locked.", 30, names.ToArray(), delegate (int i)
         {
-            Profile pp = p;
-            Button b = new Button { Text = p.Name, Left = 20, Top = y, Width = 330, Height = 40, FlatStyle = FlatStyle.Flat, BackColor = (cur != null && cur.Name == p.Name) ? Color.FromArgb(91, 147, 255) : Color.FromArgb(27, 27, 31), ForeColor = (cur != null && cur.Name == p.Name) ? Color.FromArgb(8, 16, 31) : Color.White, Font = new Font("Segoe UI", 11f, FontStyle.Bold) };
-            b.FlatAppearance.BorderSize = 0; b.Click += delegate { chosen = pp; f.Close(); }; f.Controls.Add(b); y += 48;
-        }
-        Button more = new Button { Text = "Link someone else...", Left = 20, Top = y, Width = 330, Height = 34, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(18, 18, 20), ForeColor = Color.FromArgb(150, 150, 160) };
-        more.FlatAppearance.BorderColor = Color.FromArgb(50, 50, 56); more.Click += delegate { link = true; f.Close(); }; f.Controls.Add(more); y += 44;
-        f.ClientSize = new Size(370, y + 6);
-        f.ShowDialog();
-        if (link)
-        {
-            string c = AskForCode(); if (c != null) { string err = Claim(c); if (err != null) MessageBox.Show(err, "Homebase screen time"); else { PickPerson(false); } }
-            return;
-        }
-        if (chosen != null && chosen != cur) Switch(chosen);
+            if (i < profiles.Count) { if (profiles[i] != cur) Switch(profiles[i]); return; }
+            string c = AskForCode(); if (c != null) { string err = Claim(c); if (err != null) MessageBox.Show(err, "Homebase screen time"); else PickPerson(false); }
+        });
     }
 
     void Switch(Profile p)
     {
         lock (apps) { if (dirty) { Send(); } SaveToday(); cur = p; apps.Clear(); dirty = false; cursor = -1; told.Clear(); LoadToday(); }
         SaveConfig();
-        Say("Homebase", p.Name + " is using this computer.");
+        Say("Homebase", p.Name + " is using this computer.", 4, null, null);
     }
 
     // ---------- the window that asks for the code
@@ -351,8 +359,10 @@ class App : ApplicationContext
         ToolStripMenuItem today = new ToolStripMenuItem("Today: counting...");
         ToolStripMenuItem grounded = new ToolStripMenuItem("Grounded apps: none");
         grounded.Enabled = false; m.Items.Add(grounded);
-        m.Opening += delegate { grounded.Text = groundedNow.Count == 0 ? "Grounded apps: none" : "Grounded: " + string.Join(", ", groundedNow.ToArray()); who.Text = cur == null ? "Homebase screen time is on" : "Counting for " + cur.Name; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
         m.Items.Add(today);
+        ToolStripMenuItem quiet = new ToolStripMenuItem("Pause everyday pop-ups for 1 hour");
+        quiet.Click += delegate { if (DateTime.Now < quietUntil) { quietUntil = DateTime.MinValue; Toast.Show("Pop-ups are back on", "", 4, null, null); } else { quietUntil = DateTime.Now.AddHours(1); Toast.Show("Quiet for an hour", "Calls, grounding and announcements still show.", 5, null, null); } };
+        m.Items.Add(quiet);
         ToolStripMenuItem addGame = new ToolStripMenuItem("Count the app I was just in as playing");
         addGame.Click += delegate { AddCustom("play"); };
         ToolStripMenuItem addVid = new ToolStripMenuItem("Count the app I was just in as watching");
@@ -365,11 +375,15 @@ class App : ApplicationContext
         m.Items.Add("Open Homebase", null, delegate { try { Process.Start(server + "/app"); } catch { } });
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add("Remove from this computer", null, delegate { Remove(true); Quit(); });
+        m.Opening += delegate { quiet.Text = DateTime.Now < quietUntil ? "Turn pop-ups back on" : "Pause everyday pop-ups for 1 hour"; grounded.Text = groundedNow.Count == 0 ? "Grounded apps: none" : "Grounded: " + string.Join(", ", groundedNow.ToArray()); who.Text = cur == null ? "Homebase screen time is on" : "Counting for " + cur.Name; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
         tray = new NotifyIcon { Icon = SystemIcons.Information, Text = "Homebase", Visible = true, ContextMenuStrip = m };
         tray.DoubleClick += delegate { Say("Homebase" + (cur == null ? "" : " - " + cur.Name), nowDoing + "\nToday: " + Duration(Total()) + " playing or watching", 9, "Open Homebase", delegate { Open("/app"); }); };
         tray.BalloonTipClicked += delegate { Open(pendingOpen ?? "/app"); pendingOpen = null; };
     }
     static bool hbDirIsNull() { return Environment.GetEnvironmentVariable("HB_DIR") == null; }       // tests never update themselves
+    static string ShownFile { get { return Path.Combine(Dir, "shown.txt"); } }
+    static int LastShownBuild() { try { return int.Parse(File.ReadAllText(ShownFile).Trim()); } catch { return 0; } }
+    static void SetShownBuild(int b) { try { File.WriteAllText(ShownFile, b.ToString()); } catch { } }
     string pendingOpen;
     DateTime lastUpdateCheck = DateTime.MinValue;
 
@@ -428,9 +442,12 @@ class App : ApplicationContext
 
     void Quit() { stopping = true; if (tray != null) { tray.Visible = false; tray.Dispose(); } Application.Exit(); }
     // an always-visible pop-up (drawn by us), plus a Windows balloon as a bonus when the user has notifications on
-    void Say(string title, string text) { Say(title, text, 9, null, null); }
+    // Everyday information (nudges, tips, confirmations) can be paused. Important things (calls, SOS, grounding, announcements) always show.
+    void Say(string title, string text) { Say(title, text, 7, null, null); }
+    void Important(string title, string text, int seconds) { try { if (sync != null && sync.IsHandleCreated) sync.BeginInvoke(new Action(delegate { try { Toast.Show(title, text, seconds, null, null); } catch { } })); } catch { } }
     void Say(string title, string text, int seconds, string action, Action onAction)
     {
+        if (DateTime.Now < quietUntil && action == null) return;
         try { if (sync != null && sync.IsHandleCreated) sync.BeginInvoke(new Action(delegate { try { Toast.Show(title, text, seconds, action, onAction); } catch (Exception e) { Log("toast: " + e.Message); } })); } catch { }
     }
     int Total() { int t = 0; foreach (var v in apps.Values) { int s; int.TryParse(v[2], out s); t += s; } return t; }
@@ -495,8 +512,8 @@ class App : ApplicationContext
                             bool quiet = pl.ContainsKey("quiet") && Convert.ToBoolean(pl["quiet"]);
                             if (!quiet)
                             {
-                                if (kind == "sos") { Say("\U0001F6A8 " + from + " needs help", body); try { SystemSounds.Hand.Play(); } catch { } }
-                                else if (from == "Homebase") Say("\U0001F4E2 Announcement", body);
+                                if (kind == "sos") { Important("\U0001F6A8 " + from + " needs help", body, 20); try { SystemSounds.Hand.Play(); } catch { } }
+                                else if (from == "Homebase") Important("\U0001F4E2 Announcement", body, 12);
                                 else { Say(from, body); try { SystemSounds.Asterisk.Play(); } catch { } }
                             }
                         }
@@ -514,7 +531,7 @@ class App : ApplicationContext
         if ((now - lastBeat).TotalSeconds > 30) { lastBeat = now; try { int hs; Http("POST", "/api/devices/status", new Dictionary<string, object> { { "status", nowDoing }, { "version", "b" + Build } }, out hs); } catch (Exception e) { Log("beat: " + e.Message); } }
         if ((now - lastApps).TotalMinutes > 60) { lastApps = now; try { ReportApps(); } catch (Exception e) { Log("apps: " + e.Message); } }
         double idleNow = Native.Idle();
-        if (idleNow > 1200) wasAway = true;
+        if (idleNow > 1800) wasAway = true;                                           // away for 30+ minutes: someone else may sit down next
         if (wasAway && idleNow < 20 && profiles.Count > 1) { wasAway = false; sync.BeginInvoke(new Action(delegate { PickPerson(false); })); }
         if (locked) return;
         try { Count(elapsed); } catch (Exception e) { Log("count: " + e.Message); }
@@ -533,13 +550,24 @@ class App : ApplicationContext
             new object[] { "notepad", "Untitled - Notepad", "notepad", "Notepad", true },
             new object[] { "steamwebhelper", "Steam", "steam", "Steam", true },
             new object[] { "Code", "file.cs - Visual Studio Code", "roblox", "Roblox", false },        // homework app not grounded
+            // the over-closing bug: unrelated programs whose WINDOW TITLE merely mentions the grounded app must stay open
+            new object[] { "Discord", "Roblox server - Discord", "roblox", "Roblox", false },
+            new object[] { "NotesApp", "my roblox notes", "roblox", "Roblox", false },
+            new object[] { "Claude", "Roblox grounding fix - Claude", "roblox", "Roblox", false },
+            new object[] { "explorer", "Roblox - File Explorer", "roblox", "Roblox", false },
+            new object[] { "WINWORD", "Roblox essay - Word", "robloxplayerlauncher", "Roblox", false },
+            new object[] { "svchost", "", "steam", "Steam", false },
+            new object[] { "GoogleCrashHandler", "", "chrome", "Google Chrome", false },               // the word "google" in the label must not match unrelated Google helpers
+            new object[] { "javaw", "Minecraft 1.21", "minecraft", "Minecraft", true },                // but real Minecraft (a java program, found by its title) still closes
+            new object[] { "javaw", "IntelliJ IDEA", "minecraft", "Minecraft", false },                // and other java programs do not
+            new object[] { "RobloxStudioBeta", "Roblox Studio", "roblox", "Roblox", true },
             new object[] { "WINWORD", "Essay - Word", "minecraft", "Minecraft", false },
             new object[] { "chrome", "Homework - Google Docs", "roblox", "Roblox", false },
         };
         int ok = 0;
         foreach (var c in cases)
         {
-            bool got = MatchesBlock((string)c[0], (string)c[1], (string)c[2], (string)c[3]);
+            bool got = MatchesBlock((string)c[0], (string)c[1], (string)c[2], (string)c[3], "");
             bool want = (bool)c[4];
             Console.WriteLine((got == want ? "PASS " : "FAIL ") + c[0] + " + ground[" + c[3] + "] -> " + got + " (want " + want + ")");
             if (got == want) ok++;
@@ -550,31 +578,50 @@ class App : ApplicationContext
     // only letters and digits, lower case: so "Google Chrome", "google-chrome" and "GoogleChrome" all compare the same
     static string Norm(string s) { if (s == null) return ""; var sb = new StringBuilder(); foreach (char ch in s.ToLower()) if (char.IsLetterOrDigit(ch)) sb.Append(ch); return sb.ToString(); }
 
-    // the words in a label worth matching on, e.g. "Roblox Player" -> {roblox, player}; drops tiny/common words
-    static List<string> Words(string label)
+    // the name of a program without the noise that differs between a launcher and the game it starts:
+    // "RobloxPlayerLauncher" and "RobloxPlayerBeta" both become "roblox"
+    static readonly string[] NoiseWords = { "launcher", "bootstrapper", "updater", "update", "installer", "setup", "helper", "service", "client", "shipping", "win64", "win32", "x64", "x86", "beta", "player", "game", "app", "exe" };
+    static string Core(string name)
     {
-        var outp = new List<string>();
-        if (label == null) return outp;
-        foreach (string w in label.ToLower().Split(new[] { ' ', '-', '_', '.', ':', '(', ')', '[', ']', '/' }, StringSplitOptions.RemoveEmptyEntries))
-        {
-            string n = Norm(w);
-            if (n.Length >= 3 && n != "app" && n != "the" && n != "for" && n != "pro" && n != "launcher" && n != "player" && n != "beta" && n != "game" && n != "client" && n != "desktop") outp.Add(n);
-        }
-        return outp;
+        string n = Norm(name); bool again = true;
+        while (again) { again = false; foreach (string w in NoiseWords) if (n.Length > w.Length + 3 && n.EndsWith(w)) { n = n.Substring(0, n.Length - w.Length); again = true; } }
+        return n;
     }
 
-    // Does a running process (its exe name + window title) belong to a grounded app (its key + friendly label)?
-    // Forgiving on purpose: a launcher and the game it starts often have different exe names (Roblox -> RobloxPlayerBeta),
-    // so we also match on the app's name words and on the window title.
-    public static bool MatchesBlock(string procName, string procTitle, string key, string label)
+    // Programs that are never closed, whatever is grounded. Closing these would break Windows or the person's other work.
+    static readonly string[] Protected = { "system", "idle", "registry", "smss", "csrss", "wininit", "winlogon", "services", "lsass", "svchost", "dwm", "explorer", "taskmgr", "conhost", "cmd", "powershell", "pwsh",
+        "windowsterminal", "wt", "claude", "code", "devenv", "homebasetracker", "searchhost", "startmenuexperiencehost", "shellexperiencehost", "textinputhost", "sihost", "ctfmon", "runtimebroker",
+        "applicationframehost", "msedgewebview2", "securityhealthsystray", "fontdrvhost", "audiodg", "spoolsv", "dllhost", "winlogon", "lockapp", "logonui", "backgroundtaskhost", "googlecrashhandler", "googleupdate" };
+
+    // Two names are "the same app" when one is the other plus more, and the shared part is long enough to be meaningful:
+    // "roblox" ~ "robloxstudio", "steam" ~ "steamwebhelper", but never a short chance overlap.
+    static bool SameApp(string a, string b)
     {
-        string pn = Norm(procName), pt = Norm(procTitle), kn = Norm(key);
-        if (kn.Length >= 3 && pn.Length >= 3 && (pn.Contains(kn) || kn.Contains(pn))) return true;     // exe names overlap
-        if (kn.Length >= 4 && pt.Contains(kn)) return true;                                            // the window is titled like the app
-        foreach (string w in Words(label))
-            if (pn.Contains(w) || (pt.Length > 0 && pt.Contains(w))) return true;                       // the app's name shows up in the process or its window
+        if (a.Length < 4 || b.Length < 4) return false;
+        string shorter = a.Length <= b.Length ? a : b, longer = a.Length <= b.Length ? b : a;
+        return longer == shorter || (shorter.Length >= 5 && longer.StartsWith(shorter));
+    }
+
+    // Does a running program belong to a grounded app? It is decided by WHAT THE PROGRAM IS (its exe name and, when known, the product name
+    // written into the file), never by text in a window title, because a chat, a notes file or a document can mention any app by name.
+    // The one exception is Java programs (Minecraft's Java edition runs as "javaw"), which are recognised by a title that names the app.
+    public static bool MatchesBlock(string procName, string procTitle, string key, string label, string product = "")
+    {
+        string pn = Norm(procName);
+        if (pn.Length == 0 || Array.IndexOf(Protected, pn) >= 0) return false;
+        string pc = Core(procName), kc = Core(key), lc = Core(label);
+        if (SameApp(pc, kc) || SameApp(pc, lc)) return true;                                             // the program is the app (or its launcher / helper)
+        string pr = Norm(product);
+        if (pr.Length >= 4 && ((lc.Length >= 4 && pr.Contains(lc)) || (kc.Length >= 4 && pr.Contains(kc)))) return true;   // the file says it is the app
+        if (pn == "javaw" || pn == "java")                                                                // Minecraft (Java edition) is just "javaw"; its window says what it is
+        {
+            string t = Norm(procTitle);
+            if ((kc.Length >= 4 && t.Contains(kc)) || (lc.Length >= 4 && t.Contains(lc))) return true;
+        }
         return false;
     }
+
+    static string ProductOf(Process p) { try { var v = p.MainModule.FileVersionInfo; return (v.ProductName ?? "") + " " + (v.FileDescription ?? ""); } catch { return ""; } }
 
     // grounded apps: close them (or minimise a grounded website) and say why
     void EnforceBlocks()
@@ -593,7 +640,7 @@ class App : ApplicationContext
             if (activeAt > nowEpoch)                                                     // the warning minute: let them finish, warn once
             {
                 DateTime lw;
-                if (!told.TryGetValue("warn:" + label, out lw) || (DateTime.Now - lw).TotalSeconds > 50) { told["warn:" + label] = DateTime.Now; Say("Finish up: " + label, label + " will be grounded in about a minute."); }
+                if (!told.TryGetValue("warn:" + label, out lw) || (DateTime.Now - lw).TotalSeconds > 50) { told["warn:" + label] = DateTime.Now; Important("\u23F3 Finish up: " + label, label + " will be grounded in about a minute.", 12); }
                 continue;
             }
             bool hit = false;
@@ -603,20 +650,21 @@ class App : ApplicationContext
                 try
                 {
                     string name = p.ProcessName, title = p.MainWindowTitle ?? "";
-                    if (Environment.GetEnvironmentVariable("HB_DEBUG") != null && (MatchesBlock(name, title, key, label) || name.ToLower().Contains("roblox"))) Log("  candidate " + name + " title=[" + title + "] match=" + MatchesBlock(name, title, key, label));
+                    if (Environment.GetEnvironmentVariable("HB_DEBUG") != null && MatchesBlock(name, title, key, label, ProductOf(p))) Log("  will close " + name + " title=[" + title + "]");
                     if (name.Equals("explorer", StringComparison.OrdinalIgnoreCase) || p.Id == Process.GetCurrentProcess().Id) continue;
                     bool browser = Array.IndexOf(Browsers, name.ToLower()) >= 0;
                     if (browser)
                     {
                         // a grounded website: minimise the browser only when its current tab is the grounded one
-                        if (p.MainWindowHandle != IntPtr.Zero && (Norm(title).Contains(Norm(key)) || Words(label).Exists(w => Norm(title).Contains(w)))) { Native.ShowWindow(p.MainWindowHandle, 6); hit = true; }
+                        string kt = Core(key), lt = Core(label); string tn = Norm(title);
+                        if (p.MainWindowHandle != IntPtr.Zero && ((kt.Length >= 4 && tn.Contains(kt)) || (lt.Length >= 4 && tn.Contains(lt)))) { Native.ShowWindow(p.MainWindowHandle, 6); hit = true; }
                     }
-                    else if (MatchesBlock(name, title, key, label)) { try { p.Kill(); hit = true; } catch (Exception ke) { Log("kill " + name + ": " + ke.Message); } }
+                    else if (MatchesBlock(name, title, key, label, ProductOf(p))) { try { p.Kill(); hit = true; } catch (Exception ke) { Log("kill " + name + ": " + ke.Message); } }
                 }
                 catch { }
             }
             DateTime last;
-            if (hit && (!told.TryGetValue(label, out last) || (DateTime.Now - last).TotalSeconds > 20)) { told[label] = DateTime.Now; Say("\U0001F6AB " + label + " is grounded", "Closed because it is grounded until " + until.ToString("t") + ".", 10, null, null); try { SystemSounds.Hand.Play(); } catch { } }
+            if (hit && (!told.TryGetValue(label, out last) || (DateTime.Now - last).TotalSeconds > 180)) { told[label] = DateTime.Now; Important("\U0001F6AB " + label + " is grounded", "Closed because it is grounded until " + until.ToString("t") + ".", 8); try { SystemSounds.Hand.Play(); } catch { } }
             groundedNow.Add(label + " until " + until.ToString("t"));
         }
     }
