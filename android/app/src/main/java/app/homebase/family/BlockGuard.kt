@@ -44,6 +44,7 @@ class BlockGuard(private val ctx: Context) {
         if (pkg == ctx.packageName || pkg.startsWith("com.android.systemui") || pkg.contains("launcher")) return
         val name = label(pkg)
         val hit = blocks.firstOrNull { b -> b.until * 1000 > now && b.key.isNotBlank() && (pkg.lowercase().contains(b.key) || (name.isNotEmpty() && name.contains(b.key))) } ?: return
+        if (hit.activeAt * 1000 > now) { val last = toldAt["warn:" + hit.label] ?: 0L; if (now - last > 50_000) { toldAt["warn:" + hit.label] = now; app.homebase.family.ui.Notices.grounded(ctx, hit.label, "in about a minute — finish up") }; return }
         if (Settings.canDrawOverlays(ctx) || true) {                                       // sending someone home from a background service needs the overlay permission on newer Android
             ctx.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }

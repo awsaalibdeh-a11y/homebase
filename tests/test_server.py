@@ -601,6 +601,16 @@ class WindowsDownload(Base):
         self.assertIn("HomebaseTracker.exe", r.headers["Content-Disposition"])
 
 
+class DeviceStatus(Base):
+    def test_a_computer_reports_what_it_is_doing_and_the_family_sees_it(self):
+        code = self.post(self.kid, "/api/devices/code").get_json()["code"]
+        dev = {"Authorization": "Bearer " + self.c.post("/api/devices/claim", json={"code": code, "name": "Laptop"}).get_json()["token"]}
+        self.assertEqual(self.post(self.kid, "/api/devices/status", status="x").status_code, 403)                       # only a device
+        self.post(dev, "/api/devices/status", status="counting Minecraft (play)", version="1.5")
+        v = {m["id"]: m for m in self.get(self.mum, "/api/family").get_json()["members"]}[self.kid_id]
+        self.assertEqual((v["devices"][0]["status"], v["devices"][0]["version"]), ("counting Minecraft (play)", "1.5"))
+
+
 class AppReporting(Base):
     def test_a_device_reports_its_apps_for_the_picker(self):
         code = self.post(self.kid, "/api/devices/code").get_json()["code"]
@@ -609,6 +619,14 @@ class AppReporting(Base):
         self.post(dev, "/api/devices/apps", apps=[{"key": "roblox", "label": "Roblox"}, {"key": "chrome", "label": "Chrome"}, {"key": "x", "label": "too short"}])
         avail = self.get(self.mum, f"/api/blocks?member={self.kid_id}").get_json()["available"]
         self.assertEqual(sorted(a["key"] for a in avail), ["chrome", "roblox"])                         # the 1-letter key is dropped
+
+
+class WindowsUpdate(Base):
+    def test_the_newest_build_is_published_for_self_update(self):
+        d = self.c.get("/api/windows/version").get_json()                                              # no sign-in needed: a computer asks before it is signed in
+        self.assertGreater(d["build"], 0)
+        self.assertGreater(d["size"], 20000)
+        self.assertEqual(d["url"], "/download/windows")
 
 
 class Grounding(Base):
@@ -620,9 +638,11 @@ class Grounding(Base):
         mine = self.get(self.kid, "/api/blocks").get_json()["blocks"]
         self.assertEqual(sorted(b["key"] for b in mine), ["minecraft", "roblox"])
         said = [m["body"] for m in self.get(self.kid, "/api/messages?with=0").get_json()["messages"]]
-        self.assertTrue(any("grounded Sam from roblox, Minecraft" in b or "grounded Sam from" in b for b in said))
+        self.assertTrue(any("grounding Sam from" in b and "1 minute" in b for b in said))
         v = {m["id"]: m for m in self.get(self.kid, "/api/family").get_json()["members"]}[self.kid_id]
         self.assertEqual(len(v["blocks"]), 2)
+        self.assertAlmostEqual(v["blocks"][0]["active_at"] - time.time(), 60, delta=5)                 # a minute's warning
+        self.assertTrue(any(e["type"] == "ground_warn" for e in self.events(self.kid)))               # the device is warned
 
     def test_only_parents_ground_and_they_can_lift_it(self):
         self.assertEqual(self.ground(who=self.kid).status_code, 403)
@@ -668,6 +688,27 @@ class OwnerTools(Base):
         mineb = next(b for b in bl if b["member_id"] == self.kid_id)
         self.assertEqual(self.c.delete(f"/api/admin/blocks/{mineb['id']}", headers=self.h).status_code, 200)
         self.assertEqual(self.get(self.kid, "/api/blocks").get_json()["blocks"], [])
+
+
+class Avatars(Base):
+    PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+    def test_set_get_and_clear_a_photo(self):
+        self.assertIsNone({m["id"]: m for m in self.get(self.mum, "/api/family").get_json()["members"]}[self.mum_id]["avatar"])
+        r = self.post(self.mum, "/api/avatar", image="data:image/png;base64," + self.PNG)
+        self.assertEqual(r.status_code, 200)
+        url = r.get_json()["avatar"]
+        self.assertTrue(url.startswith(f"/api/avatar/{self.mum_id}"))
+        img = self.get(self.mum, f"/api/avatar/{self.mum_id}")
+        self.assertEqual((img.status_code, img.headers["Content-Type"]), (200, "image/png"))
+        self.assertEqual({m["id"]: m for m in self.get(self.kid, "/api/family").get_json()["members"]}[self.mum_id]["avatar"][:len(url.split("?")[0])], url.split("?")[0])   # family sees it
+        self.assertEqual(self.c.delete("/api/avatar", headers=self.mum).status_code, 200)
+        self.assertIsNone({m["id"]: m for m in self.get(self.mum, "/api/family").get_json()["members"]}[self.mum_id]["avatar"])
+
+    def test_junk_and_oversized_are_refused(self):
+        self.assertEqual(self.post(self.mum, "/api/avatar", image="data:image/png;base64,not-base64!!").status_code, 400)
+        self.assertEqual(self.post(self.mum, "/api/avatar", image="data:text/plain;base64,aGVsbG8=").status_code, 400)   # valid base64, not an image
+        self.assertEqual(self.get(self.kid, f"/api/avatar/{self.mum_id}").status_code, 404)                              # none set
 
 
 if __name__ == "__main__":

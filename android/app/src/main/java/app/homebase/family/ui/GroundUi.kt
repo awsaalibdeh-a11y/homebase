@@ -41,7 +41,8 @@ fun GroundDialog(child: Member, onClose: () -> Unit) {
     var mins by remember { mutableIntStateOf(60) }
     var error by remember { mutableStateOf("") }
     var active by remember { mutableStateOf<List<BlockInfo>>(child.blocks) }
-    LaunchedEffect(child.id) { runCatching { ctx.hb.api.blocks(child.id) }.onSuccess { active = it.blocks } }
+    var available by remember { mutableStateOf<List<app.homebase.family.AppInfo>>(emptyList()) }
+    LaunchedEffect(child.id) { runCatching { ctx.hb.api.blocks(child.id) }.onSuccess { active = it.blocks; available = it.available } }
     AlertDialog(onDismissRequest = onClose, title = { Text("🚫 Ground apps for ${child.name}") }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Apps are closed on their laptop and tablet for as long as you choose, and ${child.name} is told why.", color = Muted)
@@ -54,8 +55,9 @@ fun GroundDialog(child: Member, onClose: () -> Unit) {
                     }
                 }
             }
-            Text("Choose apps", style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
-            PRESETS.chunked(2).forEach { pair ->
+            Text(if (available.isNotEmpty()) "Choose apps (${available.size} on their computer)" else "Choose apps", style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+            val choices = (available.map { it.label } + PRESETS).distinct()
+            choices.chunked(2).forEach { pair ->
                 Row { pair.forEach { n -> TextButton({ if (n in picked) picked.remove(n) else picked.add(n) }) { Text((if (n in picked) "✓ " else "") + n, maxLines = 1, softWrap = false) } } }
             }
             OutlinedTextField(other, { other = it.take(40) }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Another app or website") })

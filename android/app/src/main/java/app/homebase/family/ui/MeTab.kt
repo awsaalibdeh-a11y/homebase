@@ -4,6 +4,7 @@ import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -24,6 +25,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.homebase.family.hb
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
+import java.io.ByteArrayOutputStream
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 import java.util.TimeZone
 
@@ -45,8 +54,37 @@ fun MeTab(nav: Nav) {
     fun setSharing(state: String, minutes: Int = 60) = scope.launch {
         runCatching { app.api.sharing(state, minutes) }.onSuccess { app.state.refreshFamily() }.onFailure { toast(ctx, it.message ?: "Could not change it") }
     }
+
+        val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) scope.launch {
+                runCatching {
+                    val data = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+                    }
+                    val src = BitmapFactory.decodeByteArray(data, 0, data.size) ?: error("That image could not be read.")
+                    val s0 = minOf(src.width, src.height)
+                    val sq = Bitmap.createBitmap(src, (src.width - s0) / 2, (src.height - s0) / 2, s0, s0)
+                    val small = Bitmap.createScaledBitmap(sq, 256, 256, true)
+                    val out = ByteArrayOutputStream(); small.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                    val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                    ctx.hb.api.setAvatar("data:image/jpeg;base64,$b64")
+                }.onSuccess { app.state.refreshFamily(); Avatars.cache.clear(); toast(ctx, "Photo saved") }.onFailure { toast(ctx, it.message ?: "Could not save the photo") }
+            }
+        }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Heading("Hi, ${me?.name ?: app.store.myName} ${me?.emoji ?: ""}", app.store.familyName)
+        me?.let { meM ->
+            SoftCard {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    MemberAvatar(meM, 64, if (meM.isParent) SunSoft else BlueSoft)
+                    Column(Modifier.weight(1f)) { Text("Your photo", style = MaterialTheme.typography.titleMedium); Text("Shown on the map and in the family.", color = Muted) }
+                }
+                Row {
+                    TextButton({ pickPhoto.launch("image/*") }) { Text(if (meM.avatar != null) "Change" else "Add a photo") }
+                    if (meM.avatar != null) TextButton({ scope.launch { runCatching { ctx.hb.api.clearAvatar() }.onSuccess { app.state.refreshFamily(); toast(ctx, "Photo removed") } } }) { Text("Remove") }
+                }
+            }
+        }
 
         val share = me?.share ?: "off"
         SoftCard(tint = when (share) { "on" -> MintSoft; "paused" -> SunSoft; else -> Surface }) {

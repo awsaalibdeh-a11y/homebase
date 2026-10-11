@@ -95,6 +95,13 @@ class Api(private val store: Store) {
         raw("POST", "/api/blocks", obj { put("member", member); put("minutes", minutes); put("apps", kotlinx.serialization.json.buildJsonArray { apps.forEach { a -> add(buildJsonObject { put("key", a.trim().lowercase()); put("label", a.trim()) }) } }) })
     }
     suspend fun liftBlock(id: Int) { raw("DELETE", "/api/blocks/$id") }
+    suspend fun avatarBytes(path: String): ByteArray? = withContext(Dispatchers.IO) {
+        val rb = okhttp3.Request.Builder().url(store.server + path)
+        if (store.token.isNotEmpty()) rb.header("Authorization", "Bearer ${store.token}")
+        client.newCall(rb.build()).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
+    }
+    suspend fun setAvatar(dataUrl: String) { raw("POST", "/api/avatar", obj { put("image", dataUrl) }) }
+    suspend fun clearAvatar() { raw("DELETE", "/api/avatar") }
     suspend fun history(member: Int, hours: Int = 12): HistoryResp = ask("GET", "/api/history?member=$member&hours=$hours")
 
     suspend fun deleteHistory() { raw("DELETE", "/api/history") }

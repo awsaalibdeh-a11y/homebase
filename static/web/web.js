@@ -6,6 +6,15 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const store = (k, v) => { try { v === undefined ? localStorage.removeItem(k) : localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v)); } catch (e) { /* storage full or blocked */ } };
 const load = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
+let avaPaint = 0;                                                       // avatar url -> blob url cache lives in S.av
+function loadAva(url) {
+  if (!url || S.av[url]) return;
+  S.av[url] = "loading";
+  fetch(url, { headers: { Authorization: "Bearer " + S.token } }).then(r => r.ok ? r.blob() : Promise.reject()).then(b => {
+    S.av[url] = URL.createObjectURL(b); clearTimeout(avaPaint); avaPaint = setTimeout(() => { try { renderAll(); } catch (e) {} }, 60);
+  }).catch(() => { S.av[url] = "fail"; });
+}
+function avaInner(m) { const u = m && m.avatar; if (u) { loadAva(u); if (S.av[u] && S.av[u] !== "loading" && S.av[u] !== "fail") return `<img class="avimg" src="${S.av[u]}" alt="">`; } return esc(m ? m.emoji : "🙂"); }
 const EMOJI = ["🧒", "👦", "👧", "🧑", "😎", "🦊", "🐱", "🙂", "👩", "👨"];
 const PERMS = [
   ["location", "See where I am", "Parents see you on the map. Off means they only see \"not sharing\"."],
@@ -18,7 +27,7 @@ const PERMS = [
 ];
 const PERM_NAMES = { location: "location", trail: "trail", battery: "battery", messages: "messages", calls: "calls", ping: "where-are-you", screentime: "screen time" };
 
-const S = { token: localStorage.getItem("hb_token") || "", me: 0, family: null, members: [], places: [], ice: [], thread: 0, msgs: {}, unread: {}, items: [],
+const S = { av: {}, token: localStorage.getItem("hb_token") || "", me: 0, family: null, members: [], places: [], ice: [], thread: 0, msgs: {}, unread: {}, items: [],
   map: null, markers: {}, circles: [], trail: null, adding: false, cursor: -1, running: false, geo: null, lastPos: null, lastSent: 0, focusedOnce: false,
   online: navigator.onLine, open: 0, chatOpen: false, outbox: load("hb_out", []), savedAt: 0, tmp: -1 };
 
@@ -155,7 +164,7 @@ function youCard() {
   else if (!S.geo) hint = "On, but this laptop is not sending its location yet.";
   else if (!S.lastPos) hint = "On. Waiting for your browser to find you…";
   else hint = "Live. Everyone in the family can see you on the map.";
-  return `<section class="you"><div class="head"><div class="ava ${on ? "on" : paused ? "paused" : ""}">${esc(m.emoji)}</div><div><b>${esc(m.name)} (you)</b><br><small>${m.role === "parent" ? "Parent" : "Child"}</small></div></div>
+  return `<section class="you"><div class="head"><div class="ava ${on ? "on" : paused ? "paused" : ""}">${avaInner(m)}</div><div><b>${esc(m.name)} (you)</b><br><small>${m.role === "parent" ? "Parent" : "Child"}</small></div></div>
     <div class="shareline"><div><b>Share my location</b><small>${hint}</small></div><button class="tg ${on ? "on" : ""}" id="tShare" aria-label="Share my location"></button></div>
     ${on && !S.geo ? `<button class="btn solid" id="bAllow">Allow this laptop to share</button>` : ""}
     ${notifyState() === "default" ? `<button class="btn" id="bNotify">🔔 Turn on desktop notifications for messages and calls</button>` : ""}
@@ -169,7 +178,7 @@ function renderSide() {
   const people = others.map(m => {
     const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
     const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>Trail</button>${m.role === "child" && isParent() ? `<button class="btn sm" data-act="ground" data-id="${m.id}">${(m.blocks || []).length ? "🚫 Grounded (" + m.blocks.length + ")" : "Ground apps"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="lock" data-id="${m.id}">${m.lock ? "🔒 Locked" : "Lock device"}</button>` : ""}${m.role === "child" && isParent() ? `<button class="btn sm" data-act="screen" data-id="${m.id}" ${may(m, "screentime") ? "" : "disabled"}>Screen time</button>` : ""}</div>` : "";
-    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${esc(m.emoji)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${deviceLine(m)}</span>${m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`}</button>${offTags(m)}${acts}</div>`;
+    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${deviceLine(m)}</span>${m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`}</button>${offTags(m)}${acts}</div>`;
   }).join("") || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press Invite to add someone." : ""}</div>`;
   const places = S.places.map(p => `<div class="place"><span>${esc(p.emoji)} ${esc(p.name)} <small>${p.radius} m</small></span>${isParent() ? `<button class="btn sm" data-act="delplace" data-id="${p.id}">Remove</button>` : ""}</div>`).join("") || `<div class="empty">No saved places yet.${isParent() ? " Press ＋ Place on the map." : ""}</div>`;
   const items = S.items.map(i => `<label class="item ${i.done ? "done" : ""}"><input type="checkbox" data-act="tick" data-id="${i.id}" ${i.done ? "checked" : ""}><span style="flex:1">${esc(i.text)}</span><button class="link" data-act="delitem" data-id="${i.id}" title="Delete" aria-label="Delete">✕</button></label>`).join("");
@@ -192,7 +201,7 @@ function pad() { const w = window.innerWidth; return w < 820 ? { paddingTopLeft:
 function pinIcon(m) {
   const stale = !isLive(m) && Date.now() / 1000 - m.location.at > 900;
   const label = esc(m.name) + (stale ? ` · ${ago(m.location.at)}` : "");
-  return L.divIcon({ className: "", iconSize: [50, 50], iconAnchor: [25, 25], html: `<div class="pin ${stale ? "old" : ""} ${m.role === "parent" ? "parent" : ""}">${esc(m.emoji)}</div><div class="pinname">${label}</div>` });
+  return L.divIcon({ className: "", iconSize: [50, 50], iconAnchor: [25, 25], html: `<div class="pin ${stale ? "old" : ""} ${m.role === "parent" ? "parent" : ""}">${avaInner(m)}</div><div class="pinname">${label}</div>` });
 }
 function renderMap() {
   if (!S.map) return;
@@ -341,6 +350,9 @@ async function meDialog() {
   const perms = m.role === "child" ? `<div class="msec">What parents can do</div><div class="sub">You decide. Switch something off and Homebase stops it straight away. Your parents see that it is off.</div>` +
     PERMS.map(([k, t, why]) => `<div class="sw"><div><b>${t}</b><span>${why}</span></div><button class="tg ${m.perms[k] !== false ? "on" : ""}" data-perm="${k}" aria-label="${t}"></button></div>`).join("") : "";
   modal(`<h2>${esc(m.emoji)} ${esc(m.name)}</h2><div class="sub">${m.role === "parent" ? "Parent" : "Child"} · ${esc(S.family?.name || "")}</div>
+    <div class="msec">Photo</div>
+    <div class="pfp-row"><span class="ava big" id="pfpPrev">${avaInner(m)}</span>
+      <div class="pfp-btns"><button class="btn sm" id="pfpPick" type="button">Choose a photo</button>${m.avatar ? '<button class="btn sm" id="pfpClr" type="button">Remove</button>' : ""}<input type="file" id="pfpFile" accept="image/*" hidden></div></div>
     <div class="msec">Appearance</div><div class="seg" id="segTheme">${[["auto", "Match my computer"], ["light", "Light"], ["dark", "Dark"]].map(([v, t]) => `<button class="btn sm ${theme === v ? "sel" : ""}" data-v="${v}">${t}</button>`).join("")}</div>
     <div class="seg" id="segMap">${[["light", "Light map"], ["dark", "Dark map"]].map(([v, t]) => `<button class="btn sm ${layer === v ? "sel" : ""}" data-v="${v}">${t}</button>`).join("")}</div>
     ${perms}
@@ -350,6 +362,10 @@ async function meDialog() {
     <div class="foot" style="justify-content:space-between"><button class="btn bad" id="mLeave">Leave family</button><span><button class="btn" id="mOut">Sign out</button> <button class="btn solid" id="mDone">Done</button></span></div>`, root => {
     root.querySelectorAll("#segTheme [data-v]").forEach(b => b.onclick = () => { store("hb_theme", b.dataset.v); applyTheme(); root.querySelectorAll("#segTheme .btn").forEach(x => x.classList.toggle("sel", x === b)); });
     root.querySelectorAll("#segMap [data-v]").forEach(b => b.onclick = () => { store("hb_map", b.dataset.v); paintLayer(); root.querySelectorAll("#segMap .btn").forEach(x => x.classList.toggle("sel", x === b)); });
+    const pfpFile = root.querySelector("#pfpFile");
+    root.querySelector("#pfpPick").onclick = () => pfpFile.click();
+    pfpFile.onchange = async () => { const f = pfpFile.files[0]; if (!f) return; if (!f.type.startsWith("image/")) return toast("Pick an image."); try { const url = await uploadAvatar(f); S.av[url] = undefined; root.querySelector("#pfpPrev").innerHTML = ""; const img = new Image(); img.className = "avimg"; const blob = await (await fetch(url, { headers: { Authorization: "Bearer " + S.token } })).blob(); img.src = URL.createObjectURL(blob); root.querySelector("#pfpPrev").append(img); toast("Photo saved"); refreshFamily(); } catch (e) { toast(e.message); } };
+    const pfpClr = root.querySelector("#pfpClr"); if (pfpClr) pfpClr.onclick = async () => { try { await api("/api/avatar", "DELETE"); toast("Photo removed"); closeModal(); refreshFamily(); } catch (e) { toast(e.message); } };
     root.querySelectorAll("[data-perm]").forEach(b => b.onclick = async () => { const on = !b.classList.contains("on"); b.classList.toggle("on", on); try { await api("/api/me", "PATCH", { perms: { [b.dataset.perm]: on } }); refreshFamily(); } catch (e) { b.classList.toggle("on", !on); toast(e.message); } });
     const mins = v => { const [h, mm] = v.split(":").map(Number); return h * 60 + mm; };
     root.querySelector("#qSave").onclick = async () => { const a = root.querySelector("#qFrom").value, b = root.querySelector("#qTo").value; if (!a || !b) { toast("Pick both times."); return; } try { await api("/api/me", "PATCH", { quiet_from: mins(a), quiet_to: mins(b), tz_offset: new Date().getTimezoneOffset() }); toast("Quiet hours saved"); } catch (e) { toast(e.message); } };
@@ -429,6 +445,7 @@ function handleEvent(ev) {
       }
       saveSnap(); break; }
     case "member": case "places": refreshFamily(); break;
+    case "ground_warn": { const names = (p.apps || []).join(", "); toast("⏳ " + names + " will be grounded in 1 minute — finish up", 14000); notify("Finish up", names + " will be grounded in a minute.", { tag: "groundwarn", force: true }); break; }
     case "nudge": toast("💡 " + p.text, 12000); notify("Time for a break?", p.text, { tag: "nudge", force: false, thread: undefined }); break;
     case "list": refreshItems(); break;
     case "chores": refreshChores(); break;
@@ -668,5 +685,24 @@ async function groundDialog(id) {
 function deviceLine(m) {
   const ds = m.devices || []; if (!ds.length) return "";
   const now = Date.now() / 1000;
-  return ds.map(d => { const quiet = now - d.last_seen > 20 * 60; return `<small class="${quiet ? "devwarn" : ""}">${d.kind === "windows" ? "💻" : "📱"} ${esc(d.name)} · ${d.last_seen ? (quiet ? "quiet for " : "reported ") + ago(d.last_seen) : "not reported yet"}</small>`; }).join("");
+  return ds.map(d => { const quiet = now - d.last_seen > 20 * 60; return `<small class="${quiet ? "devwarn" : ""}">${d.kind === "windows" ? "💻" : "📱"} ${esc(d.name)} · ${d.last_seen ? (quiet ? "quiet for " : "reported ") + ago(d.last_seen) : "not reported yet"}${!quiet && d.status ? " · " + esc(d.status) : ""}</small>`; }).join("");
+}
+
+
+/* ---------- profile photo: shrink to a small square in the browser, then upload ---------- */
+function uploadAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = async () => {
+      URL.revokeObjectURL(url);
+      const S2 = 256, c = document.createElement("canvas"); c.width = S2; c.height = S2;
+      const ctx = c.getContext("2d"), s = Math.min(img.width, img.height), sx = (img.width - s) / 2, sy = (img.height - s) / 2;
+      ctx.drawImage(img, sx, sy, s, s, 0, 0, S2, S2);
+      let data = c.toDataURL("image/jpeg", 0.82);
+      if (data.length > 180 * 1024) data = c.toDataURL("image/jpeg", 0.6);
+      try { const r = await api("/api/avatar", "POST", { image: data }); resolve(r.avatar); } catch (e) { reject(e); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("That image could not be read.")); };
+    img.src = url;
+  });
 }

@@ -151,7 +151,8 @@ def member_view(m, viewer=None):
     gated = bool(viewer) and viewer["role"] == "parent" and m["role"] == "child" and viewer["id"] != m["id"]
     out = {"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "battery": m["battery"], "share": state,
            "paused_until": m["paused_until"] if state == "paused" else 0, "last_seen": m["last_seen"], "quiet": m["quiet_from"] >= 0,
-           "location": None, "perms": perms, "lock": lock_view(m), "home": at_home(m), "blocks": block_views(m)}
+           "location": None, "perms": perms, "lock": lock_view(m), "home": at_home(m), "blocks": block_views(m),
+           "avatar": (f"/api/avatar/{m['id']}?v={int(m['avatar_at'] or 0)}" if m["avatar"] else None)}
     if state == "on" and m["last_lat"] is not None and not (gated and not perms["location"]):
         out["location"] = {"lat": m["last_lat"], "lng": m["last_lng"], "acc": m["last_acc"], "at": m["last_at"]}
     if gated and not perms["location"]:
@@ -159,7 +160,7 @@ def member_view(m, viewer=None):
     if gated and not perms["battery"]:
         out["battery"] = -1
     if m["role"] == "child" and viewer and (viewer["id"] == m["id"] or viewer["role"] == "parent"):          # a linked computer that goes quiet is visible to the family
-        out["devices"] = [{"id": d["id"], "name": d["name"], "kind": d["kind"], "last_seen": d["last_seen"]}
+        out["devices"] = [{"id": d["id"], "name": d["name"], "kind": d["kind"], "last_seen": d["last_seen"], "status": d["status"] or "", "version": d["version"] or ""}
                           for d in db.many(select(db.devices).where(db.devices.c.member_id == m["id"]).order_by(db.devices.c.id))]
     return out
 
@@ -460,6 +461,59 @@ def delete_history():
     return jsonify(ok=True)
 
 
+# ---------------------------------------------------------------- profile pictures (a small photo, stored as the member chooses)
+import base64 as _b64
+
+AVATAR_MAGIC = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png"}
+
+
+@app.post("/api/avatar")
+@need
+def set_avatar():
+    """Set your own photo. The browser shrinks it to a small square first; we keep it small."""
+    b = request.get_json(silent=True) or {}
+    raw = str(b.get("image") or "")
+    if not raw:                                                            # empty = remove it
+        db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(avatar="", avatar_at=time.time()))
+        push_family(g.m["family_id"], "member", {"id": g.m["id"], "avatar": None})
+        return jsonify(ok=True, avatar=None)
+    data = raw.split(",", 1)[-1]                                           # drop a data: prefix if present
+    try:
+        blob = _b64.b64decode(data, validate=True)
+    except (ValueError, Exception):
+        return err("That image did not come through. Try another photo.")
+    if len(blob) > 200 * 1024:
+        return err("That photo is too big. Pick a smaller one.")
+    if not any(blob.startswith(magic) for magic in AVATAR_MAGIC):
+        return err("That is not a photo Homebase can use (use a normal JPEG or PNG).")
+    db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(avatar=_b64.b64encode(blob).decode(), avatar_at=time.time()))
+    row = db.one(select(db.members).where(db.members.c.id == g.m["id"]))
+    push_family(g.m["family_id"], "member", {"id": g.m["id"], "avatar": f"/api/avatar/{g.m['id']}?v={int(row['avatar_at'])}"})
+    return jsonify(ok=True, avatar=f"/api/avatar/{g.m['id']}?v={int(row['avatar_at'])}")
+
+
+@app.delete("/api/avatar")
+@need
+def clear_avatar():
+    db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(avatar="", avatar_at=time.time()))
+    push_family(g.m["family_id"], "member", {"id": g.m["id"], "avatar": None})
+    return jsonify(ok=True)
+
+
+@app.get("/api/avatar/<int:member_id>")
+@need
+def get_avatar(member_id):
+    target = same_family(member_id)
+    if not target or not target["avatar"]:
+        return err("No photo.", 404)
+    try:
+        blob = _b64.b64decode(target["avatar"])
+    except Exception:
+        return err("No photo.", 404)
+    mime = next((m for magic, m in AVATAR_MAGIC.items() if blob.startswith(magic)), "image/jpeg")
+    return app.response_class(blob, mimetype=mime, headers={"Cache-Control": "private, max-age=86400"})
+
+
 # ---------------------------------------------------------------- linking a computer or tablet with a 6-digit code (no scripts, no copying keys)
 @app.post("/api/devices/code")
 @need
@@ -519,6 +573,19 @@ def report_apps():
     return jsonify(ok=True, count=len(clean_apps))
 
 
+@app.post("/api/devices/status")
+@need
+def device_status():
+    """The tracker's heartbeat: what it sees right now (e.g. "counting Minecraft"), so the family can tell it is alive and working."""
+    token = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+    dev = db.one(select(db.devices).where(db.devices.c.token_hash == db.hash_token(token)))
+    if not dev:
+        return err("Only a linked device reports status.", 403)
+    b = request.get_json(silent=True) or {}
+    db.run(update(db.devices).where(db.devices.c.id == dev["id"]).values(status=clean(b.get("status"), 150), version=clean(b.get("version"), 12), last_seen=time.time()))
+    return jsonify(ok=True)
+
+
 @app.get("/api/devices")
 @need
 def list_devices():
@@ -544,10 +611,13 @@ def active_blocks(member_id, now=None):
     return [r for r in rows if not r["ended"] or r["ended"] > now]
 
 
+GROUND_WARN = 60                                               # a minute's warning to finish the game or video before it is blocked
+
+
 def block_views(m):
     if m["role"] != "child":
         return []
-    return [{"id": r["id"], "key": r["key"], "label": r["label"], "until": r["until"]} for r in active_blocks(m["id"])]
+    return [{"id": r["id"], "key": r["key"], "label": r["label"], "until": r["until"], "active_at": r["created"] + GROUND_WARN} for r in active_blocks(m["id"])]
 
 
 def make_blocks(by, target, apps, minutes):
@@ -563,7 +633,8 @@ def make_blocks(by, target, apps, minutes):
     if labels:
         who = by["name"] if by else "The owner"
         until = time.strftime("%H:%M", time.gmtime(now + minutes * 60 - (target["tz_offset"] or 0) * 60))
-        say(target["family_id"], by["id"] if by else target["id"], f"{who} grounded {target['name']} from {', '.join(labels)} until {until}")
+        say(target["family_id"], by["id"] if by else target["id"], f"{who} is grounding {target['name']} from {', '.join(labels)} in 1 minute, until {until}")
+        push(target["id"], "ground_warn", {"apps": labels, "seconds": GROUND_WARN})
         push_family(target["family_id"], "member", {"id": target["id"], "blocks": True})
     return labels
 
@@ -897,7 +968,7 @@ def admin_families():
     for f in db.many(select(db.families).order_by(db.families.c.id.desc())):
         ms = family_members(f["id"])
         out.append({"id": f["id"], "name": f["name"], "created": f["created"], "members": [{"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "last_seen": m["last_seen"],
-                    "devices": len(db.many(select(db.devices.c.id).where(db.devices.c.member_id == m["id"]))), "device_list": [{"id": d["id"], "name": d["name"], "kind": d["kind"], "last_seen": d["last_seen"]} for d in db.many(select(db.devices).where(db.devices.c.member_id == m["id"]))],
+                    "devices": len(db.many(select(db.devices.c.id).where(db.devices.c.member_id == m["id"]))), "device_list": [{"id": d["id"], "name": d["name"], "kind": d["kind"], "last_seen": d["last_seen"], "status": d["status"] or "", "version": d["version"] or ""} for d in db.many(select(db.devices).where(db.devices.c.member_id == m["id"]))],
                     "lock": lock_view(m), "blocks": block_views(m), "apps": apps_for(m["id"]) if m["role"] == "child" else []} for m in ms]})
     return jsonify(families=out, now=time.time())
 
@@ -1165,6 +1236,17 @@ def screentime_agent():
         return app.response_class("\ufeff" + body, mimetype="text/plain", headers={"Content-Disposition": 'attachment; filename="Homebase-ScreenTime.ps1"', "Cache-Control": "no-store"})
     text = (CMD_HEAD + body).replace("\r\n", "\n").replace("\n", "\r\n")                  # batch files need Windows line endings
     return app.response_class(text, mimetype="application/octet-stream", headers={"Content-Disposition": 'attachment; filename="Homebase-ScreenTime.cmd"', "Cache-Control": "no-store"})
+
+
+@app.get("/api/windows/version")
+def windows_version():
+    """The newest Windows tracker build. A running tracker compares this to its own build and updates itself."""
+    try:
+        build = int(open(os.path.join(BASE, "windows", "BUILD")).read().strip())
+    except (OSError, ValueError):
+        build = 0
+    exe = os.path.join(BASE, "windows", "HomebaseTracker.exe")
+    return jsonify(build=build, size=os.path.getsize(exe) if os.path.exists(exe) else 0, url="/download/windows")
 
 
 @app.get("/download/windows")

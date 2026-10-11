@@ -45,7 +45,7 @@ fun FamilyTab(nav: Nav) {
         fam?.members.orEmpty().forEach { m ->
             SoftCard {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Avatar(m.emoji, 52, if (m.isParent) SunSoft else BlueSoft)
+                    MemberAvatar(m, 52, if (m.isParent) SunSoft else BlueSoft)
                     Column(Modifier.weight(1f)) {
                         Text(if (m.id == me.myId) "${m.name} (you)" else m.name, style = MaterialTheme.typography.titleMedium)
                         Text(memberLine(m), style = MaterialTheme.typography.bodyMedium, color = Muted)

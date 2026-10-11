@@ -24,8 +24,60 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
+/// <summary>
+/// A small dark pop-up that Homebase draws itself in the corner of the screen. Windows "balloon" notifications are silently hidden by
+/// Focus Assist or notification settings, which made grounding warnings and messages invisible, so important things use this instead.
+/// </summary>
+class Toast : Form
+{
+    static readonly List<Toast> open = new List<Toast>();
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int a, int b, int c, int d, int e, int f);
+    protected override bool ShowWithoutActivation { get { return true; } }
+    protected override CreateParams CreateParams { get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x80 | 0x8; return cp; } }   // no focus steal, not in alt-tab, always on top
+    readonly System.Windows.Forms.Timer life = new System.Windows.Forms.Timer();
+
+    public Toast(string title, string body, int seconds, string action, Action onAction)
+    {
+        AutoScaleDimensions = new SizeF(96f, 96f); AutoScaleMode = AutoScaleMode.Dpi;
+        FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
+        BackColor = Color.FromArgb(24, 24, 28); ForeColor = Color.FromArgb(236, 236, 240); Width = 380; Height = action == null ? 96 : 130;
+        Label t = new Label { Text = title, Left = 18, Top = 12, Width = 344, Height = 24, Font = new Font("Segoe UI Emoji", 11f, FontStyle.Bold), ForeColor = Color.White, UseCompatibleTextRendering = false };
+        Label b = new Label { Text = body, Left = 18, Top = 38, Width = 344, Height = 48, Font = new Font("Segoe UI Emoji", 9.5f), ForeColor = Color.FromArgb(180, 180, 190) };
+        Controls.Add(t); Controls.Add(b);
+        if (action != null)
+        {
+            Button go = new Button { Text = action, Left = 18, Top = 90, Width = 230, Height = 30, AutoSize = false, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(91, 147, 255), ForeColor = Color.FromArgb(8, 16, 31), Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
+            go.FlatAppearance.BorderSize = 0; go.Click += delegate { try { onAction(); } catch { } Close(); }; Controls.Add(go);
+        }
+        Click += delegate { Close(); }; t.Click += delegate { Close(); }; b.Click += delegate { Close(); };
+        Shown += delegate { Rounded(); Stack(); };
+        SizeChanged += delegate { Rounded(); };
+        life.Interval = Math.Max(3, seconds) * 1000; life.Tick += delegate { Close(); }; life.Start();
+        FormClosed += delegate { open.Remove(this); Stack(); };
+        open.Add(this); Stack();
+    }
+
+    void Rounded() { try { Region = System.Drawing.Region.FromHrgn(CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 18, 18)); } catch { } }
+
+    static void Stack()
+    {
+        Rectangle wa = Screen.PrimaryScreen.WorkingArea; int y = wa.Bottom - 12;
+        for (int i = open.Count - 1; i >= 0; i--) { Toast x = open[i]; y -= x.Height; x.Location = new Point(wa.Right - x.Width - 14, y); y -= 10; }
+    }
+    public static void Snapshots(string dir)                                              // test helper: draw each pop-up to a picture
+    {
+        int i = 0; foreach (Toast t in open.ToArray()) { try { using (Bitmap bmp = new Bitmap(t.Width, t.Height)) { t.DrawToBitmap(bmp, new Rectangle(0, 0, t.Width, t.Height)); bmp.Save(Path.Combine(dir, "toast" + (i++) + ".png")); } } catch { } }
+    }
+    public static void Show(string title, string body, int seconds, string action, Action onAction)
+    {
+        while (open.Count >= 4) open[0].Close();
+        new Toast(title, body, seconds, action, onAction).Show();
+    }
+}
+
 static class Native
 {
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
     [StructLayout(LayoutKind.Sequential)] public struct LII { public uint cb; public uint t; }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -41,6 +93,7 @@ static class Native
 
 class App : ApplicationContext
 {
+    public const int Build = 16;                                              // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -56,8 +109,8 @@ class App : ApplicationContext
     string server = DefaultServer;
     string token { get { return cur == null ? "" : cur.Token; } }
     Control sync;                                                            // lets the background loop open windows on the UI thread
-    DateTime lastPrompt = DateTime.MinValue; bool wasAway; DateTime lastApps = DateTime.MinValue;
-    volatile string nowDoing = "nothing yet";
+    DateTime lastPrompt = DateTime.MinValue; bool wasAway; DateTime lastApps = DateTime.MinValue; DateTime lastBeat = DateTime.MinValue;
+    volatile string nowDoing = "nothing yet"; volatile string lastFgName = "";
     string TodayFile { get { return Path.Combine(Dir, "today_" + Regex.Replace(cur == null ? "x" : cur.Name, "[^A-Za-z0-9]", "_") + ".txt"); } }
     NotifyIcon tray;
     Dictionary<string, string[]> apps = new Dictionary<string, string[]>();      // key -> label, category, seconds
@@ -74,18 +127,38 @@ class App : ApplicationContext
     static readonly string[][] SocialSites = { new[] { "TikTok", "TikTok" }, new[] { "Instagram", "Instagram" }, new[] { "Facebook", "Facebook" }, new[] { "Snapchat", "Snapchat" },
         new[] { "Reddit", "Reddit" }, new[] { "Twitter|(^|[ \\-])X($|[ \\-])", "X (Twitter)" } };
     static readonly string[] WatchApps = { "vlc", "mpv", "wmplayer", "video.ui", "netflix", "disneyplus", "primevideo", "plex", "kodi", "potplayermini64", "stremio" };
-    static readonly Regex GameNames = new Regex("^(minecraft|roblox.*|fortnite.*|valorant.*|overwatch.*|cs2|csgo|dota2|r5apex|gta5|eldenring|terraria|stardew valley|amongus|rocketleague|fallguys.*|palworld.*|hogwarts.*|league of legends|genshinimpact|yuanshen|apex.*|rainbowsix.*|fifa.*|eafc.*|cyberpunk2077|witcher3|skyrim.*|portal2|hl2|left4dead2|tf2|brawlhalla|osu!|lethalcompany|helldivers2|content warning)$", RegexOptions.IgnoreCase);
+    static readonly Regex GameNames = new Regex("^(minecraft.*|roblox.*|zenlesszonezero|honkai.*|wutheringwaves.*|marvel.*|tarkov|rust|pubg.*|tslgame|warframe.*|destiny2|bf20.*|bf4|bf1|modernwarfare.*|cod.*|warzone.*|callofduty.*|battlefront.*|nba2k.*|madden.*|nfs.*|forza.*|halo.*|gta.*|rdr2|sims4|spore|undertale|deltarune|hollow ?knight|celeste|hades|among ?us|goose ?goose.*|fall ?guys.*|stumble.*|brawl.*|clash.*|supercell.*|subway.*|geometry ?dash|plants ?vs.*|pvz.*|bluestacks.*|hd-player|ldplayer.*|memu.*|nox.*|gameloop|epicgameslauncher_|fortnite.*|valorant.*|overwatch.*|cs2|csgo|dota2|r5apex|gta5|eldenring|terraria|stardew valley|amongus|rocketleague|fallguys.*|palworld.*|hogwarts.*|league of legends|genshinimpact|yuanshen|apex.*|rainbowsix.*|fifa.*|eafc.*|cyberpunk2077|witcher3|skyrim.*|portal2|hl2|left4dead2|tf2|brawlhalla|osu!|lethalcompany|helldivers2|content warning)$", RegexOptions.IgnoreCase);
     static readonly string[] Launchers = { "steam", "steamwebhelper", "epicgameslauncher", "riotclientservices", "riotclientux", "battle.net", "origin", "ubisoftconnect", "gog galaxy", "galaxyclient" };
 
     [STAThread]
     static void Main(string[] args)
     {
+        try { Native.SetProcessDPIAware(); } catch { }                              // real pixels on scaled screens, so pop-ups land where they should
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;           // TLS 1.2
         Application.EnableVisualStyles();
-        bool created;
-        using (new Mutex(true, "Local\\HomebaseTracker", out created))
+        if (args.Length > 0 && args[0] == "--selftest") { SelfTest(); return; }        // runs even while the real tracker is open
+        if (args.Length > 0 && args[0] == "--popuptest")                                // shows the pop-ups for a few seconds so they can be seen
         {
-            if (!created) { if (args.Length == 0) MessageBox.Show("Homebase screen time is already running. Look for its icon near the clock.", "Homebase"); return; }
+            Toast.Show("🚫 Roblox is grounded", "Closed because it is grounded until 8:51 PM.", 9, null, null);
+            Toast.Show("📞 Mum is calling", "Homebase call", 9, "Answer in Homebase", delegate { });
+            Toast.Show("Homebase is on", "Counting only playing and watching.", 9, null, null);
+            System.Windows.Forms.Timer snap = new System.Windows.Forms.Timer { Interval = 1500 }; snap.Tick += delegate { snap.Stop(); Toast.Snapshots(Environment.GetEnvironmentVariable("HB_SNAP") ?? Path.GetTempPath()); }; snap.Start();
+            System.Windows.Forms.Timer t = new System.Windows.Forms.Timer { Interval = 11000 }; t.Tick += delegate { Application.Exit(); }; t.Start();
+            Application.Run(); return;
+        }
+        bool created;
+        string hbDir = Environment.GetEnvironmentVariable("HB_DIR");                   // tests use their own folder, so they can run beside the real tracker
+        using (Mutex mx = new Mutex(true, "Local\\HomebaseTracker" + (hbDir == null ? "" : "_" + Math.Abs(hbDir.GetHashCode())), out created))   // tests use their own folder, so they can run beside the real tracker
+        {
+            if (!created)
+            {
+                // another copy is running, possibly an OLD version. Launching a new one means "update me": stop the old one and take over.
+                if (hbDir == null)
+                    foreach (Process other in Process.GetProcessesByName("HomebaseTracker"))
+                        if (other.Id != Process.GetCurrentProcess().Id) { try { other.Kill(); other.WaitForExit(4000); } catch { } }
+                try { created = mx.WaitOne(8000); } catch (AbandonedMutexException) { created = true; }
+                if (!created) { if (args.Length == 0) MessageBox.Show("Homebase screen time is already running. Look for its icon near the clock.", "Homebase"); return; }
+            }
             try { Application.Run(new App(args)); }
             catch (Exception e) { Log("fatal: " + e); MessageBox.Show("Something went wrong:\n\n" + e.Message + "\n\nDetails are in " + LogFile, "Homebase screen time"); }
         }
@@ -118,9 +191,9 @@ class App : ApplicationContext
         }
         sync = new Control(); sync.CreateControl(); IntPtr force = sync.Handle;
         if (profiles.Count > 1) PickPerson(false);                              // two kids, one laptop: ask who is sitting down
-        LoadToday();
+        LoadToday(); LoadCustom();
         MakeTray();
-        Say("Homebase is on", (cur == null ? "" : cur.Name + ": ") + "counting only playing and watching. Your family sees the same numbers.");
+        Say("Homebase is on", (cur == null ? "" : cur.Name + ": ") + "counting only playing and watching. Your family sees the same numbers. Right-click the icon near the clock to see what it counts.", 12, null, null);
         Microsoft.Win32.SystemEvents.SessionSwitch += delegate (object o, Microsoft.Win32.SessionSwitchEventArgs e) { if (profiles.Count > 1 && (e.Reason == Microsoft.Win32.SessionSwitchReason.SessionUnlock || e.Reason == Microsoft.Win32.SessionSwitchReason.SessionLogon)) sync.BeginInvoke(new Action(delegate { PickPerson(false); })); };
         new Thread(Loop) { IsBackground = true }.Start();
     }
@@ -276,20 +349,62 @@ class App : ApplicationContext
         ContextMenuStrip m = new ContextMenuStrip();
         ToolStripMenuItem who = new ToolStripMenuItem("Homebase screen time is on"); who.Enabled = false; m.Items.Add(who);
         ToolStripMenuItem today = new ToolStripMenuItem("Today: counting...");
-        m.Opening += delegate { who.Text = cur == null ? "Homebase screen time is on" : "Counting for " + cur.Name; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
+        ToolStripMenuItem grounded = new ToolStripMenuItem("Grounded apps: none");
+        grounded.Enabled = false; m.Items.Add(grounded);
+        m.Opening += delegate { grounded.Text = groundedNow.Count == 0 ? "Grounded apps: none" : "Grounded: " + string.Join(", ", groundedNow.ToArray()); who.Text = cur == null ? "Homebase screen time is on" : "Counting for " + cur.Name; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
         m.Items.Add(today);
+        ToolStripMenuItem addGame = new ToolStripMenuItem("Count the app I was just in as playing");
+        addGame.Click += delegate { AddCustom("play"); };
+        ToolStripMenuItem addVid = new ToolStripMenuItem("Count the app I was just in as watching");
+        addVid.Click += delegate { AddCustom("watch"); };
+        m.Items.Add(addGame); m.Items.Add(addVid);
         ToolStripMenuItem doing = new ToolStripMenuItem("What am I counting now?");
-        doing.Click += delegate { tray.ShowBalloonTip(6000, "Right now", nowDoing, ToolTipIcon.Info); };
+        doing.Click += delegate { Say("Right now", nowDoing, 8, null, null); };
         m.Items.Add(doing);
         m.Items.Add("Who is using this computer...", null, delegate { sync.BeginInvoke(new Action(delegate { PickPerson(true); })); });
         m.Items.Add("Open Homebase", null, delegate { try { Process.Start(server + "/app"); } catch { } });
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add("Remove from this computer", null, delegate { Remove(true); Quit(); });
         tray = new NotifyIcon { Icon = SystemIcons.Information, Text = "Homebase", Visible = true, ContextMenuStrip = m };
-        tray.DoubleClick += delegate { Open("/app"); };
+        tray.DoubleClick += delegate { Say("Homebase" + (cur == null ? "" : " - " + cur.Name), nowDoing + "\nToday: " + Duration(Total()) + " playing or watching", 9, "Open Homebase", delegate { Open("/app"); }); };
         tray.BalloonTipClicked += delegate { Open(pendingOpen ?? "/app"); pendingOpen = null; };
     }
+    static bool hbDirIsNull() { return Environment.GetEnvironmentVariable("HB_DIR") == null; }       // tests never update themselves
     string pendingOpen;
+    DateTime lastUpdateCheck = DateTime.MinValue;
+
+    // Ask the server for the newest build; if it is newer, download it, swap the files and restart. Nobody has to re-download again.
+    void CheckUpdate()
+    {
+        int st; string txt = Http("GET", "/api/windows/version", null, out st); if (st != 200) return;
+        var d = Json.Deserialize<Dictionary<string, object>>(txt);
+        if (!d.ContainsKey("build") || Convert.ToInt32(d["build"]) <= Build) return;
+        string tmp = Path.Combine(Dir, "update.exe");
+        HttpWebRequest r = (HttpWebRequest)WebRequest.Create(server + "/download/windows"); r.Timeout = 60000; r.UserAgent = "HomebaseTracker/" + Build;
+        using (HttpWebResponse x = (HttpWebResponse)r.GetResponse()) using (Stream src = x.GetResponseStream()) using (FileStream dst = File.Create(tmp)) src.CopyTo(dst);
+        FileInfo fi = new FileInfo(tmp);
+        byte[] head = new byte[2]; using (FileStream f = File.OpenRead(tmp)) f.Read(head, 0, 2);
+        if (fi.Length < 20000 || head[0] != (byte)'M' || head[1] != (byte)'Z') { try { File.Delete(tmp); } catch { } Log("update: download looked wrong"); return; }
+        // a running program can be renamed on Windows even though it cannot be overwritten, so move the old one aside and put the new one in its place
+        try { if (File.Exists(Installed + ".old")) File.Delete(Installed + ".old"); } catch { }
+        try { if (File.Exists(Installed)) File.Move(Installed, Installed + ".old"); } catch (Exception e) { Log("update rename: " + e.Message); }
+        File.Move(tmp, Installed);
+        Log("updated from build " + Build + " to " + d["build"]);
+        Say("Homebase updated", "Now on the newest version.", 6, null, null);
+        Process.Start(Installed);                                                          // the new copy takes over from this one
+        stopping = true; Thread.Sleep(600); Quit();
+    }
+    readonly List<string> groundedNow = new List<string>();
+    static string CustomFile { get { return Path.Combine(Dir, "custom.txt"); } }
+    void LoadCustom() { try { if (File.Exists(CustomFile)) foreach (string l in File.ReadAllLines(CustomFile)) { string[] p = l.Split('|'); if (p.Length == 3) CustomPicks[p[0]] = new[] { p[1], p[2] }; } } catch { } }
+    void AddCustom(string cat)
+    {
+        string n = (lastFgName ?? "").ToLower();
+        if (n == "" || n == "homebasetracker" || n == "explorer") { Say("Homebase", "Open the game or video first, then pick this from the tray menu.", 8, null, null); return; }
+        CustomPicks[n] = new[] { lastFgName, cat };
+        try { File.WriteAllLines(CustomFile, CustomPicks.Select(kv => kv.Key + "|" + kv.Value[0] + "|" + kv.Value[1]).ToArray()); } catch { }
+        Say("Got it", lastFgName + " will now count as " + (cat == "play" ? "playing" : "watching") + " on this computer.", 8, null, null);
+    }
     void Open(string path) { try { Process.Start(server + path); } catch { } }
 
     // a call ringing on this computer: beep a ring pattern and show a balloon you can click to answer in the web app
@@ -297,7 +412,7 @@ class App : ApplicationContext
     {
         if (ringingCall == callId) return;
         ringingCall = callId; pendingOpen = "/app";
-        Say(who + " is calling", "Click here to answer in Homebase.");
+        Say("\U0001F4DE " + who + " is calling", "Homebase call", 30, "Answer in Homebase", delegate { Open("/app"); });
         new Thread(delegate ()
         {
             DateTime start = DateTime.Now;
@@ -312,7 +427,12 @@ class App : ApplicationContext
     }
 
     void Quit() { stopping = true; if (tray != null) { tray.Visible = false; tray.Dispose(); } Application.Exit(); }
-    void Say(string title, string text) { try { if (tray != null) tray.ShowBalloonTip(10000, title, text, ToolTipIcon.Info); } catch { } }
+    // an always-visible pop-up (drawn by us), plus a Windows balloon as a bonus when the user has notifications on
+    void Say(string title, string text) { Say(title, text, 9, null, null); }
+    void Say(string title, string text, int seconds, string action, Action onAction)
+    {
+        try { if (sync != null && sync.IsHandleCreated) sync.BeginInvoke(new Action(delegate { try { Toast.Show(title, text, seconds, action, onAction); } catch (Exception e) { Log("toast: " + e.Message); } })); } catch { }
+    }
     int Total() { int t = 0; foreach (var v in apps.Values) { int s; int.TryParse(v[2], out s); t += s; } return t; }
     static string Duration(int sec) { int m = sec / 60; return m >= 60 ? (m / 60) + " h " + (m % 60).ToString("00") + " min" : m + " min"; }
 
@@ -390,6 +510,8 @@ class App : ApplicationContext
         }
         catch (Exception e) { Log("events: " + e.Message); }
         try { EnforceBlocks(); } catch (Exception e) { Log("blocks: " + e.Message); }
+        if ((hbDirIsNull() || Environment.GetEnvironmentVariable("HB_UPDATE") != null) && (now - lastUpdateCheck).TotalMinutes > 20) { lastUpdateCheck = now; try { CheckUpdate(); } catch (Exception e) { Log("update: " + e.Message); } }
+        if ((now - lastBeat).TotalSeconds > 30) { lastBeat = now; try { int hs; Http("POST", "/api/devices/status", new Dictionary<string, object> { { "status", nowDoing }, { "version", "b" + Build } }, out hs); } catch (Exception e) { Log("beat: " + e.Message); } }
         if ((now - lastApps).TotalMinutes > 60) { lastApps = now; try { ReportApps(); } catch (Exception e) { Log("apps: " + e.Message); } }
         double idleNow = Native.Idle();
         if (idleNow > 1200) wasAway = true;
@@ -460,17 +582,28 @@ class App : ApplicationContext
         int st; string txt = Http("GET", "/api/blocks", null, out st); if (st != 200) return;
         var d = Json.Deserialize<Dictionary<string, object>>(txt);
         if (!d.ContainsKey("blocks")) return;
+        groundedNow.Clear();
         Process[] procs = Process.GetProcesses();
         foreach (object o in (System.Collections.ArrayList)d["blocks"])
         {
             var b = (Dictionary<string, object>)o; string key = Convert.ToString(b["key"]), label = Convert.ToString(b["label"]);
             DateTime until = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(Convert.ToDouble(b["until"])).ToLocalTime();
+            double activeAt = b.ContainsKey("active_at") ? Convert.ToDouble(b["active_at"]) : 0;
+            double nowEpoch = (DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+            if (activeAt > nowEpoch)                                                     // the warning minute: let them finish, warn once
+            {
+                DateTime lw;
+                if (!told.TryGetValue("warn:" + label, out lw) || (DateTime.Now - lw).TotalSeconds > 50) { told["warn:" + label] = DateTime.Now; Say("Finish up: " + label, label + " will be grounded in about a minute."); }
+                continue;
+            }
             bool hit = false;
+            if (Environment.GetEnvironmentVariable("HB_DEBUG") != null) Log("enforce key=" + key + " label=" + label + " active_at_in=" + (int)(activeAt - nowEpoch) + "s processes=" + procs.Length);
             foreach (Process p in procs)
             {
                 try
                 {
                     string name = p.ProcessName, title = p.MainWindowTitle ?? "";
+                    if (Environment.GetEnvironmentVariable("HB_DEBUG") != null && (MatchesBlock(name, title, key, label) || name.ToLower().Contains("roblox"))) Log("  candidate " + name + " title=[" + title + "] match=" + MatchesBlock(name, title, key, label));
                     if (name.Equals("explorer", StringComparison.OrdinalIgnoreCase) || p.Id == Process.GetCurrentProcess().Id) continue;
                     bool browser = Array.IndexOf(Browsers, name.ToLower()) >= 0;
                     if (browser)
@@ -483,7 +616,8 @@ class App : ApplicationContext
                 catch { }
             }
             DateTime last;
-            if (hit && (!told.TryGetValue(label, out last) || (DateTime.Now - last).TotalSeconds > 60)) { told[label] = DateTime.Now; Say(label + " is grounded", "A parent grounded " + label + " until " + until.ToString("t") + "."); }
+            if (hit && (!told.TryGetValue(label, out last) || (DateTime.Now - last).TotalSeconds > 20)) { told[label] = DateTime.Now; Say("\U0001F6AB " + label + " is grounded", "Closed because it is grounded until " + until.ToString("t") + ".", 10, null, null); try { SystemSounds.Hand.Play(); } catch { } }
+            groundedNow.Add(label + " until " + until.ToString("t"));
         }
     }
 
@@ -502,6 +636,9 @@ class App : ApplicationContext
         }
         if (name == "LockApp" || name == "LogonUI" || name == "SearchHost" || name == "explorer") return;
         string[] c = Classify(name, title, path);
+        if (c == null && Array.IndexOf(NotGames, name.ToLower()) < 0 && Array.IndexOf(Browsers, name.ToLower()) < 0 && (D3DFullScreen() || (full && path != null && !Regex.IsMatch(path, "\\\\(Windows|Microsoft Office|Office1\\d)\\\\", RegexOptions.IgnoreCase))))
+            c = new[] { "pc:" + name.ToLower(), name, "play" };                                 // Windows says it is a full-screen game
+        lastFgName = name;
         bool active = c != null && (c[2] == "watch" ? (idle <= ActiveSeconds || full) : idle <= ActiveSeconds);
         if (Environment.GetEnvironmentVariable("HB_DEBUG") != null) Log("fg=" + name + " title=\"" + title + "\" idle=" + (int)idle + " full=" + full + " class=" + (c == null ? "none" : c[2]) + " active=" + active);
         if (c == null) { nowDoing = name + " - not counted (not a game or video)"; return; }
@@ -513,11 +650,20 @@ class App : ApplicationContext
     }
 
     // returns { key, label, category } for playing/watching, or null (homework, work, everyday apps)
+    [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
+    static bool D3DFullScreen() { try { int st; return SHQueryUserNotificationState(out st) == 0 && st == 3; } catch { return false; } }    // 3 = a full-screen game is running
+
+    static readonly Regex GameSites = new Regex("Poki|CrazyGames|Miniclip|itch\\.io|Friv|Y8 Games|Kongregate|Coolmath ?Games|Krunker|Slither\\.io|Agar\\.io|Roblox|Minecraft|Shell Shockers|1v1\\.LOL|Geoguessr|Chess\\.com|Lichess|Wordle|Kahoot|Gimkit|Blooket|PlayStation|Xbox Cloud|GeForce NOW|Steam|Epic Games|Game", RegexOptions.IgnoreCase);
+    static readonly string[] NotGames = { "winword", "excel", "powerpnt", "onenote", "outlook", "acrobat", "acrord32", "code", "devenv", "teams", "zoom", "mstsc", "anydesk", "teamviewer", "notepad", "mspaint", "obs64", "claude", "explorer", "taskmgr", "cmd", "powershell", "windowsterminal", "slack", "discord" };
+    public static readonly Dictionary<string, string[]> CustomPicks = new Dictionary<string, string[]>();     // apps the family told us count (process name -> { label, category })
+
     static string[] Classify(string proc, string title, string path)
     {
         string n = proc.ToLower();
+        string[] mine; if (CustomPicks.TryGetValue(n, out mine)) return new[] { "pc:" + n, mine[0], mine[1] };
         if (Array.IndexOf(Browsers, n) >= 0)
         {
+            if (GameSites.IsMatch(title) && !Regex.IsMatch(title, "Docs|Sheets|Slides|Classroom|Drive", RegexOptions.IgnoreCase)) return new[] { "pc:web:games", "Browser games", "play" };
             foreach (var s in WatchSites) if (Regex.IsMatch(title, s[0], RegexOptions.IgnoreCase)) return new[] { "pc:web:" + s[1], s[1] + " (in browser)", "watch" };
             foreach (var s in SocialSites) if (Regex.IsMatch(title, s[0])) return new[] { "pc:web:" + s[1], s[1] + " (in browser)", "social" };
             return null;                                              // an ordinary web page is homework or reading
