@@ -621,7 +621,7 @@ async function screenDialog(id) {
     root.querySelector("#stBody").innerHTML = `<div class="sub">${label(pick)}</div><div class="stbig">${fmtDur(sel.total)}</div>
       <div class="stbars">${[6, 5, 4, 3, 2, 1, 0].map(i => `<button class="stbar ${i === pick ? "sel" : ""}" data-i="${i}" aria-label="${label(i)}: ${fmtDur(days[i].total)}"><i style="height:${8 + 72 * days[i].total / max}px"></i><span>${new Date(days[i].day + "T12:00").toLocaleDateString([], { weekday: "narrow" })}</span></button>`).join("")}</div>
       <div class="msec">Apps</div>${sel.apps.length ? sel.apps.map(a => { const c = CAT[a.cat] || CAT.play; return `<div class="starow"><span class="stemo">${c[0]}</span><div style="flex:1"><div class="stline"><b>${esc(a.label || a.pkg)}</b><span>${fmtDur(a.sec)}</span></div><div class="sttrack"><i style="width:${100 * a.sec / top}%;background:${c[2]}"></i></div><small>${c[1]}</small></div></div>`; }).join("")
-      : `<div class="empty">${mine ? "Nothing counted for this day yet." : esc(m.name) + " may not have turned tracking on yet. It is their choice."}</div>`}`;
+      : `<div class="empty">${mine ? "Nothing counted for this day yet." + (pick === 0 && whyNothing(m) ? "<br><small>" + esc(whyNothing(m)) + "</small>" : "") : esc(m.name) + " may not have turned tracking on yet. It is their choice."}</div>`}`;
     root.querySelectorAll(".stbar").forEach(b => b.onclick = () => { pick = +b.dataset.i; draw(root); });
   };
   let sm = null; try { sm = await api("/api/summary?member=" + id); } catch (e) { /* not available */ }
@@ -816,4 +816,11 @@ function screenLine(m) {
   if (s.hidden) return `<small class="devwarn">⏱ ${esc(m.name)} has switched screen time off</small>`;
   return `<small>⏱ ${fmtDur(s.today)} today${s.top ? " · most on " + esc(s.top) : ""}</small>`;
 }
-function screenSub(m) { const s = m.screen; if (!s) return "Minutes and apps"; if (s.hidden) return "Switched off by " + esc(m.name); return s.today ? `Today ${fmtDur(s.today)}${s.top ? " · " + esc(s.top) : ""}` : "Nothing counted today"; }
+/* A zero is never a mystery: say what this person's freshest computer is doing (or that it has gone quiet, e.g. after a crash or reboot). */
+function whyNothing(m, short) {
+  const ds = (m.devices || []).filter(d => d.last_seen).sort((a, b) => b.last_seen - a.last_seen); if (!ds.length) return "";
+  const d = ds[0], quiet = Date.now() / 1000 - d.last_seen > 20 * 60, gap = ago(d.last_seen).replace(" ago", "");
+  if (quiet) return short ? `${d.name} quiet for ${gap}` : `${d.name} has not reported for ${gap}. Homebase may not be running on it (a restart can stop it).`;
+  return short ? `${d.name} is on` : `${d.name} is on${d.status ? " (" + d.status + ")" : ""}. It counts only while a game or video is playing.`;
+}
+function screenSub(m) { const s = m.screen; if (!s) return "Minutes and apps"; if (s.hidden) return "Switched off by " + esc(m.name); if (s.today) return `Today ${fmtDur(s.today)}${s.top ? " · " + esc(s.top) : ""}`; const w = whyNothing(m, true); return "Nothing counted today" + (w ? " · " + esc(w) : ""); }
