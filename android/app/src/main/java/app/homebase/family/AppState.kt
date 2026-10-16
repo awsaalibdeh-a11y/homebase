@@ -8,6 +8,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 data class PingAsk(val id: Int, val fromId: Int, val name: String, val emoji: String)
 
@@ -37,12 +40,13 @@ class AppState(val store: Store, val api: Api) {
     val family = MutableStateFlow<FamilyResp?>(runCatching { store.familyCache.takeIf { it.isNotEmpty() }?.let { cacheJson.decodeFromString<FamilyResp>(it) } }.getOrNull())   // what we saw last, so the map is never empty offline
     val online = MutableStateFlow(true)
     val threads = MutableStateFlow<Map<Int, List<Message>>>(emptyMap())
-    val items = MutableStateFlow<List<Item>>(emptyList())
-    val plans = MutableStateFlow<List<Plan>>(emptyList())
+    val items = MutableStateFlow<List<Item>>(cached("items"))               // what we saw last, so these are never empty with no signal
+    val plans = MutableStateFlow<List<Plan>>(cached("plans"))
     val polls = MutableStateFlow<List<Poll>>(emptyList())
     val rewards = MutableStateFlow(RewardsResp())
     val notes = MutableStateFlow<List<BoardItem>>(emptyList())
-    val meals = MutableStateFlow<List<Meal>>(emptyList())
+    val meals = MutableStateFlow<List<Meal>>(cached("meals"))
+    val timerEnd = MutableStateFlow(0L)                              // when the break timer in Pocket finishes (0 = not running)
     val mealsSeen = HashMap<Int, Meal>()                              // every meal we have loaded, so a meal opened from the calendar can be shown
     val groups = MutableStateFlow<List<FriendGroup>>(emptyList())
     val groupAsks = MutableStateFlow<List<GroupAsk>>(emptyList())
@@ -56,6 +60,48 @@ class AppState(val store: Store, val api: Api) {
     val showOnMap = MutableSharedFlow<Spot>(extraBufferCapacity = 4)
     val openGroup = MutableStateFlow<Int?>(null)                     // the friend group on screen right now, so its messages do not also ping
 
+    private inline fun <reified T> cached(key: String): List<T> = runCatching { cacheJson.decodeFromString<List<T>>(store.text(key)) }.getOrDefault(emptyList())
+    private inline fun <reified T> keep(key: String, v: List<T>) { runCatching { store.saveText(key, cacheJson.encodeToString(v)) } }
+
+    // ---- the outbox: things written with no signal are kept and sent by themselves when it is back
+    private val outboxLock = Any()
+    private fun readOutbox(): List<kotlinx.serialization.json.JsonElement> =
+        runCatching { cacheJson.parseToJsonElement(store.text("outbox")) as kotlinx.serialization.json.JsonArray }.getOrDefault(kotlinx.serialization.json.JsonArray(emptyList()))
+
+    fun queueSend(kind: String, body: String, to: Int, lat: Double?, lng: Double?) = synchronized(outboxLock) {
+        val item = buildJsonObject {
+            put("kind", kind); put("body", body); put("to", to)
+            if (lat != null && lng != null) { put("lat", lat); put("lng", lng) }
+        }
+        store.saveText("outbox", kotlinx.serialization.json.JsonArray((readOutbox() + item).takeLast(30)).toString())
+    }
+
+    fun queued(): Int = synchronized(outboxLock) { readOutbox().size }
+
+    /** Sends what was waiting. A message the server refuses is dropped; if there is still no signal the rest wait. */
+    suspend fun flushOutbox(): Int {
+        val batch = synchronized(outboxLock) { val a = readOutbox(); if (a.isNotEmpty()) store.saveText("outbox", "[]"); a }
+        if (batch.isEmpty()) return 0
+        var sent = 0
+        var stop = false
+        val waiting = mutableListOf<kotlinx.serialization.json.JsonElement>()
+        for (e in batch) {
+            if (stop) { waiting += e; continue }
+            val o = e as? kotlinx.serialization.json.JsonObject ?: continue
+            val r = runCatching {
+                api.send(o["kind"]?.jsonPrimitiveOrNull().orEmpty(), o["body"]?.jsonPrimitiveOrNull().orEmpty(), o["to"]?.jsonPrimitiveOrNull()?.toIntOrNull() ?: 0,
+                    o["lat"]?.jsonPrimitiveOrNull()?.toDoubleOrNull(), o["lng"]?.jsonPrimitiveOrNull()?.toDoubleOrNull())
+            }
+            if (r.isSuccess) { add(r.getOrThrow()); sent++ }
+            else if (r.exceptionOrNull() is ApiError) { /* refused, so there is no point trying again */ }
+            else { waiting += e; stop = true }
+        }
+        if (waiting.isNotEmpty()) synchronized(outboxLock) { store.saveText("outbox", kotlinx.serialization.json.JsonArray(waiting + readOutbox()).toString()) }
+        return sent
+    }
+
+    private fun kotlinx.serialization.json.JsonElement.jsonPrimitiveOrNull(): String? = (this as? kotlinx.serialization.json.JsonPrimitive)?.content
+
     val me: Member? get() = family.value?.members?.firstOrNull { it.id == store.myId }
     fun member(id: Int): Member? = family.value?.members?.firstOrNull { it.id == id }
 
@@ -67,6 +113,7 @@ class AppState(val store: Store, val api: Api) {
             family.value = it
             store.familyName = it.family.name
             runCatching { store.familyCache = cacheJson.encodeToString(FamilyResp.serializer(), it) }
+            flushOutbox()
         }
         return r.isSuccess
     }
@@ -92,7 +139,7 @@ class AppState(val store: Store, val api: Api) {
     }
 
     suspend fun refreshPlans() {
-        runCatching { api.plans() }.onSuccess { plans.value = it }
+        runCatching { api.plans() }.onSuccess { plans.value = it; keep("plans", it) }
     }
 
     suspend fun refreshRewards() {
@@ -110,7 +157,7 @@ class AppState(val store: Store, val api: Api) {
     fun noteMeals(list: List<Meal>) { list.forEach { mealsSeen[it.id] = it } }
 
     suspend fun refreshMeals() {
-        runCatching { api.meals() }.onSuccess { meals.value = it; it.forEach { m -> mealsSeen[m.id] = m } }
+        runCatching { api.meals() }.onSuccess { meals.value = it; keep("meals", it); it.forEach { m -> mealsSeen[m.id] = m } }
     }
 
     suspend fun refreshGroups() {
@@ -126,7 +173,7 @@ class AppState(val store: Store, val api: Api) {
     }
 
     suspend fun refreshItems() {
-        runCatching { api.items() }.onSuccess { items.value = it }
+        runCatching { api.items() }.onSuccess { items.value = it; keep("items", it) }
     }
 
     fun updateLocation(memberId: Int, spot: Spot, battery: Int) {

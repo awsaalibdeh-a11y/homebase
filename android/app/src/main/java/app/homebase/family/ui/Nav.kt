@@ -24,6 +24,8 @@ sealed interface Screen {
     data class Meal(val id: Int) : Screen
     data class Group(val id: Int) : Screen
     data object Feed : Screen
+    data object Emergency : Screen
+    data object Pocket : Screen
     data class Camera(val purpose: String) : Screen
     data object Chores : Screen
     data object Plans : Screen

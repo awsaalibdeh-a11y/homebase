@@ -135,6 +135,8 @@ fun MeTab(nav: Nav) {
         SectionLabel("More")
         SoftButton("What my family can see") { nav.go(Screen.Transparency) }
         if (!ctx.hb.store.isParent) SoftButton("What parents can do") { nav.go(Screen.Perms) }
+        SoftButton("🆘 Emergency card (works offline)") { nav.go(Screen.Emergency) }
+        SoftButton("🧰 Pocket: timer and private notes") { nav.go(Screen.Pocket) }
         SoftButton("🎓 Tutorial") { tutorial = true }
         SoftButton("Settings") { nav.go(Screen.Settings) }
         Gap(8)

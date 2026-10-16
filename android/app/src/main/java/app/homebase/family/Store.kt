@@ -65,14 +65,22 @@ class Store(context: Context) {
         get() = p.getFloat("lastLng", 0f)
         set(v) = p.edit().putFloat("lastLng", v).apply()
 
+    /** Small pieces of text kept on the phone: the offline copies of plans and meals, the outbox, and the private emergency card and notes. */
+    fun text(key: String): String = p.getString("t_$key", "") ?: ""
+    fun saveText(key: String, v: String) { p.edit().putString("t_$key", v).apply() }
+
     val signedIn get() = token.isNotEmpty() && myId != 0
     val isParent get() = role == "parent"
 
     fun signOut() {
         val keepServer = server
         val keepLook = darkLook
+        val keepCard = text("emergency")                      // personal things stay on the phone when you leave a family
+        val keepNotes = text("notes")
         p.edit().clear().apply()
         server = keepServer
         darkLook = keepLook
+        saveText("emergency", keepCard)
+        saveText("notes", keepNotes)
     }
 }

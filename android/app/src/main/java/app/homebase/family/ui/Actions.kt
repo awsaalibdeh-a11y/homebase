@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import app.homebase.family.ApiError
 import app.homebase.family.LocationClient
 import app.homebase.family.Member
 import app.homebase.family.Spot
@@ -33,7 +34,10 @@ fun sendQuick(ctx: Context, kind: String, body: String, to: Int = 0, withSpot: B
         val spot = if (withSpot) lastSpot(ctx) else null
         runCatching { ctx.hb.api.send(kind, body, to, spot?.lat, spot?.lng) }
             .onSuccess { ctx.hb.state.add(it); toast(ctx, done) }
-            .onFailure { toast(ctx, it.message ?: "Could not send") }
+            .onFailure {
+                if (it is ApiError) toast(ctx, it.message ?: "Could not send")
+                else { ctx.hb.state.queueSend(kind, body, to, spot?.lat, spot?.lng); toast(ctx, "You are offline. Saved: it sends by itself when you have signal.") }
+            }
     }
 }
 
