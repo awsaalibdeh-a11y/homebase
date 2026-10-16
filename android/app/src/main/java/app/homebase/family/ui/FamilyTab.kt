@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.homebase.family.Member
 import app.homebase.family.hb
+import kotlinx.coroutines.launch
 
 @Composable
 private fun ShareChip(m: Member) {
@@ -57,6 +58,9 @@ fun FamilyTab(nav: Nav) {
                 Text("Today", style = MaterialTheme.typography.titleMedium)
                 Text(listOfNotNull("${all.size} people", if (live > 0) "$live live on the map" else "nobody live right now", if (home > 0) "$home at home" else null).joinToString(" · "), color = Muted, style = MaterialTheme.typography.bodyMedium)
                 plans.firstOrNull()?.let { p -> Text("Next: ${p.emoji} ${p.title} · ${planWhen(p.start)}", Modifier.padding(top = 4.dp), color = Ink, style = MaterialTheme.typography.bodyMedium) }
+                all.mapNotNull { b -> b.birthday?.let { b to daysToBirthday(it) } }.filter { it.second <= 30 }.minByOrNull { it.second }?.let { (b, days) ->
+                    Text("🎂 " + (if (days == 0) "It's ${b.name}'s birthday today!" else "${b.name}'s birthday is ${if (days == 1) "tomorrow" else "in $days days"}"), Modifier.padding(top = 4.dp), color = Ink, style = MaterialTheme.typography.bodyMedium)
+                }
                 SoftButton(if (mine != null) "${mine.emoji} ${mine.text}".trim() else "🙂 What I'm up to", Modifier.padding(top = 10.dp)) { statusOpen = true }
                 val waiting = polls.count { !it.closed && it.mine == null }
                 SoftButton("📅 Plans and votes" + (if (waiting > 0) " · $waiting to vote" else ""), Modifier.padding(top = 8.dp)) { nav.go(Screen.Plans) }
@@ -98,6 +102,7 @@ fun FamilyTab(nav: Nav) {
                             ShareChip(m)
                             if (m.quiet) Chip("Quiet hours", SunSoft, Ink)
                             m.status?.let { s -> Chip("${s.emoji} ${s.text}".trim(), AccentSoft, AccentDark) }
+                            if (me.isParent && m.id != me.myId && m.appVersion in 1 until app.homebase.family.BuildConfig.VERSION_CODE) Chip("App update available", SunSoft, Ink)
                         }
                     }
                 }
@@ -112,6 +117,9 @@ fun FamilyTab(nav: Nav) {
                 }
                 if (!m.isParent && me.isParent) BigButton("🎛️ Controls: screen time, lock, ground apps") { nav.go(Screen.Controls(m.id)) }
                 if (!m.isParent && m.id == me.myId) TextButton({ nav.go(Screen.ScreenTime(m.id)) }) { Text("My screen time", maxLines = 1, softWrap = false) }
+                if (me.isParent && m.id != me.myId) TextButton({
+                    ctx.hb.scope.launch { runCatching { ctx.hb.api.askUpdate(m.id) }.onSuccess { toast(ctx, "Asked ${m.name} to update") }.onFailure { toast(ctx, it.message ?: "Could not ask") } }
+                }) { Text("📲 Ask ${m.name} to update Homebase", maxLines = 1) }
             }
         }
         if (me.isParent) {

@@ -27,6 +27,8 @@ data class Member(
     val screen: ScreenToday? = null,
     val devices: List<DeviceInfo> = emptyList(),
     val status: StatusInfo? = null,
+    val birthday: String? = null,                                   // "MM-DD", chosen by the person
+    @SerialName("app_version") val appVersion: Int = 0,               // the Android build they last used (0 = not known)
 ) {
     val isParent get() = role == "parent"
     /** Whether a parent may do [key] with this person. Everything is allowed until they turn it off. */
@@ -122,7 +124,7 @@ data class PollResp(val poll: Poll)
 
 /** Something chore points can buy. A [Redemption] is a child asking for one, and a parent's answer. */
 @Serializable
-data class Reward(val id: Int, val title: String, val emoji: String = "🎁", val cost: Int = 0)
+data class Reward(val id: Int, val title: String, val emoji: String = "🎁", val cost: Int = 0, val minutes: Int = 0)
 
 @Serializable
 data class Redemption(
@@ -131,6 +133,7 @@ data class Redemption(
     val title: String,
     val emoji: String = "🎁",
     val cost: Int = 0,
+    val minutes: Int = 0,
     val status: String = "pending",
     val at: Double = 0.0,
     @SerialName("decided_at") val decidedAt: Double = 0.0,
@@ -142,6 +145,8 @@ data class RewardsResp(
     val rewards: List<Reward> = emptyList(),
     val requests: List<Redemption> = emptyList(),
     val balance: Map<String, Int> = emptyMap(),
+    val streaks: Map<String, Int> = emptyMap(),
+    val bonus: Map<String, Int> = emptyMap(),                       // extra screen-time minutes earned today, by member id
 )
 
 /** A note on the family board (Wi-Fi, the doctor, allergies). */
@@ -185,10 +190,13 @@ data class HistoryPoint(val lat: Double, val lng: Double, val at: Double = 0.0)
 data class HistoryResp(val points: List<HistoryPoint> = emptyList())
 
 @Serializable
-data class Chore(val id: Int, val title: String = "", val emoji: String = "🧹", val points: Int = 0, val to: Int = 0, val status: String = "open", @SerialName("done_by") val doneBy: Int = 0)
+data class Chore(
+    val id: Int, val title: String = "", val emoji: String = "🧹", val points: Int = 0, val to: Int = 0, val status: String = "open", @SerialName("done_by") val doneBy: Int = 0,
+    val repeats: String = "", @SerialName("opens_at") val opensAt: Double = 0.0,
+)
 
 @Serializable
-data class ChoresResp(val chores: List<Chore> = emptyList(), val points: Map<String, Int> = emptyMap(), val week: Map<String, Int> = emptyMap())
+data class ChoresResp(val chores: List<Chore> = emptyList(), val points: Map<String, Int> = emptyMap(), val week: Map<String, Int> = emptyMap(), val streaks: Map<String, Int> = emptyMap())
 
 @Serializable
 data class SumTop(val label: String = "", val sec: Int = 0)

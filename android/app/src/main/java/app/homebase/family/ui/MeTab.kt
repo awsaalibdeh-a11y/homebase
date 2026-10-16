@@ -46,6 +46,7 @@ fun MeTab(nav: Nav) {
     var pause by remember { mutableStateOf(false) }
     var late by remember { mutableStateOf(false) }
     var statusOpen by remember { mutableStateOf(false) }
+    var birthdayOpen by remember { mutableStateOf(false) }
     var quietFrom by remember { mutableIntStateOf(-1) }
     var quietTo by remember { mutableIntStateOf(-1) }
     LaunchedEffect(Unit) {
@@ -108,6 +109,7 @@ fun MeTab(nav: Nav) {
             Text(if (st != null) "${st.emoji} ${st.text}".trim() else "Tell your family in one tap. It goes away by itself.", Modifier.padding(top = 4.dp), color = Muted)
             OutlinedButton({ statusOpen = true }, Modifier.padding(top = 8.dp)) { Text(if (st != null) "Change" else "Set") }
         }
+        SoftButton("🎂 My birthday" + (me?.birthday?.let { " · " + birthdayText(it) } ?: "")) { birthdayOpen = true }
 
         SectionLabel("Quick messages to the family")
         TwoUp({ BigButton("I'm OK ✓", color = Mint) { sendQuick(ctx, "checkin", "I'm OK", 0, true, "Checked in") } },
@@ -146,6 +148,7 @@ fun MeTab(nav: Nav) {
         Gap(8)
     }
     if (statusOpen) StatusDialog { statusOpen = false }
+    if (birthdayOpen) BirthdayDialog(me?.birthday) { birthdayOpen = false }
     if (pause) PickDialog("Pause sharing for…", listOf("15 minutes" to 15, "1 hour" to 60, "3 hours" to 180, "Until tomorrow" to 720), { setSharing("paused", it) }, { pause = false })
     if (late) PickDialog("How late will you be?", listOf("About 10 minutes" to 10, "About 20 minutes" to 20, "About 30 minutes" to 30, "About an hour" to 60), { sendQuick(ctx, "late", "Running about $it minutes late", 0, false, "Sent") }, { late = false })
 }

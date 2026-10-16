@@ -46,6 +46,7 @@ fun ChoresScreen(nav: Nav) {
     var title by remember { mutableStateOf("") }
     var points by remember { mutableStateOf("5") }
     var forId by remember { mutableIntStateOf(0) }
+    var repeat by remember { mutableStateOf("") }
     LaunchedEffect(reload) { runCatching { ctx.hb.api.chores() }.onSuccess { data = it } }
     val kids = fam?.members.orEmpty().filter { !it.isParent }
     fun act(block: suspend () -> Unit) = scope.launch { runCatching { block() }.onSuccess { reload++ }.onFailure { toast(ctx, it.message ?: "Could not do that") } }
@@ -55,7 +56,10 @@ fun ChoresScreen(nav: Nav) {
         Heading("Jobs and points", if (parent) "Add a job. Your child ticks it off and you approve it for points." else "Do a job, tick it off, and a parent gives you the points.")
         if (kids.isNotEmpty()) SoftCard {
             Text("Points", style = MaterialTheme.typography.titleMedium)
-            kids.forEach { k -> Text("${k.emoji} ${k.name}: ${data.week[k.id.toString()] ?: 0} this week · ${data.points[k.id.toString()] ?: 0} total", color = Muted) }
+            kids.forEach { k ->
+                val streak = data.streaks[k.id.toString()] ?: 0
+                Text("${k.emoji} ${k.name}: ${data.week[k.id.toString()] ?: 0} this week · ${data.points[k.id.toString()] ?: 0} total" + (if (streak > 0) " · 🔥 $streak" else ""), color = Muted)
+            }
         }
         data.chores.forEach { c -> ChoreRow(c, parent, myId, kids.firstOrNull { it.id == c.doneBy }?.name, kids.firstOrNull { it.id == c.to }?.name,
             onDone = { act { ctx.hb.api.choreDone(c.id) } }, onApprove = { ok -> act { ctx.hb.api.choreApprove(c.id, ok) } }, onDelete = { act { ctx.hb.api.choreDelete(c.id) } }) }
@@ -67,7 +71,10 @@ fun ChoresScreen(nav: Nav) {
                 OutlinedTextField(points, { points = it.filter(Char::isDigit).take(3) }, Modifier.width(110.dp), singleLine = true, suffix = { Text("pts") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                 TextButton({ val i = kids.indexOfFirst { it.id == forId }; forId = if (kids.isEmpty()) 0 else if (i + 1 >= kids.size) 0 else kids[i + 1].id }) { Text("For: " + (kids.firstOrNull { it.id == forId }?.name ?: "any child")) }
             }
-            BigButton("Add the job", enabled = title.isNotBlank()) { act { ctx.hb.api.addChore(title.trim(), points.toIntOrNull() ?: 0, forId); title = "" } }
+            TextButton({ repeat = when (repeat) { "" -> "daily"; "daily" -> "weekly"; else -> "" } }) {
+                Text("Repeat: " + when (repeat) { "daily" -> "every day"; "weekly" -> "every week"; else -> "never" })
+            }
+            BigButton("Add the job", enabled = title.isNotBlank()) { act { ctx.hb.api.addChore(title.trim(), points.toIntOrNull() ?: 0, forId, repeat); title = "" } }
         }
         Gap(8)
     }
@@ -76,6 +83,8 @@ fun ChoresScreen(nav: Nav) {
 @Composable
 private fun ChoreRow(c: Chore, parent: Boolean, myId: Int, doneName: String?, toName: String?, onDone: () -> Unit, onApprove: (Boolean) -> Unit, onDelete: () -> Unit) {
     val forMe = c.to == 0 || c.to == myId
+    val waiting = c.status == "open" && c.opensAt > System.currentTimeMillis() / 1000.0          // a repeating job that has not come back yet (only a parent sees it)
+    val again = when (c.repeats) { "daily" -> " · 🔁 every day"; "weekly" -> " · 🔁 every week"; else -> "" }
     SoftCard {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(c.emoji, style = MaterialTheme.typography.headlineSmall)
@@ -84,12 +93,12 @@ private fun ChoreRow(c: Chore, parent: Boolean, myId: Int, doneName: String?, to
                 Text(when (c.status) {
                     "done" -> "${doneName ?: "Someone"} finished it" + if (parent) "" else ". Waiting for a parent"
                     "approved" -> "✓ ${doneName ?: ""} · +${c.points} points"
-                    else -> (if (toName != null) "For $toName" else "Any child") + " · ${c.points} points"
+                    else -> (if (waiting) "Back ${planWhen(c.opensAt)}" else if (toName != null) "For $toName" else "Any child") + " · ${c.points} points" + again
                 }, color = Muted)
             }
         }
         Row(Modifier.fillMaxWidth()) {
-            if (c.status == "open" && !parent && forMe) TextButton(onDone) { Text("Done") }
+            if (c.status == "open" && !waiting && !parent && forMe) TextButton(onDone) { Text("Done") }
             if (c.status == "done" && parent) { TextButton({ onApprove(false) }) { Text("Redo") }; TextButton({ onApprove(true) }) { Text("Approve") } }
             if (parent && c.status != "approved") TextButton(onDelete) { Text("Delete") }
         }

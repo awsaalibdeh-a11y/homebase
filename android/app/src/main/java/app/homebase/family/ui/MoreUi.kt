@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import android.app.DatePickerDialog
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -66,9 +67,17 @@ fun RewardsScreen(nav: Nav) {
                 Text("Points to spend", style = MaterialTheme.typography.titleMedium)
                 val kids = fam?.members.orEmpty().filter { !it.isParent }
                 if (kids.isEmpty()) Text("No children yet.", color = Muted)
-                kids.forEach { k -> Text("${k.emoji} ${k.name} · ${info.balance[k.id.toString()] ?: 0} points", Modifier.padding(top = 4.dp)) }
+                kids.forEach { k ->
+                    val streak = info.streaks[k.id.toString()] ?: 0
+                    val extra = info.bonus[k.id.toString()] ?: 0
+                    Text("${k.emoji} ${k.name} · ${info.balance[k.id.toString()] ?: 0} points" + (if (streak > 0) " · 🔥 $streak" else "") + (if (extra > 0) " · ⏱️ +$extra min today" else ""), Modifier.padding(top = 4.dp))
+                }
             } else {
                 Text("⭐ You have $myPoints points", style = MaterialTheme.typography.titleMedium)
+                val streak = info.streaks[me.toString()] ?: 0
+                val extra = info.bonus[me.toString()] ?: 0
+                if (streak > 0) Text("🔥 $streak ${if (streak == 1) "day" else "days"} in a row with a job done", color = Muted)
+                if (extra > 0) Text("⏱️ +$extra minutes of extra screen time today", color = Muted)
                 Text("Points come from jobs a parent approves.", color = Muted)
             }
         }
@@ -101,7 +110,7 @@ fun RewardsScreen(nav: Nav) {
                     Text(r.emoji, fontSize = 26.sp)
                     Column(Modifier.weight(1f)) {
                         Text(r.title, style = MaterialTheme.typography.titleMedium)
-                        Text("${r.cost} points", color = Muted, style = MaterialTheme.typography.bodyMedium)
+                        Text("${r.cost} points" + (if (r.minutes > 0) " · +${r.minutes} min screen time" else ""), color = Muted, style = MaterialTheme.typography.bodyMedium)
                     }
                     if (parent) {
                         TextButton({ act { app.api.dropReward(r.id) } }) { Text("✕") }
@@ -130,6 +139,7 @@ private fun AddRewardDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var title by remember { mutableStateOf("") }
     var cost by remember { mutableStateOf("20") }
+    var minutes by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Surface,
@@ -142,15 +152,22 @@ private fun AddRewardDialog(onDismiss: () -> Unit) {
                     cost, { cost = it.filter { c -> c.isDigit() }.take(4) }, Modifier.fillMaxWidth(), label = { Text("Points it costs") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
+                OutlinedTextField(
+                    minutes, { minutes = it.filter { c -> c.isDigit() }.take(3) }, Modifier.fillMaxWidth(), label = { Text("Extra screen time in minutes (optional)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                Text("If you set a daily limit, a yes adds these minutes to today's limit.", color = Muted, fontSize = 12.sp)
             }
         },
         confirmButton = {
             TextButton({
                 val n = cost.toIntOrNull() ?: 0
+                val extra = minutes.toIntOrNull() ?: 0
                 if (title.isBlank()) toast(ctx, "Write what the reward is")
                 else if (n !in 1..1000) toast(ctx, "Pick between 1 and 1000 points")
+                else if (extra !in 0..240) toast(ctx, "Extra screen time can be up to 240 minutes")
                 else ctx.hb.scope.launch {
-                    runCatching { ctx.hb.api.addReward(title.trim(), n) }
+                    runCatching { ctx.hb.api.addReward(title.trim(), n, extra) }
                         .onSuccess { ctx.hb.state.refreshRewards(); onDismiss() }
                         .onFailure { toast(ctx, it.message ?: "Could not add it") }
                 }
@@ -231,6 +248,64 @@ private fun NoteDialog(note: BoardItem?, onDismiss: () -> Unit) {
                 if (note != null) TextButton({
                     ctx.hb.scope.launch { runCatching { ctx.hb.api.dropNote(note.id) }.onSuccess { ctx.hb.state.refreshNotes(); onDismiss() }.onFailure { toast(ctx, it.message ?: "Could not delete") } }
                 }) { Text("Delete") }
+                TextButton(onDismiss) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+/** "03-14" as "14 March". */
+fun birthdayText(md: String): String {
+    val parts = md.split("-")
+    val cal = java.util.Calendar.getInstance().apply { clear(); set(2024, (parts.getOrNull(0)?.toIntOrNull() ?: 1) - 1, parts.getOrNull(1)?.toIntOrNull() ?: 1) }
+    return java.text.SimpleDateFormat("d MMMM", java.util.Locale.getDefault()).format(cal.time)
+}
+
+/** Whole days until the next time that date comes round (0 = today). A 29 February birthday is kept on the 28th in years without one. */
+fun daysToBirthday(md: String): Int {
+    val parts = md.split("-")
+    val m = parts.getOrNull(0)?.toIntOrNull() ?: return 999
+    val d = parts.getOrNull(1)?.toIntOrNull() ?: return 999
+    val today = java.time.LocalDate.now()
+    fun on(year: Int): java.time.LocalDate = if (m == 2 && d == 29 && !java.time.Year.isLeap(year.toLong())) java.time.LocalDate.of(year, 2, 28) else java.time.LocalDate.of(year, m, d)
+    var next = on(today.year)
+    if (next.isBefore(today)) next = on(today.year + 1)
+    return java.time.temporal.ChronoUnit.DAYS.between(today, next).toInt()
+}
+
+/** You choose your birthday. Your family sees it and hears about it on the day, and you can take it away again. */
+@Composable
+fun BirthdayDialog(current: String?, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    fun save(month: Int, day: Int) {
+        ctx.hb.scope.launch {
+            runCatching { ctx.hb.api.setBirthday(month, day) }
+                .onSuccess { ctx.hb.state.refreshFamily(); onDismiss() }
+                .onFailure { toast(ctx, it.message ?: "Could not save it") }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface,
+        title = { Text("🎂 My birthday") },
+        text = {
+            Text(
+                if (current != null) "Your family sees ${birthdayText(current)} and hears about it on the day." else "Pick the day. Your family sees it and hears about it on your birthday. It is your choice, and you can remove it any time.",
+                color = Muted, fontSize = 14.sp,
+            )
+        },
+        confirmButton = {
+            TextButton({
+                val parts = current?.split("-")
+                val cal = java.util.Calendar.getInstance()
+                val month = (parts?.getOrNull(0)?.toIntOrNull() ?: (cal.get(java.util.Calendar.MONTH) + 1)) - 1
+                val day = parts?.getOrNull(1)?.toIntOrNull() ?: cal.get(java.util.Calendar.DAY_OF_MONTH)
+                DatePickerDialog(ctx, { _, _, m, d -> save(m + 1, d) }, 2024, month, day).show()          // 2024 is a leap year, so 29 February can be picked
+            }) { Text(if (current != null) "Change" else "Pick the day") }
+        },
+        dismissButton = {
+            Row {
+                if (current != null) TextButton({ save(0, 0) }) { Text("Remove") }
                 TextButton(onDismiss) { Text("Cancel") }
             }
         },

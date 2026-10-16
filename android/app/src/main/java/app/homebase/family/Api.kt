@@ -30,7 +30,7 @@ class Api(private val store: Store) {
     private val jsonType = "application/json; charset=utf-8".toMediaType()
 
     suspend fun raw(method: String, path: String, body: JsonObject? = null, auth: Boolean = true, long: Boolean = false): String = withContext(Dispatchers.IO) {
-        val rb = Request.Builder().url(store.server + path)
+        val rb = Request.Builder().url(store.server + path).header("X-Homebase-Version", BuildConfig.VERSION_CODE.toString())
         if (auth && store.token.isNotEmpty()) rb.header("Authorization", "Bearer ${store.token}")
         rb.method(method, if (method == "GET") null else (body ?: buildJsonObject { }).toString().toRequestBody(jsonType))
         (if (long) poller else client).newCall(rb.build()).execute().use { r ->
@@ -85,7 +85,7 @@ class Api(private val store: Store) {
     suspend fun rules(): RulesResp = ask("GET", "/api/rules")
     suspend fun saveRules(text: String, limits: Map<Int, Int>) { raw("POST", "/api/rules", obj { put("text", text); put("limits", buildJsonObject { limits.forEach { (k, v) -> put(k.toString(), v) } }) }) }
     suspend fun chores(): ChoresResp = ask("GET", "/api/chores")
-    suspend fun addChore(title: String, points: Int, to: Int) { raw("POST", "/api/chores", obj { put("title", title); put("points", points); put("to", to) }) }
+    suspend fun addChore(title: String, points: Int, to: Int, repeat: String = "") { raw("POST", "/api/chores", obj { put("title", title); put("points", points); put("to", to); put("repeat", repeat) }) }
     suspend fun choreDone(id: Int) { raw("POST", "/api/chores/$id/done") }
     suspend fun choreApprove(id: Int, ok: Boolean) { raw("POST", "/api/chores/$id/approve", obj { put("ok", ok) }) }
     suspend fun choreDelete(id: Int) { raw("DELETE", "/api/chores/$id") }
@@ -126,6 +126,8 @@ class Api(private val store: Store) {
     suspend fun addPlan(title: String, emoji: String, start: Double, note: String) { raw("POST", "/api/plans", obj { put("title", title); put("emoji", emoji); put("start", start); put("note", note) }) }
     suspend fun rsvp(id: Int, answer: String): Plan = ask<PlanResp>("POST", "/api/plans/$id/rsvp", obj { put("answer", answer) }).plan
     suspend fun dropPlan(id: Int) { raw("DELETE", "/api/plans/$id") }
+    suspend fun plansBetween(from: Long, to: Long): List<Plan> = ask<PlansResp>("GET", "/api/plans?from=$from&to=$to").plans
+    suspend fun askUpdate(memberId: Int) { raw("POST", "/api/members/$memberId/update-nudge") }
     suspend fun polls(): List<Poll> = ask<PollsResp>("GET", "/api/polls").polls
     suspend fun askPoll(question: String, options: List<String>) {
         raw("POST", "/api/polls", obj { put("question", question); put("options", kotlinx.serialization.json.JsonArray(options.map { JsonPrimitive(it) })) })
@@ -136,7 +138,8 @@ class Api(private val store: Store) {
 
     // rewards (what chore points can buy) and the family board
     suspend fun rewards(): RewardsResp = ask<RewardsResp>("GET", "/api/rewards")
-    suspend fun addReward(title: String, cost: Int) { raw("POST", "/api/rewards", obj { put("title", title); put("cost", cost) }) }
+    suspend fun addReward(title: String, cost: Int, minutes: Int = 0) { raw("POST", "/api/rewards", obj { put("title", title); put("cost", cost); put("minutes", minutes) }) }
+    suspend fun setBirthday(month: Int, day: Int) { raw("POST", "/api/birthday", obj { put("month", month); put("day", day) }) }
     suspend fun dropReward(id: Int) { raw("DELETE", "/api/rewards/$id") }
     suspend fun redeem(id: Int) { raw("POST", "/api/rewards/$id/redeem") }
     suspend fun decide(id: Int, ok: Boolean) { raw("POST", "/api/redemptions/$id/decide", obj { put("ok", ok) }) }
@@ -162,6 +165,7 @@ class Api(private val store: Store) {
     suspend fun addItem(text: String) { raw("POST", "/api/list", obj { put("text", text) }) }
     suspend fun tick(id: Int, done: Boolean) { raw("POST", "/api/list/$id", obj { put("done", done) }) }
     suspend fun dropItem(id: Int) { raw("DELETE", "/api/list/$id") }
+    suspend fun clearDone() { raw("POST", "/api/list/clear") }
 
     // the event stream: held open by the service, it wakes the app when something happens
     suspend fun events(after: Int, wait: Int = 25): EventsResp = ask("GET", "/api/events?after=$after&wait=$wait", long = true)

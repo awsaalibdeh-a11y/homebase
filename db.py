@@ -32,7 +32,8 @@ members = Table("members", meta,
     Column("perms", Text, default=""),                               # JSON {key: false} of what parents may NOT do; the child edits it
     Column("last_lat", Float), Column("last_lng", Float), Column("last_acc", Float), Column("last_at", Float, default=0),
     Column("avatar", Text, default=""), Column("avatar_at", Float, default=0),
-    Column("status_emoji", String(8), default=""), Column("status_text", String(40), default=""), Column("status_until", Float, default=0))   # "what I am up to", set by the person, ends by itself
+    Column("status_emoji", String(8), default=""), Column("status_text", String(40), default=""), Column("status_until", Float, default=0),   # "what I am up to", set by the person, ends by itself
+    Column("birthday", String(5), default=""), Column("bday_year", Integer, default=0), Column("app_version", Integer, default=0))                     # "MM-DD" the person chose; the year we last said happy birthday
 invites = Table("invites", meta,
     Column("code", String(12), primary_key=True), Column("family_id", Integer), Column("role", String(8)), Column("created_by", Integer),
     Column("expires", Float), Column("used", Boolean, default=False))
@@ -76,7 +77,9 @@ chores = Table("chores", meta,                                          # jobs a
     Column("points", Integer, default=5), Column("to_id", Integer, default=0),                                  # 0 = any child
     Column("created_by", Integer), Column("created", Float),
     Column("status", String(10), default="open"),                                                               # open | done | approved
-    Column("done_by", Integer, default=0), Column("done_at", Float, default=0), Column("approved_by", Integer, default=0), Column("approved_at", Float, default=0))
+    Column("done_by", Integer, default=0), Column("done_at", Float, default=0), Column("approved_by", Integer, default=0), Column("approved_at", Float, default=0),
+    Column("repeats", String(8), default=""),                                                                    # "" | daily | weekly: approving it opens a fresh copy later
+    Column("opens_at", Float, default=0))                                                                        # a repeating job waits until then (0 = open now)
 devices = Table("devices", meta,                                          # a computer or tablet linked to a person with a 6-digit code; it has its own key
     Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("token_hash", String(64), unique=True),
     Column("name", String(60), default=""), Column("kind", String(12), default="windows"), Column("created", Float), Column("last_seen", Float, default=0), Column("apps", Text, default=""), Column("status", String(160), default=""), Column("version", String(12), default=""))
@@ -97,12 +100,16 @@ polls = Table("polls", meta,                                              # a qu
     Column("created_by", Integer), Column("created", Float), Column("closed", Boolean, default=False))
 rewards = Table("rewards", meta,                                          # what chore points can buy, set by a parent
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("title", String(60)), Column("emoji", String(8), default="🎁"),
-    Column("cost", Integer, default=20), Column("created_by", Integer), Column("created", Float))
+    Column("cost", Integer, default=20), Column("created_by", Integer), Column("created", Float),
+    Column("minutes", Integer, default=0))                              # extra screen time today when a parent says yes (0 = none)
 redemptions = Table("redemptions", meta,                                  # a child asks to spend points; a parent says yes or no
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True),
     Column("title", String(60)), Column("emoji", String(8), default="🎁"), Column("cost", Integer),                  # a copy, so a later change to the reward does not rewrite history
     Column("status", String(10), default="pending"),                    # pending | approved | declined
-    Column("created", Float), Column("decided_by", Integer, default=0), Column("decided_at", Float, default=0))
+    Column("created", Float), Column("decided_by", Integer, default=0), Column("decided_at", Float, default=0),
+    Column("minutes", Integer, default=0))
+bonus = Table("bonus", meta,                                              # extra screen-time minutes a reward earned, for one day
+    Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("day", String(10), index=True), Column("minutes", Integer), Column("created", Float))
 board = Table("board", meta,                                              # the family board: what everyone should be able to find (Wi-Fi, the doctor, allergies)
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("title", String(40)), Column("emoji", String(8), default="📌"),
     Column("body", Text, default=""), Column("updated_by", Integer), Column("updated", Float))
@@ -114,7 +121,11 @@ except Exception:
     pass
 for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE families ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN apps TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN status VARCHAR(160) DEFAULT ''", "ALTER TABLE devices ADD COLUMN version VARCHAR(12) DEFAULT ''", "ALTER TABLE calls ADD COLUMN web_seen BOOLEAN DEFAULT FALSE", "ALTER TABLE members ADD COLUMN avatar TEXT DEFAULT ''", "ALTER TABLE members ADD COLUMN avatar_at FLOAT DEFAULT 0",
             "ALTER TABLE members ADD COLUMN status_emoji VARCHAR(8) DEFAULT ''", "ALTER TABLE members ADD COLUMN status_text VARCHAR(40) DEFAULT ''",
-            "ALTER TABLE members ADD COLUMN status_until FLOAT DEFAULT 0", "ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT ''"):
+            "ALTER TABLE members ADD COLUMN status_until FLOAT DEFAULT 0", "ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT ''",
+            "ALTER TABLE chores ADD COLUMN repeats VARCHAR(8) DEFAULT ''", "ALTER TABLE chores ADD COLUMN opens_at FLOAT DEFAULT 0",
+            "ALTER TABLE rewards ADD COLUMN minutes INTEGER DEFAULT 0", "ALTER TABLE redemptions ADD COLUMN minutes INTEGER DEFAULT 0",
+            "ALTER TABLE members ADD COLUMN birthday VARCHAR(5) DEFAULT ''", "ALTER TABLE members ADD COLUMN bday_year INTEGER DEFAULT 0",
+            "ALTER TABLE members ADD COLUMN app_version INTEGER DEFAULT 0"):
     try:
         with engine.begin() as _c:
             _c.exec_driver_sql(_sql)

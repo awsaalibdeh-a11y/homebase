@@ -240,13 +240,18 @@ class HomebaseService : Service() {
                 if (p.flag("new")) Notifications.post(this, Notifications.CH_MESSAGES, "📅 ${p.str("name")} planned something", "${p.str("title")} · ${planWhen(p.dbl("start"))}", "plans")
             }
             "plan_soon" -> Notifications.post(this, Notifications.CH_ALERTS, "${p.str("emoji")} Starting soon", "${p.str("title")} · ${planWhen(p.dbl("start"))}", "plans")
+            "birthday" -> {
+                app.state.refreshFamily()
+                if (p.flag("self")) Notifications.post(this, Notifications.CH_MESSAGES, "🎂 Happy birthday, ${p.str("name")}!", "Your family is thinking of you.")
+                else Notifications.post(this, Notifications.CH_MESSAGES, "🎂 It's ${p.str("name")}'s birthday", "Send them some love today.", "chat:${p.int("id")}")
+            }
             "rewards" -> app.state.refreshRewards()
             "board" -> app.state.refreshNotes()
             "reward" -> {
                 app.state.refreshRewards()
                 val (title, body) = when (p.str("status")) {
                     "pending" -> "🎁 ${p.str("name")} asked for a reward" to "${p.str("title")} · ${p.int("cost")} points"
-                    "approved" -> "🎁 ${p.str("name")} said yes" to p.str("title")
+                    "approved" -> "🎁 ${p.str("name")} said yes" to (p.str("title") + if (p.int("minutes") > 0) " · +${p.int("minutes")} min screen time today" else "")
                     else -> "${p.str("name")} said not now" to p.str("title")
                 }
                 Notifications.post(this, Notifications.CH_MESSAGES, title, body, "rewards")

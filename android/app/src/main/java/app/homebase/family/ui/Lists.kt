@@ -56,6 +56,7 @@ fun ListsScreen(nav: Nav) {
                 }
             }
         }
+        if (items.any { it.done }) TextButton({ ctx.hb.scope.launch { runCatching { api.clearDone() }; ctx.hb.state.refreshItems() } }) { Text("Clear ticked items") }
         if (items.isEmpty()) CenterNote("Nothing on the list.")
     }
 }

@@ -1,8 +1,10 @@
+import calendar
 import os
 import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 _tmp = tempfile.mkdtemp()
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(_tmp, 'test.db')}"
@@ -1049,7 +1051,7 @@ class Rewards(Base):
         self.earn(self.kid, 30)
         qid = self.post(self.kid, f"/api/rewards/{rid}/redeem").get_json()["id"]
         zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
-        self.assertEqual(self.info(zed), {"rewards": [], "requests": [], "balance": {}, "mine": None})
+        self.assertEqual(self.info(zed), {"rewards": [], "requests": [], "balance": {}, "mine": None, "streaks": {}, "bonus": {}, "my_streak": None, "my_bonus": None})
         self.assertEqual(self.post(zed, f"/api/redemptions/{qid}/decide", ok=True).status_code, 404)
         self.assertEqual(self.c.delete(f"/api/rewards/{rid}", headers=zed).status_code, 404)
         self.assertEqual(self.c.get("/api/rewards").status_code, 401)
@@ -1109,6 +1111,341 @@ class Pickup(Base):
         self.post(self.kid, "/api/messages", kind="pickup")
         self.assertEqual(self.post(self.mum, "/api/messages", body="On my way, about 10 minutes").status_code, 200)
         self.assertEqual([m["kind"] for m in self.get(self.kid, "/api/messages").get_json()["messages"]][-2:], ["pickup", "text"])
+
+
+class RecurringJobs(Base):
+    def make(self, repeat, title="Bins"):
+        return self.post(self.mum, "/api/chores", title=title, points=5, repeat=repeat).get_json()["id"]
+
+    def finish(self, cid):
+        self.assertEqual(self.post(self.kid, f"/api/chores/{cid}/done").status_code, 200)
+        self.assertEqual(self.post(self.mum, f"/api/chores/{cid}/approve", ok=True).status_code, 200)
+
+    def jobs(self, who):
+        return self.get(who, "/api/chores").get_json()["chores"]
+
+    def test_a_repeating_job_comes_back_later_never_straight_away(self):
+        cid = self.make("daily")
+        self.finish(cid)
+        self.assertEqual([c["status"] for c in self.jobs(self.kid) if c["title"] == "Bins"], ["approved"], "nothing new to farm today")
+        waiting = [c for c in self.jobs(self.mum) if c["status"] == "open"]
+        self.assertEqual((len(waiting), waiting[0]["repeats"]), (1, "daily"))
+        self.assertGreater(waiting[0]["opens_at"], time.time(), "a parent can see it is waiting")
+        self.assertEqual(self.post(self.kid, f"/api/chores/{waiting[0]['id']}/done").status_code, 404, "and it cannot be ticked off before it opens")
+        db.run(db.update(db.chores).where(db.chores.c.id == waiting[0]["id"]).values(opens_at=time.time() - 5))
+        again = [c for c in self.jobs(self.kid) if c["status"] == "open"]
+        self.assertEqual(len(again), 1, "once it opens the child sees it")
+        self.finish(again[0]["id"])
+        self.assertEqual(len([c for c in self.jobs(self.mum) if c["status"] == "open"]), 1, "and it keeps coming back")
+
+    def test_weekly_is_a_week_later_than_daily(self):
+        d, w = self.make("daily", "Daily"), self.make("weekly", "Weekly")
+        self.finish(d)
+        self.finish(w)
+        opens = {c["title"]: c["opens_at"] for c in self.jobs(self.mum) if c["status"] == "open"}
+        self.assertAlmostEqual(opens["Weekly"] - opens["Daily"], 6 * 86400, delta=86400)
+
+    def test_a_one_off_job_does_not_come_back_and_neither_does_one_sent_back(self):
+        one = self.make("")
+        self.finish(one)
+        self.assertEqual(len([c for c in db.many(db.select(db.chores)) if c["created_by"] == self.mum_id]), 1, "a one-off job leaves no copy")
+        again = self.make("daily", "Again")
+        self.post(self.kid, f"/api/chores/{again}/done")
+        self.post(self.mum, f"/api/chores/{again}/approve", ok=False)
+        self.assertEqual(len([c for c in db.many(db.select(db.chores)) if c["title"] == "Again"]), 1, "'do it again' is the same job, not a new copy")
+
+    def test_only_daily_and_weekly_are_accepted(self):
+        cid = self.make("monthly")
+        self.assertEqual(db.one(db.select(db.chores).where(db.chores.c.id == cid))["repeats"], "")
+
+
+class Streaks(Base):
+    def approved(self, days_ago):
+        cid = self.post(self.mum, "/api/chores", title=f"Job {days_ago}", points=1).get_json()["id"]
+        self.post(self.kid, f"/api/chores/{cid}/done")
+        self.post(self.mum, f"/api/chores/{cid}/approve", ok=True)
+        db.run(db.update(db.chores).where(db.chores.c.id == cid).values(approved_at=time.time() - days_ago * 86400))
+
+    def streak(self):
+        return self.get(self.kid, "/api/chores").get_json()["streaks"][str(self.kid_id)]
+
+    def test_days_in_a_row_with_an_approved_job(self):
+        self.assertEqual(self.streak(), 0)
+        self.approved(0)
+        self.assertEqual(self.streak(), 1)
+        self.approved(1)
+        self.approved(2)
+        self.assertEqual(self.streak(), 3)
+
+    def test_a_missed_day_breaks_it_but_yesterday_still_counts_until_today_ends(self):
+        self.approved(0)
+        self.approved(2)
+        self.assertEqual(self.streak(), 1, "a gap yesterday ends the run")
+        db.run(db.update(db.chores).values(approved_at=time.time() - 86400))
+        self.assertEqual(self.streak(), 1, "yesterday only: still alive today")
+        db.run(db.update(db.chores).values(approved_at=time.time() - 2 * 86400))
+        self.assertEqual(self.streak(), 0, "two days ago only: over")
+
+    def test_rewards_also_report_streaks_and_only_children_have_them(self):
+        self.approved(0)
+        d = self.get(self.mum, "/api/rewards").get_json()
+        self.assertEqual(d["streaks"], {str(self.kid_id): 1})
+
+
+class Bonus(Base):
+    DAY = time.strftime("%Y-%m-%d")
+
+    def earn(self, points):
+        cid = self.post(self.mum, "/api/chores", title="Tidy", points=points).get_json()["id"]
+        self.post(self.kid, f"/api/chores/{cid}/done")
+        self.post(self.mum, f"/api/chores/{cid}/approve", ok=True)
+
+    def play(self, seconds):
+        self.post(self.kid, "/api/screentime", day=self.DAY, apps=[{"pkg": "com.game", "label": "Game", "cat": "play", "sec": seconds}])
+
+    def limit_nudges(self):
+        return [e["payload"]["text"] for e in self.events(self.kid) if e["type"] == "nudge" and "daily limit" in e["payload"]["text"]]
+
+    def reward(self, minutes=30, cost=10, title="Extra game time"):
+        return self.post(self.mum, "/api/rewards", title=title, cost=cost, minutes=minutes)
+
+    def spend(self, rid, approve=True):
+        qid = self.post(self.kid, f"/api/rewards/{rid}/redeem").get_json()["id"]
+        return self.post(self.mum, f"/api/redemptions/{qid}/decide", ok=approve)
+
+    def test_extra_game_time_moves_the_daily_limit(self):
+        self.post(self.mum, "/api/rules", limits={str(self.kid_id): 60})
+        rid = self.reward().get_json()["id"]
+        self.earn(20)
+        self.play(3000)
+        self.assertEqual(self.limit_nudges(), [], "50 of 60 minutes: not there yet")
+        self.assertEqual(self.spend(rid).status_code, 200)
+        self.assertEqual(self.get(self.kid, "/api/rewards").get_json()["bonus"], {str(self.kid_id): 30})
+        mine = self.get(self.kid, "/api/rewards").get_json()
+        self.assertEqual((mine["my_bonus"], mine["my_streak"]), (30, 1), "a child is told their own extra minutes and streak (for the Windows tray)")
+        self.assertEqual(self.get(self.mum, "/api/rewards").get_json()["my_bonus"], None)
+        self.play(3700)
+        self.assertEqual(self.limit_nudges(), [], "past the old 60-minute limit but inside the new 90")
+        self.play(5500)
+        nudged = self.limit_nudges()
+        self.assertEqual(len(nudged), 1)
+        self.assertIn("90 minutes", nudged[0])
+
+    def test_without_the_reward_the_original_limit_stands(self):
+        self.post(self.mum, "/api/rules", limits={str(self.kid_id): 60})
+        self.play(3700)
+        self.assertIn("60 minutes", self.limit_nudges()[0])
+
+    def test_a_no_gives_no_time_and_no_limit_means_nothing_to_extend(self):
+        rid = self.reward().get_json()["id"]
+        self.earn(40)
+        self.assertEqual(self.spend(rid, approve=False).get_json()["status"], "declined")
+        self.assertEqual(self.get(self.kid, "/api/rewards").get_json()["bonus"], {})
+        self.assertEqual(self.spend(rid).status_code, 200)
+        self.play(99999)
+        self.assertEqual(self.limit_nudges(), [], "no limit is set, so there is no limit to reach")
+
+    def test_the_family_chat_and_the_child_are_told_how_many_minutes(self):
+        rid = self.reward().get_json()["id"]
+        self.earn(20)
+        self.spend(rid)
+        told = [e["payload"] for e in self.events(self.kid) if e["type"] == "reward" and e["payload"]["status"] == "approved"]
+        self.assertEqual(told[0]["minutes"], 30)
+        notes = [m["body"] for m in self.get(self.mum, "/api/messages").get_json()["messages"] if "said yes" in m["body"]]
+        self.assertIn("+30 minutes of screen time today", notes[0])
+
+    def test_minutes_must_be_a_sensible_number(self):
+        for bad in (-1, 241, "lots"):
+            self.assertEqual(self.reward(minutes=bad).status_code, 400, bad)
+        self.assertEqual(self.reward(minutes=240).status_code, 200)
+        self.assertEqual(self.reward(minutes=0, title="Plain").status_code, 200)
+        self.assertEqual(sorted(r["minutes"] for r in self.get(self.kid, "/api/rewards").get_json()["rewards"]), [0, 240])
+
+
+class Birthdays(Base):
+    def set(self, who, month, day):
+        return self.post(who, "/api/birthday", month=month, day=day)
+
+    def greetings(self, who):
+        return [e["payload"] for e in self.events(who) if e["type"] == "birthday"]
+
+    def fire(self, ts=None):
+        server._last_bday[0] = 0
+        if ts is None:
+            server.remind_birthdays()
+        else:
+            with mock.patch.object(server.time, "time", return_value=ts):
+                server.remind_birthdays()
+
+    def test_set_show_and_clear(self):
+        self.assertEqual(self.set(self.kid, 3, 14).get_json()["birthday"], "03-14")
+        seen = {m["name"]: m["birthday"] for m in self.get(self.mum, "/api/family").get_json()["members"]}
+        self.assertEqual((seen["Sam"], seen["Mum"]), ("03-14", None))
+        self.assertIsNone(self.set(self.kid, 0, 0).get_json()["birthday"])
+
+    def test_only_real_dates(self):
+        for month, day in ((2, 30), (13, 1), (0, 5), (4, 31), (1, 0), ("x", 1)):
+            self.assertEqual(self.set(self.kid, month, day).status_code, 400, (month, day))
+        self.assertEqual(self.set(self.kid, 2, 29).status_code, 200)
+
+    def test_the_family_hears_once_on_the_day(self):
+        now = time.gmtime()
+        self.set(self.kid, now.tm_mon, now.tm_mday)
+        self.fire()
+        told, own = self.greetings(self.mum), self.greetings(self.kid)
+        self.assertEqual((len(told), told[0]["name"], told[0]["self"], own[0]["self"]), (1, "Sam", False, True))
+        self.assertTrue(any("birthday today" in m["body"] for m in self.get(self.mum, "/api/messages").get_json()["messages"]))
+        self.fire()
+        self.assertEqual(len(self.greetings(self.mum)), 1, "once a year, not every five minutes")
+        db.run(db.update(db.members).where(db.members.c.id == self.kid_id).values(bday_year=now.tm_year - 1))
+        self.fire()
+        self.assertEqual(len(self.greetings(self.mum)), 2, "and again next year")
+
+    def test_nothing_on_other_days(self):
+        t = time.gmtime(time.time() + 3 * 86400)
+        self.set(self.kid, t.tm_mon, t.tm_mday)
+        self.fire()
+        self.assertEqual(self.greetings(self.mum), [])
+
+    def test_a_leap_day_birthday_is_kept_on_the_28th_in_normal_years(self):
+        self.set(self.kid, 2, 29)
+        self.fire(calendar.timegm((2027, 2, 28, 12, 0, 0)))
+        self.assertEqual(len(self.greetings(self.mum)), 1, "2027 has no 29 February")
+        db.run(db.update(db.members).where(db.members.c.id == self.kid_id).values(bday_year=0))
+        self.fire(calendar.timegm((2028, 2, 28, 12, 0, 0)))
+        self.assertEqual(len(self.greetings(self.mum)), 1, "in a leap year the 28th is just a day")
+        self.fire(calendar.timegm((2028, 2, 29, 12, 0, 0)))
+        self.assertEqual(len(self.greetings(self.mum)), 2)
+
+    def test_their_own_clock_decides_the_day(self):
+        now = time.gmtime()
+        self.set(self.kid, now.tm_mon, now.tm_mday)
+        ts = calendar.timegm((now.tm_year, now.tm_mon, now.tm_mday, 1, 0, 0))             # 01:00 UTC on the day...
+        db.run(db.update(db.members).where(db.members.c.id == self.kid_id).values(tz_offset=300))     # ...is still the evening before in UTC-5
+        self.fire(ts)
+        server._last_bday[0] = time.time() + 600                                        # reading events also runs the check, on the real clock: keep it out of this test
+        self.assertEqual(self.greetings(self.mum), [], "not their birthday yet where they are")
+
+
+class AppVersions(Base):
+    def seen_by_mum(self, name="Sam"):
+        return {m["name"]: m["app_version"] for m in self.get(self.mum, "/api/family").get_json()["members"]}[name]
+
+    def test_the_android_app_reports_its_version_and_the_latest_is_kept(self):
+        self.assertEqual(self.seen_by_mum(), 0, "unknown until the app says")
+        self.c.get("/api/me", headers={**self.kid, "X-Homebase-Version": "4"})
+        self.assertEqual(self.seen_by_mum(), 4)
+        self.c.get("/api/me", headers={**self.kid, "X-Homebase-Version": "5"})
+        self.assertEqual(self.seen_by_mum(), 5)
+        for junk in ("abc", "-3", "0", "99999999", ""):
+            self.c.get("/api/me", headers={**self.kid, "X-Homebase-Version": junk})
+        self.assertEqual(self.seen_by_mum(), 5, "nonsense is ignored")
+
+
+class UpdateNudge(Base):
+    def nudge(self, who, member):
+        return self.c.post(f"/api/members/{member}/update-nudge", headers=who)
+
+    def test_a_parent_asks_once_with_the_link_and_only_that_person_hears(self):
+        dad_code = self.post(self.mum, "/api/invite", role="parent").get_json()["code"]
+        dad = {"Authorization": "Bearer " + self.c.post("/api/join", json={"code": dad_code, "name": "Dad"}).get_json()["token"]}
+        self.assertEqual(self.nudge(self.mum, self.kid_id).status_code, 200)
+        told = [e["payload"] for e in self.events(self.kid) if e["type"] == "message" and "/download" in e["payload"]["body"]]
+        self.assertEqual((len(told), told[0]["name"], told[0]["kind"], told[0]["to"]), (1, "Mum", "text", self.kid_id))
+        self.assertIn("Please update Homebase", told[0]["body"])
+        self.assertFalse(any("/download" in e["payload"].get("body", "") for e in self.events(dad) if e["type"] == "message"), "nobody else is buzzed")
+        thread = self.get(self.kid, f"/api/messages?with={self.mum_id}").get_json()["messages"]
+        self.assertTrue(any("update Homebase" in m["body"] for m in thread), "it is in their chat too")
+
+    def test_it_is_capped_so_it_cannot_become_spam(self):
+        self.assertEqual(self.nudge(self.mum, self.kid_id).status_code, 200)
+        for _ in range(5):
+            self.assertEqual(self.nudge(self.mum, self.kid_id).status_code, 429)
+        self.assertEqual(len([e for e in self.events(self.kid) if e["type"] == "message" and "/download" in e["payload"]["body"]]), 1)
+
+    def test_who_may_ask_whom(self):
+        self.assertEqual(self.nudge(self.kid, self.mum_id).status_code, 403, "a child cannot send these")
+        self.assertEqual(self.nudge(self.mum, self.mum_id).status_code, 404, "not yourself")
+        self.assertEqual(self.nudge(self.mum, 99999).status_code, 404)
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertEqual(self.nudge(zed, self.kid_id).status_code, 404, "another family cannot")
+        self.assertEqual(self.c.post(f"/api/members/{self.kid_id}/update-nudge").status_code, 401)
+
+
+class CalendarRange(Base):
+    def plan_at(self, title, delta):
+        fid = db.one(db.select(db.members).where(db.members.c.id == self.mum_id))["family_id"]
+        now = time.time()
+        db.run(db.insert(db.plans).values(family_id=fid, title=title, emoji="\U0001F4C5", start=now + delta, note="", created_by=self.mum_id, created=now, rsvp="{}", reminded=True))
+
+    def titles(self, query=""):
+        return [p["title"] for p in self.get(self.kid, "/api/plans" + query).get_json()["plans"]]
+
+    def test_a_stretch_of_days_includes_the_past_and_nothing_outside_it(self):
+        self.plan_at("Last week", -7 * 86400)
+        self.plan_at("Tomorrow", 86400)
+        self.plan_at("Next month", 40 * 86400)
+        now = time.time()
+        self.assertEqual(self.titles(f"?from={now - 10 * 86400}&to={now + 10 * 86400}"), ["Last week", "Tomorrow"])
+        self.assertEqual(self.titles(f"?from={now + 30 * 86400}&to={now + 50 * 86400}"), ["Next month"])
+        self.assertEqual(self.titles(), ["Tomorrow", "Next month"], "the normal list is still just what is coming up")
+
+    def test_the_range_must_be_sensible_and_stays_in_the_family(self):
+        now = time.time()
+        for query in ("?from=x&to=y", f"?from={now}&to={now - 5}", f"?from={now}&to={now + 80 * 86400}"):
+            self.assertEqual(self.get(self.kid, "/api/plans" + query).status_code, 400, query)
+        self.plan_at("Ours", 86400)
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertEqual(self.get(zed, f"/api/plans?from={now - 86400}&to={now + 5 * 86400}").get_json()["plans"], [])
+
+
+class ClearList(Base):
+    def items(self, who):
+        return [i["text"] for i in self.get(who, "/api/list").get_json()["items"]]
+
+    def test_only_the_ticked_items_go_and_only_from_this_family(self):
+        a, b, _ = (self.post(self.mum, "/api/list", text=t).get_json()["id"] for t in ("Milk", "Eggs", "Bread"))
+        self.post(self.kid, f"/api/list/{a}", done=True)
+        self.post(self.kid, f"/api/list/{b}", done=True)
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        z = self.post(zed, "/api/list", text="Zed's tea").get_json()["id"]
+        self.post(zed, f"/api/list/{z}", done=True)
+        self.assertEqual(self.post(self.kid, "/api/list/clear").get_json()["cleared"], 2)
+        self.assertEqual(self.items(self.mum), ["Bread"])
+        self.assertEqual(self.items(zed), ["Zed's tea"], "another family's list is not touched")
+        self.assertEqual(self.post(self.kid, "/api/list/clear").get_json()["cleared"], 0)
+        self.assertTrue(any(e["type"] == "list" and e["payload"].get("cleared") == 2 for e in self.events(self.mum)))
+        self.assertEqual(self.c.post("/api/list/clear").status_code, 401)
+
+
+class CalendarFile(Base):
+    def test_plans_and_birthdays_come_out_as_a_calendar_file(self):
+        self.post(self.mum, "/api/plans", title="Dinner, at Gran's; bring cake", emoji="\U0001F37D\ufe0f", start=time.time() + 86400, note="Bring a cake, candles; and a card")
+        self.post(self.kid, "/api/birthday", month=3, day=14)
+        self.post(self.mum, "/api/birthday", month=2, day=29)
+        r = self.c.get("/api/calendar.ics", headers=self.kid)
+        self.assertEqual((r.status_code, r.mimetype), (200, "text/calendar"))
+        self.assertIn("attachment", r.headers["Content-Disposition"])
+        text = r.get_data(as_text=True)
+        lines = text.split("\r\n")
+        self.assertEqual((lines[0], lines[-2], lines[-1]), ("BEGIN:VCALENDAR", "END:VCALENDAR", ""))
+        self.assertEqual(text.count("BEGIN:VEVENT"), 3)
+        self.assertEqual(text.count("END:VEVENT"), 3)
+        flat = text.replace("\r\n ", "")                                  # undo the line folding
+        self.assertIn("SUMMARY:\U0001F37D\ufe0f Dinner\\, at Gran's\\; bring cake", flat, "commas and semicolons are escaped")
+        self.assertIn("DESCRIPTION:Bring a cake\\, candles\\; and a card", flat)
+        self.assertIn(f"DTSTART;VALUE=DATE:{time.gmtime().tm_year}0314", flat)
+        self.assertIn("DTSTART;VALUE=DATE:20240229", flat, "29 February sits in a leap year")
+        self.assertIn("RRULE:FREQ=YEARLY", flat)
+        self.assertTrue(all(len(line) <= 75 for line in lines), "long lines are folded")
+
+    def test_each_family_gets_only_its_own_calendar(self):
+        self.post(self.mum, "/api/plans", title="Private plan", start=time.time() + 86400)
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        other = self.c.get("/api/calendar.ics", headers=zed).get_data(as_text=True)
+        self.assertNotIn("Private plan", other)
+        self.assertEqual(other.count("BEGIN:VEVENT"), 0)
+        self.assertEqual(self.c.get("/api/calendar.ics").status_code, 401)
 
 
 if __name__ == "__main__":

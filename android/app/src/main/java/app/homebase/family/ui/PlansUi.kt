@@ -8,7 +8,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -36,8 +39,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.homebase.family.Member
 import app.homebase.family.Plan
 import app.homebase.family.Poll
 import app.homebase.family.hb
@@ -77,22 +82,24 @@ fun PlansScreen(nav: Nav) {
     val me = app.store.myId
     var addPlan by remember { mutableStateOf(false) }
     var askPoll by remember { mutableStateOf(false) }
+    var addPlanDay by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(Unit) { app.state.refreshPlans(); app.state.refreshPolls() }
     val nameOf: (Int) -> String = { id -> if (id == me) "You" else fam?.members?.firstOrNull { it.id == id }?.name ?: "Someone" }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { TextButton({ nav.back() }) { Text("Back") } }
         Heading("Plans and votes", "Put things on the family calendar and ask everyone a question.")
+        CalendarCard(nameOf, fam?.members.orEmpty(), plans) { ms -> addPlanDay = ms; addPlan = true }
         SectionLabel("📅 Coming up")
         plans.forEach { PlanCard(it, nameOf) }
         if (plans.isEmpty()) CenterNote("Nothing planned yet.")
-        SoftButton("＋ Add a plan") { addPlan = true }
+        SoftButton("＋ Add a plan") { addPlanDay = null; addPlan = true }
         SectionLabel("🗳️ Family votes")
         polls.forEach { PollCard(it, nameOf) }
         if (polls.isEmpty()) CenterNote("Ask the family something: pizza or tacos?")
         SoftButton("＋ Ask the family") { askPoll = true }
         Gap(8)
     }
-    if (addPlan) AddPlanDialog { addPlan = false }
+    if (addPlan) AddPlanDialog(addPlanDay) { addPlan = false; addPlanDay = null }
     if (askPoll) AskPollDialog { askPoll = false }
 }
 
@@ -182,12 +189,12 @@ private fun PollCard(p: Poll, nameOf: (Int) -> String) {
 }
 
 @Composable
-private fun AddPlanDialog(onDismiss: () -> Unit) {
+private fun AddPlanDialog(startMs: Long?, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var title by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var emoji by remember { mutableStateOf("📅") }
-    var whenMs by remember { mutableLongStateOf(midnight(System.currentTimeMillis()) + 86_400_000L + 18 * 3_600_000L) }   // tomorrow, 6 pm
+    var whenMs by remember { mutableLongStateOf(startMs ?: (midnight(System.currentTimeMillis()) + 86_400_000L + 18 * 3_600_000L)) }   // the day picked on the calendar, or tomorrow, 6 pm
     val cal = Calendar.getInstance().apply { timeInMillis = whenMs }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -259,4 +266,90 @@ private fun AskPollDialog(onDismiss: () -> Unit) {
         },
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
     )
+}
+
+/** A month at a glance: dots for plans, a cake for birthdays. Tap a day to see it, answer "I'm in", or add a plan on it. */
+@Composable
+private fun CalendarCard(nameOf: (Int) -> String, members: List<Member>, refresh: Any, onAdd: (Long) -> Unit) {
+    val ctx = LocalContext.current
+    val zone = java.time.ZoneId.systemDefault()
+    var month by remember { mutableStateOf(java.time.YearMonth.now()) }
+    var sel by remember { mutableIntStateOf(java.time.LocalDate.now().dayOfMonth) }
+    var monthPlans by remember { mutableStateOf<List<Plan>>(emptyList()) }
+    LaunchedEffect(month, refresh) {
+        val from = month.atDay(1).atStartOfDay(zone).toEpochSecond()
+        val to = month.plusMonths(1).atDay(1).atStartOfDay(zone).toEpochSecond()
+        runCatching { ctx.hb.api.plansBetween(from, to) }.onSuccess { monthPlans = it }
+    }
+    fun answerHere(id: Int, answer: String) {
+        ctx.hb.scope.launch {
+            runCatching { ctx.hb.api.rsvp(id, answer) }
+                .onSuccess { updated ->
+                    monthPlans = monthPlans.map { if (it.id == id) updated else it }
+                    ctx.hb.state.plans.update { list -> list.map { if (it.id == id) updated else it } }
+                }
+                .onFailure { toast(ctx, it.message ?: "Could not save that") }
+        }
+    }
+    val days = month.lengthOfMonth()
+    val day = minOf(sel, days)
+    val lead = month.atDay(1).dayOfWeek.value - 1                                         // weeks start on Monday
+    val today = java.time.LocalDate.now()
+    val byDay = monthPlans.groupBy { java.time.Instant.ofEpochSecond(it.start.toLong()).atZone(zone).dayOfMonth }
+    val birthdays = members.mapNotNull { m ->
+        val parts = m.birthday?.split("-")
+        val bm = parts?.getOrNull(0)?.toIntOrNull()
+        val bd = parts?.getOrNull(1)?.toIntOrNull()
+        if (bm == month.monthValue && bd != null) m to minOf(bd, days) else null
+    }
+    val monthName = month.month.getDisplayName(java.time.format.TextStyle.FULL, Locale.getDefault())
+    SoftCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton({ month = month.minusMonths(1); sel = 1 }) { Text("‹") }
+            Text("$monthName ${month.year}", Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium)
+            TextButton({ month = month.plusMonths(1); sel = 1 }) { Text("›") }
+        }
+        Row(Modifier.fillMaxWidth()) {
+            listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach { Text(it, Modifier.weight(1f), textAlign = TextAlign.Center, color = Muted, fontSize = 11.sp) }
+        }
+        for (w in 0 until (lead + days + 6) / 7) {
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (c in 0 until 7) {
+                    val d = w * 7 + c - lead + 1
+                    if (d < 1 || d > days) {
+                        Box(Modifier.weight(1f).height(46.dp))
+                    } else {
+                        val n = byDay[d]?.size ?: 0
+                        val cake = birthdays.any { it.second == d }
+                        val chosen = d == day
+                        val ring = if (month.atDay(d) == today && !chosen) Modifier.border(1.dp, Accent, RoundedCornerShape(12.dp)) else Modifier
+                        Column(
+                            Modifier.weight(1f).height(46.dp).clip(RoundedCornerShape(12.dp)).background(if (chosen) Accent else Surface2).then(ring).clickable { sel = d },
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text("$d", color = if (chosen) OnAccent else Ink, fontSize = 14.sp)
+                            Text((if (cake) "\uD83C\uDF82" else "") + "\u25CF".repeat(minOf(n, 3)), color = if (chosen) OnAccent else Accent, fontSize = 8.sp, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+        Text("$day $monthName", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.titleMedium)
+        byDay[day].orEmpty().forEach { p ->
+            Column(Modifier.padding(top = 8.dp)) {
+                Text("${p.emoji} ${p.title}", style = MaterialTheme.typography.titleMedium)
+                Text(java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(Date((p.start * 1000).toLong())) + (if (p.note.isNotBlank()) " · " + p.note else ""), color = Muted, fontSize = 13.sp)
+                Text(if (p.going.isEmpty()) "Nobody has said yes yet" else "\uD83D\uDC4D " + p.going.joinToString(", ") { nameOf(it) } + (if (p.out.isEmpty()) "" else " · can't: " + p.out.joinToString(", ") { nameOf(it) }), color = Muted, fontSize = 13.sp)
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("in" to "I'm in", "out" to "Can't").forEach { (answer, label) ->
+                        val on = p.mine == answer
+                        Pill(if (on) "\u2713 $label" else label, on) { answerHere(p.id, if (on) "" else answer) }
+                    }
+                }
+            }
+        }
+        birthdays.filter { it.second == day }.forEach { Text("\uD83C\uDF82 ${it.first.name}'s birthday", Modifier.padding(top = 8.dp)) }
+        if (byDay[day].isNullOrEmpty() && birthdays.none { it.second == day }) Text("Nothing on this day.", Modifier.padding(top = 4.dp), color = Muted)
+        SoftButton("\uFF0B Plan on this day", Modifier.padding(top = 8.dp)) { onAdd(month.atDay(day).atTime(18, 0).atZone(zone).toInstant().toEpochMilli()) }
+    }
 }

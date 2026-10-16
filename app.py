@@ -4,6 +4,7 @@ Principles baked in: everything shared is visible to the person sharing it, they
 and there is no hidden mode. Parents never get silent access to a child's phone: location is shared by the app, check-ins, requests
 ("where are you?") can be declined, and quiet hours are the child's own setting."""
 
+import calendar
 import hmac
 import json
 import math
@@ -23,7 +24,7 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "4"))
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "5"))
 KEEP_LOCATIONS_DAYS = 7
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _hits = defaultdict(list)
@@ -71,7 +72,11 @@ def need(fn):
         m = current()
         if not m:
             return err("Sign in again.", 401)
-        db.run(update(db.members).where(db.members.c.id == m["id"]).values(last_seen=time.time()))
+        seen = {"last_seen": time.time()}
+        v = request.headers.get("X-Homebase-Version", "")
+        if v.isdigit() and 0 < int(v) < 100000 and int(v) != (m.get("app_version") or 0):
+            seen["app_version"] = int(v)
+        db.run(update(db.members).where(db.members.c.id == m["id"]).values(**seen))
         g.m = m
         return fn(*a, **k)
     wrapped.__name__ = fn.__name__
@@ -159,7 +164,7 @@ def member_view(m, viewer=None):
     out = {"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "battery": m["battery"], "share": state,
            "paused_until": m["paused_until"] if state == "paused" else 0, "last_seen": m["last_seen"], "quiet": m["quiet_from"] >= 0,
            "location": None, "perms": perms, "lock": lock_view(m), "home": at_home(m), "blocks": block_views(m),
-           "avatar": (f"/api/avatar/{m['id']}?v={int(m['avatar_at'] or 0)}" if m["avatar"] else None), "status": status_view(m)}
+           "avatar": (f"/api/avatar/{m['id']}?v={int(m['avatar_at'] or 0)}" if m["avatar"] else None), "status": status_view(m), "birthday": m["birthday"] or None, "app_version": m.get("app_version") or 0}
     if state == "on" and m["last_lat"] is not None and not (gated and not perms["location"]):
         out["location"] = {"lat": m["last_lat"], "lng": m["last_lng"], "acc": m["last_acc"], "at": m["last_at"]}
     if gated and not perms["location"]:
@@ -701,7 +706,33 @@ def lift_block(bid):
 # ---------------------------------------------------------------- chores: a parent sets a job, a child ticks it off, a parent approves it for points
 def chore_view(c):
     return {"id": c["id"], "title": c["title"], "emoji": c["emoji"], "points": c["points"], "to": c["to_id"], "status": c["status"],
-            "done_by": c["done_by"], "done_at": c["done_at"], "approved_at": c["approved_at"], "created": c["created"]}
+            "done_by": c["done_by"], "done_at": c["done_at"], "approved_at": c["approved_at"], "created": c["created"],
+            "repeats": c.get("repeats") or "", "opens_at": c.get("opens_at") or 0}
+
+
+def next_midnight(tz_offset, now=None):
+    """The next midnight on someone's clock (tz_offset is minutes, as the phone reports it: UTC minus local)."""
+    now = now or time.time()
+    local_day = int((now / 60 - (tz_offset or 0)) // 1440)
+    return ((local_day + 1) * 1440 + (tz_offset or 0)) * 60
+
+
+def chore_streaks(fid):
+    """For each child: how many days in a row (counting today, or yesterday if today is not done yet) have at least one approved job."""
+    now, kids = time.time(), {m["id"]: m for m in family_members(fid) if m["role"] == "child"}
+    days = {i: set() for i in kids}
+    for c in db.many(select(db.chores).where(db.chores.c.family_id == fid, db.chores.c.status == "approved", db.chores.c.approved_at >= now - 60 * 86400)):
+        k = kids.get(c["done_by"])
+        if k:
+            days[k["id"]].add(int((c["approved_at"] / 60 - (k["tz_offset"] or 0)) // 1440))
+    out = {}
+    for i, ds in days.items():
+        today = int((now / 60 - (kids[i]["tz_offset"] or 0)) // 1440)
+        n, d = 0, (today if today in ds else today - 1)
+        while d in ds:
+            n, d = n + 1, d - 1
+        out[i] = n
+    return out
 
 
 def chore_points(fid, since=0):
@@ -720,8 +751,9 @@ def own_chore(cid):
 def get_chores():
     rows = db.many(select(db.chores).where(db.chores.c.family_id == g.m["family_id"]).order_by(db.chores.c.id.desc()))
     week = time.time() - 7 * 86400
-    open_rows = [c for c in rows if c["status"] != "approved" or c["approved_at"] >= week][:60]
-    return jsonify(chores=[chore_view(c) for c in open_rows], points=chore_points(g.m["family_id"]), week=chore_points(g.m["family_id"], week))
+    now = time.time()
+    open_rows = [c for c in rows if (c["status"] != "approved" or c["approved_at"] >= week) and (g.m["role"] == "parent" or (c["opens_at"] or 0) <= now)][:60]
+    return jsonify(chores=[chore_view(c) for c in open_rows], points=chore_points(g.m["family_id"]), week=chore_points(g.m["family_id"], week), streaks=chore_streaks(g.m["family_id"]))
 
 
 @app.post("/api/chores")
@@ -740,8 +772,9 @@ def add_chore():
         return err("Pick a child.", 404)
     if len(db.many(select(db.chores.c.id).where(db.chores.c.family_id == g.m["family_id"], db.chores.c.status != "approved"))) >= 40:
         return err("That is plenty of jobs (40). Approve or delete some first.")
-    cid = db.run(insert(db.chores).values(family_id=g.m["family_id"], title=title, emoji=clean(b.get("emoji"), 8) or "🧹", points=pts, to_id=to, created_by=g.m["id"], created=time.time()))
-    say(g.m["family_id"], g.m["id"], f"{g.m['name']} added a job: {title} ({pts} points)")
+    repeats = b.get("repeat") if b.get("repeat") in ("daily", "weekly") else ""
+    cid = db.run(insert(db.chores).values(family_id=g.m["family_id"], title=title, emoji=clean(b.get("emoji"), 8) or "🧹", points=pts, to_id=to, created_by=g.m["id"], created=time.time(), repeats=repeats, opens_at=0))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} added a job: {title} ({pts} points{', ' + repeats if repeats else ''})")
     push_family(g.m["family_id"], "chores", {"id": cid})
     return jsonify(id=cid)
 
@@ -752,6 +785,8 @@ def chore_done(cid):
     c = own_chore(cid)
     if not c or c["status"] != "open":
         return err("That job is not open.", 404)
+    if (c["opens_at"] or 0) > time.time():
+        return err("That job is not open yet.", 404)
     if g.m["role"] != "child" or (c["to_id"] and c["to_id"] != g.m["id"]):
         return err("This job is for someone else.", 403)
     db.run(update(db.chores).where(db.chores.c.id == cid).values(status="done", done_by=g.m["id"], done_at=time.time()))
@@ -771,6 +806,10 @@ def chore_approve(cid):
         db.run(update(db.chores).where(db.chores.c.id == cid).values(status="approved", approved_by=g.m["id"], approved_at=time.time()))
         who = same_family(c["done_by"])
         say(g.m["family_id"], g.m["id"], f"{g.m['name']} approved {who['name'] if who else 'the job'}'s job: {c['title']} (+{c['points']} points)")
+        if c.get("repeats") in ("daily", "weekly"):                    # it comes back: tomorrow (daily) or a week from today (weekly), never straight away, so the points cannot be farmed
+            back = next_midnight((who or {}).get("tz_offset", 0)) + (6 * 86400 if c["repeats"] == "weekly" else 0)
+            db.run(insert(db.chores).values(family_id=c["family_id"], title=c["title"], emoji=c["emoji"], points=c["points"], to_id=c["to_id"], created_by=c["created_by"],
+                                            created=time.time(), repeats=c["repeats"], opens_at=back))
     else:                                                          # not quite right: back to the list
         db.run(update(db.chores).where(db.chores.c.id == cid).values(status="open", done_by=0, done_at=0))
         say(g.m["family_id"], g.m["id"], f"{g.m['name']} asked for {c['title']} to be done again")
@@ -820,6 +859,18 @@ def week_summary():
 
 
 # ---------------------------------------------------------------- family rules: house rules and a daily play/watch limit per child
+def kid_today(m):
+    """The day the child's own device is on right now (devices send their own date), else the day on the server by their clock."""
+    row = db.one(select(db.screentime.c.day, db.screentime.c.updated).where(db.screentime.c.member_id == m["id"]).order_by(db.screentime.c.updated.desc()).limit(1))
+    if row and time.time() - (row["updated"] or 0) < 6 * 3600:
+        return row["day"]
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() - (m["tz_offset"] or 0) * 60))
+
+
+def bonus_minutes(member_id, day):
+    return sum(r["minutes"] for r in db.many(select(db.bonus).where(db.bonus.c.member_id == member_id, db.bonus.c.day == day)))
+
+
 def limit_of(m):
     try:
         return max(0, int(json.loads(m["rules"] or "{}").get("limit") or 0))
@@ -1165,7 +1216,8 @@ def post_screentime():
         else:
             db.run(insert(db.screentime).values(member_id=g.m["id"], day=day, pkg=pkg, label=label, cat=cat, sec=sec, updated=now))
     after = day_total(g.m["id"], day)
-    lim = limit_of(g.m) * 60
+    base = limit_of(g.m)
+    lim = (base + (bonus_minutes(g.m["id"], day) if base else 0)) * 60                       # a reward's extra minutes count, but only when a limit is set
     if g.m["role"] == "child" and lim and before < lim <= after:                                  # reached the daily limit a parent set
         push(g.m["id"], "nudge", {"text": f"You have reached your daily limit of {lim // 60} minutes of playing and watching. Time for something else 🌳", "total": after})
         say(g.m["family_id"], g.m["id"], f"{g.m['name']} reached the daily limit of {lim // 60} minutes of playing and watching")
@@ -1523,6 +1575,18 @@ def tick_item(iid):
     return jsonify(ok=True)
 
 
+@app.post("/api/list/clear")
+@need
+def clear_done_items():
+    """Takes everything that has been ticked off the list. Items still to do are never touched."""
+    t = db.lists.c
+    n = len(db.many(select(t.id).where(t.family_id == g.m["family_id"], t.done == True)))  # noqa: E712
+    if n:
+        db.run(delete(db.lists).where(t.family_id == g.m["family_id"], t.done == True))  # noqa: E712
+        push_family(g.m["family_id"], "list", {"cleared": n}, skip=g.m["id"])
+    return jsonify(ok=True, cleared=n)
+
+
 @app.delete("/api/list/<int:iid>")
 @need
 def drop_item(iid):
@@ -1557,7 +1621,17 @@ def plan_view(r, me):
 @app.get("/api/plans")
 @need
 def get_plans():
-    rows = db.many(select(db.plans).where(db.plans.c.family_id == g.m["family_id"], db.plans.c.start >= time.time() - PLAN_GRACE).order_by(db.plans.c.start).limit(60))
+    q = db.plans.c
+    if request.args.get("from") and request.args.get("to"):               # the calendar: one stretch of days, past or future
+        try:
+            a, b = float(request.args["from"]), float(request.args["to"])
+        except ValueError:
+            return err("Pick a range.")
+        if not 0 < b - a <= 70 * 86400:
+            return err("Pick up to two months at a time.")
+        rows = db.many(select(db.plans).where(q.family_id == g.m["family_id"], q.start >= a, q.start < b).order_by(q.start).limit(300))
+    else:
+        rows = db.many(select(db.plans).where(q.family_id == g.m["family_id"], q.start >= time.time() - PLAN_GRACE).order_by(q.start).limit(60))
     return jsonify(plans=[plan_view(r, g.m["id"]) for r in rows])
 
 
@@ -1732,11 +1806,11 @@ def balances(fid):
 
 
 def reward_view(r):
-    return {"id": r["id"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"]}
+    return {"id": r["id"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"], "minutes": r["minutes"] or 0}
 
 
 def redemption_view(r):
-    return {"id": r["id"], "member": r["member_id"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"], "status": r["status"], "at": r["created"], "decided_at": r["decided_at"]}
+    return {"id": r["id"], "member": r["member_id"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"], "minutes": r["minutes"] or 0, "status": r["status"], "at": r["created"], "decided_at": r["decided_at"]}
 
 
 @app.get("/api/rewards")
@@ -1748,7 +1822,16 @@ def get_rewards():
     if m["role"] != "parent":                                          # a child sees their own requests, a parent sees everyone's
         asks = [r for r in asks if r["member_id"] == m["id"]]
     bal = balances(fid)
-    return jsonify(rewards=[reward_view(r) for r in rewards], requests=[redemption_view(r) for r in asks[:25]], balance=bal, mine=bal.get(m["id"], 0) if m["role"] == "child" else None)
+    kids = [k for k in family_members(fid) if k["role"] == "child" and (m["role"] == "parent" or k["id"] == m["id"])]
+    extra = {}                                                          # extra screen-time minutes each child has earned today
+    for k in kids:
+        n = bonus_minutes(k["id"], kid_today(k))
+        if n:
+            extra[k["id"]] = n
+    streaks = chore_streaks(fid)
+    child = m["role"] == "child"
+    return jsonify(rewards=[reward_view(r) for r in rewards], requests=[redemption_view(r) for r in asks[:25]], balance=bal, mine=bal.get(m["id"], 0) if child else None,
+                   streaks=streaks, bonus=extra, my_streak=streaks.get(m["id"], 0) if child else None, my_bonus=extra.get(m["id"], 0) if child else None)
 
 
 @app.post("/api/rewards")
@@ -1764,10 +1847,16 @@ def add_reward():
         return err("Say how many points it costs.")
     if not 1 <= cost <= 1000:
         return err("A reward costs between 1 and 1000 points.")
+    try:
+        minutes = int(b.get("minutes") or 0)
+    except (TypeError, ValueError):
+        return err("Minutes should be a number.")
+    if not 0 <= minutes <= 240:
+        return err("Extra screen time can be up to 240 minutes.")
     fid = g.m["family_id"]
     if len(db.many(select(db.rewards.c.id).where(db.rewards.c.family_id == fid))) >= 30:
         return err("That is plenty of rewards (30). Delete some first.")
-    rid = db.run(insert(db.rewards).values(family_id=fid, title=title, emoji=clean(b.get("emoji"), 8) or "🎁", cost=cost, created_by=g.m["id"], created=time.time()))
+    rid = db.run(insert(db.rewards).values(family_id=fid, title=title, emoji=clean(b.get("emoji"), 8) or "🎁", cost=cost, minutes=minutes, created_by=g.m["id"], created=time.time()))
     push_family(fid, "rewards", {"id": rid})
     return jsonify(id=rid)
 
@@ -1796,11 +1885,11 @@ def redeem_reward(rid):
         return err(f"You need {r['cost'] - have} more points for that.")
     if len(db.many(select(db.redemptions.c.id).where(db.redemptions.c.member_id == m["id"], db.redemptions.c.status == "pending"))) >= 3:
         return err("You already have three waiting. Ask a parent to answer them first.")
-    qid = db.run(insert(db.redemptions).values(family_id=m["family_id"], member_id=m["id"], title=r["title"], emoji=r["emoji"], cost=r["cost"], status="pending", created=time.time()))
+    qid = db.run(insert(db.redemptions).values(family_id=m["family_id"], member_id=m["id"], title=r["title"], emoji=r["emoji"], cost=r["cost"], minutes=r["minutes"] or 0, status="pending", created=time.time()))
     say(m["family_id"], m["id"], f"{m['name']} asked for a reward: {r['title']} ({r['cost']} points)")
     for x in family_members(m["family_id"]):
         if x["role"] == "parent":
-            push(x["id"], "reward", {"id": qid, "status": "pending", "name": m["name"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"]})
+            push(x["id"], "reward", {"id": qid, "status": "pending", "name": m["name"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"], "minutes": r["minutes"] or 0})
     push_family(m["family_id"], "rewards", {"id": qid}, skip=m["id"])
     return jsonify(id=qid, balance=have - r["cost"])
 
@@ -1815,8 +1904,12 @@ def decide_redemption(qid):
     status = "approved" if ok else "declined"
     db.run(update(db.redemptions).where(db.redemptions.c.id == qid).values(status=status, decided_by=g.m["id"], decided_at=time.time()))
     kid = same_family(r["member_id"])
-    say(g.m["family_id"], g.m["id"], f"{g.m['name']} {'said yes to' if ok else 'said not now to'} {kid['name'] if kid else 'a'} reward: {r['title']}" + (f" ({r['cost']} points spent)" if ok else ""))
-    push(r["member_id"], "reward", {"id": qid, "status": status, "name": g.m["name"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"]})
+    minutes = (r["minutes"] or 0) if ok else 0
+    if minutes and kid:                                                # "extra game time": the day's limit grows by that many minutes
+        db.run(insert(db.bonus).values(member_id=kid["id"], day=kid_today(kid), minutes=minutes, created=time.time()))
+    spent = f"{r['cost']} points spent" + (f", +{minutes} minutes of screen time today" if minutes else "")
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} {'said yes to' if ok else 'said not now to'} {kid['name'] if kid else 'a'} reward: {r['title']}" + (f" ({spent})" if ok else ""))
+    push(r["member_id"], "reward", {"id": qid, "status": status, "name": g.m["name"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"], "minutes": minutes})
     push_family(g.m["family_id"], "rewards", {"id": qid}, skip=g.m["id"])
     return jsonify(ok=True, status=status)
 
@@ -1878,6 +1971,107 @@ def drop_board(bid):
     return jsonify(ok=True)
 
 
+# ---------------------------------------------------------------- the calendar as a file other calendars understand
+def ics_text(value):
+    return str(value or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\r", "").replace("\n", "\\n")
+
+
+def ics_fold(line):
+    """Lines longer than 75 characters continue on the next line, which starts with a space."""
+    out, first = [], True
+    while len(line) > 75:
+        out.append(line[:75] if first else " " + line[:74])
+        line, first = (line[75:] if first else line[74:]), False
+    out.append(line if first else " " + line)
+    return out
+
+
+@app.get("/api/calendar.ics")
+@need
+def calendar_file():
+    fid, now = g.m["family_id"], time.time()
+    fam = db.one(select(db.families).where(db.families.c.id == fid))
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Homebase//Family//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:" + ics_text(f"{fam['name']} (Homebase)")]
+    for r in db.many(select(db.plans).where(db.plans.c.family_id == fid, db.plans.c.start >= now - 86400, db.plans.c.start < now + 365 * 86400).order_by(db.plans.c.start).limit(500)):
+        lines += ["BEGIN:VEVENT", f"UID:plan-{r['id']}@homebase", f"DTSTAMP:{stamp}", "DTSTART:" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(r["start"])),
+                  "DTEND:" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(r["start"] + 3600)), "SUMMARY:" + ics_text(f"{r['emoji']} {r['title']}".strip())]
+        if r["note"]:
+            lines.append("DESCRIPTION:" + ics_text(r["note"]))
+        lines.append("END:VEVENT")
+    year = time.gmtime(now).tm_year
+    for m in family_members(fid):
+        if not m["birthday"]:
+            continue
+        month, day = m["birthday"].split("-")
+        y = 2024 if m["birthday"] == "02-29" else year                      # a leap year, so 29 February is a real date; calendars handle the other years
+        lines += ["BEGIN:VEVENT", f"UID:birthday-{m['id']}@homebase", f"DTSTAMP:{stamp}", f"DTSTART;VALUE=DATE:{y}{month}{day}", "RRULE:FREQ=YEARLY",
+                  "SUMMARY:" + ics_text(f"\U0001F382 {m['name']}'s birthday"), "END:VEVENT"]
+    lines.append("END:VCALENDAR")
+    body = "\r\n".join(part for line in lines for part in ics_fold(line)) + "\r\n"
+    return app.response_class(body, mimetype="text/calendar", headers={"Content-Disposition": 'attachment; filename="homebase-family.ics"', "Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------- "please update Homebase": one clear message, not a pile of pop-ups
+@app.post("/api/members/<int:mid>/update-nudge")
+@parent_only
+def update_nudge(mid):
+    target = same_family(mid)
+    if not target or target["id"] == g.m["id"]:
+        return err("Not found.", 404)
+    if not parent_may(g.m, target, "messages"):
+        return denied(target, "messages")
+    if limited(f"updnudge:{target['id']}", 1, window=1800):
+        return err(f"{target['name']} was asked a moment ago. Give it half an hour.", 429)
+    scheme = (request.headers.get("X-Forwarded-Proto") or request.scheme).split(",")[0].strip()
+    body = f"\U0001F4F2 Please update Homebase. On Android open {scheme}://{request.host}/download and install it. Windows computers update by themselves."
+    msg_id = say(g.m["family_id"], g.m["id"], body, kind="text", to_id=target["id"])
+    row = db.one(select(db.messages).where(db.messages.c.id == msg_id))
+    push(target["id"], "message", {**msg_view(row), "name": g.m["name"], "emoji": g.m["emoji"], "quiet": in_quiet(target), "urgent": False})
+    return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- birthdays: the person chooses the date, the whole family hears about it on the day
+MONTH_DAYS = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+_last_bday = [0.0]
+
+
+@app.post("/api/birthday")
+@need
+def set_birthday():
+    b = request.get_json(silent=True) or {}
+    try:
+        month, day = int(b.get("month") or 0), int(b.get("day") or 0)
+    except (TypeError, ValueError):
+        return err("Pick a month and a day.")
+    if month == 0 and day == 0:
+        value = ""
+    elif 1 <= month <= 12 and 1 <= day <= MONTH_DAYS[month - 1]:
+        value = f"{month:02d}-{day:02d}"
+    else:
+        return err("That is not a real date.")
+    db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(birthday=value, bday_year=0))
+    push_family(g.m["family_id"], "member", {"id": g.m["id"], "birthday": value or None}, skip=g.m["id"])
+    return jsonify(birthday=value or None)
+
+
+def remind_birthdays():
+    """On someone's birthday (by their own clock) everyone hears about it, once a year. Runs from the event stream, at most every 5 minutes."""
+    now = time.time()
+    if now - _last_bday[0] < 300:
+        return
+    _last_bday[0] = now
+    for m in db.many(select(db.members).where(db.members.c.birthday != "")):
+        local = time.gmtime(now - (m["tz_offset"] or 0) * 60)
+        target = "02-28" if m["birthday"] == "02-29" and not calendar.isleap(local.tm_year) else m["birthday"]
+        if target != time.strftime("%m-%d", local) or m["bday_year"] == local.tm_year:
+            continue
+        db.run(update(db.members).where(db.members.c.id == m["id"]).values(bday_year=local.tm_year))
+        say(m["family_id"], m["id"], f"\U0001F382 It's {m['name']}'s birthday today!")
+        for x in family_members(m["family_id"]):
+            push(x["id"], "birthday", {"id": m["id"], "name": m["name"], "emoji": m["emoji"], "self": x["id"] == m["id"]})
+
+
 # ---------------------------------------------------------------- the event stream: the apps hold this open and it wakes them
 @app.get("/api/events")
 @need
@@ -1892,6 +2086,7 @@ def event_stream():
     while True:
         expire_calls()
         remind_plans()
+        remind_birthdays()
         rows = db.many(select(db.events).where(db.events.c.member_id == m["id"], db.events.c.id > after).order_by(db.events.c.id).limit(100))
         if rows or time.time() >= deadline:
             break

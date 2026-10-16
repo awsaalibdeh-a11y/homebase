@@ -29,7 +29,7 @@ const PERM_NAMES = { location: "location", trail: "trail", battery: "battery", m
 
 const S = { av: {}, token: localStorage.getItem("hb_token") || "", me: 0, family: null, members: [], places: [], ice: [], thread: 0, msgs: {}, unread: {}, items: [],
   map: null, markers: {}, circles: [], trail: null, adding: false, cursor: -1, running: false, geo: null, lastPos: null, lastSent: 0, focusedOnce: false,
-  online: navigator.onLine, open: 0, chatOpen: false, outbox: load("hb_out", []), savedAt: 0, tmp: -1, plans: [], polls: [], rewards: [], asks: [], bal: {}, board: [] };
+  online: navigator.onLine, open: 0, chatOpen: false, outbox: load("hb_out", []), savedAt: 0, tmp: -1, plans: [], polls: [], rewards: [], asks: [], bal: {}, board: [], streaks: {}, bonus: {} };
 
 /* ---------- helpers ---------- */
 async function api(path, method = "GET", body) {
@@ -129,6 +129,7 @@ async function startApp(fresh) {
   if (!loadSnap() && !fresh) { /* first run: nothing to show yet */ }
   try { await refreshFamily(); } catch (e) { if (!e.offline) return; }
   loadThread(0); refreshItems(); refreshChores(); refreshPlans(); refreshPolls(); refreshRewards(); refreshBoard(); flushOutbox();
+  fetch("/api/config").then(r => r.json()).then(c => { S.latest = c.version_code || 0; renderSide(); }).catch(() => { /* offline: no hint */ });
   const ans = location.hash.match(/answer=(\d+)/); if (ans) { history.replaceState(null, "", location.pathname); setTimeout(() => window.Calls && window.Calls.answerNow(+ans[1]), 600); }
   if (!S.running) { S.running = true; eventLoop(); }
   setInterval(() => { if (!document.hidden && S.token && S.online) refreshFamily().catch(() => {}); }, 12000);
@@ -224,9 +225,9 @@ function peopleHtml() {
   if (!S.openSet && isParent()) { const k = others.find(m => m.role === "child"); if (k) S.open = k.id; S.openSet = true; }      // a parent lands with the first child already open, so the controls are right there
   const rows = others.map(m => {
     const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
-    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>💬 Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>📞 Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>📍 Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>🧭 Trail</button></div>${m.role === "child" && isParent() ? `<div class="ctlwrap">${kidTiles(m)}</div>` : (m.role === "child" ? `<div class="ctlwrap"><p class="tabhelp">${esc(screenLine(m).replace(/<[^>]+>/g, "")) || ""}</p></div>` : "")}` : "";
+    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>💬 Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>📞 Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>📍 Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>🧭 Trail</button>${isParent() ? `<button class="btn sm" data-act="updnudge" data-id="${m.id}" title="Sends one message with the download link">📲 Ask to update</button>` : ""}</div>${m.role === "child" && isParent() ? `<div class="ctlwrap">${kidTiles(m)}</div>` : (m.role === "child" ? `<div class="ctlwrap"><p class="tabhelp">${esc(screenLine(m).replace(/<[^>]+>/g, "")) || ""}</p></div>` : "")}` : "";
     const chip = m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`;
-    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b>${statusChip(m)}<small>${esc(statusLine(m))}</small>${screenLine(m)}${deviceLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
+    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b>${statusChip(m)}<small>${esc(statusLine(m))}</small>${screenLine(m)}${deviceLine(m)}${oldAppLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
   }).join("");
   return rows || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press <b>Invite</b> at the top to add someone." : ""}</div>`;
 }
@@ -239,7 +240,7 @@ function placesHtml() {
 function jobsHtml() {
   const items = S.items.map(i => `<label class="item ${i.done ? "done" : ""}"><input type="checkbox" data-act="tick" data-id="${i.id}" ${i.done ? "checked" : ""}><span style="flex:1">${esc(i.text)}</span><button class="link" data-act="delitem" data-id="${i.id}" title="Delete" aria-label="Delete">✕</button></label>`).join("");
   const keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  return `${choresHtml()}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}
+  return `${choresHtml()}<div class="sechead"><h3>Family list</h3></div>${items || '<div class="empty">Nothing on the list.</div>'}${S.items.some(i => i.done) ? '<button class="link" data-act="clearitems" style="text-align:left">Clear ticked items</button>' : ""}
     <form id="itemForm" style="display:flex;gap:8px"><input class="field" id="itemIn" placeholder="Add to the list" maxlength="120" autocomplete="off" value="${esc(keep)}"><button class="btn" type="submit">Add</button></form>`;
 }
 
@@ -249,6 +250,7 @@ const statusChip = m => (m.status ? `<span class="stat">${esc(m.status.emoji || 
 function todayHtml() {
   const ms = S.members, live = ms.filter(isLive).length, home = ms.filter(m => m.home).length, st = me().status;
   const bits = [`${ms.length} ${ms.length === 1 ? "person" : "people"}`, live ? `${live} live on the map` : "nobody live right now"]; if (home) bits.push(`${home} at home`);
+  const bd = nextBirthday(); if (bd) bits.push(bd);
   const nx = (S.plans || [])[0]; if (nx) bits.push(`next: ${nx.emoji} ${esc(nx.title)}, ${whenTxt(nx.start).toLowerCase()}`);
   return `<section class="today"><div><b>${esc(S.family ? S.family.name : "Your family")}</b><small>${bits.join(" · ")}</small></div>
     <div class="tbtns"><button class="btn sm" data-act="status">${st ? esc(st.emoji || "💬") + " " + esc(st.text || "My status") : "🙂 What I'm up to"}</button><button class="btn sm" data-act="chatall">💬 Message the family</button><button class="btn sm" data-act="fit">📍 Show everyone</button></div></section>`;
@@ -278,19 +280,19 @@ function statusDialog() {
 
 /* the Family tab: people first (their controls open right inside each card), then three small rows */
 /* ---------- rewards: what chore points can buy ---------- */
-async function refreshRewards() { try { const d = await api("/api/rewards"); S.rewards = d.rewards; S.asks = d.requests; S.bal = d.balance; renderSide(); } catch (e) { /* keep what we have */ } }
+async function refreshRewards() { try { const d = await api("/api/rewards"); S.rewards = d.rewards; S.asks = d.requests; S.bal = d.balance; S.bonus = d.bonus || {}; if (d.streaks) S.streaks = d.streaks; renderSide(); } catch (e) { /* keep what we have */ } }
 const myBal = () => (S.bal || {})[S.me] || 0;
 const rewardsAlert = () => (isParent() ? (S.asks || []).filter(a => a.status === "pending").length : 0);
 function rewardsHtml() {
   const parent = isParent(), kids = S.members.filter(m => m.role === "child"), item = (a, mid, side) => `<div class="item"><span class="stemo">${esc(a.emoji)}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(a.title)}</b><small>${mid}</small></span>${side}</div>`;
-  const bal = `<div class="board">${parent ? kids.map(k => `<span class="chip">${esc(k.emoji)} ${esc(k.name)} · ${(S.bal || {})[k.id] || 0} points</span>`).join("") : `<span class="chip">⭐ You have ${myBal()} points</span>`}</div>`;
+  const bal = `<div class="board">${parent ? kids.map(k => `<span class="chip">${esc(k.emoji)} ${esc(k.name)} · ${(S.bal || {})[k.id] || 0} points${S.streaks[k.id] ? " · 🔥 " + S.streaks[k.id] : ""}${S.bonus[k.id] ? " · ⏱️ +" + S.bonus[k.id] + " min today" : ""}</span>`).join("") : `<span class="chip">⭐ You have ${myBal()} points</span>${S.streaks[S.me] ? `<span class="chip">🔥 ${S.streaks[S.me]} ${S.streaks[S.me] === 1 ? "day" : "days"} in a row</span>` : ""}${S.bonus[S.me] ? `<span class="chip">⏱️ +${S.bonus[S.me]} min screen time today</span>` : ""}`}</div>`;
   const pend = (S.asks || []).filter(a => a.status === "pending").map(a => parent
     ? item(a, `${esc((member(a.member) || {}).name || "Someone")} · ${a.cost} points`, `<button class="btn sm" data-rw="no" data-id="${a.id}">Not now</button><button class="btn sm solid" data-rw="yes" data-id="${a.id}">Yes</button>`)
     : item(a, `Waiting for a parent · ${a.cost} points held`, `<button class="btn sm" data-rw="cancel" data-id="${a.id}">Take back</button>`)).join("");
-  const rows = (S.rewards || []).map(r => item(r, `${r.cost} points`, parent ? `<button class="link" data-rw="del" data-id="${r.id}" title="Delete" aria-label="Delete reward">✕</button>`
+  const rows = (S.rewards || []).map(r => item(r, `${r.cost} points${r.minutes ? " · +" + r.minutes + " min screen time" : ""}`, parent ? `<button class="link" data-rw="del" data-id="${r.id}" title="Delete" aria-label="Delete reward">✕</button>`
     : `<button class="btn sm ${myBal() >= r.cost ? "solid" : ""}" data-rw="ask" data-id="${r.id}" ${myBal() >= r.cost ? "" : "disabled"}>${myBal() >= r.cost ? "Ask for it" : "Need " + (r.cost - myBal())}</button>`)).join("");
   const past = (S.asks || []).filter(a => a.status !== "pending").slice(0, 4).map(a => `<div class="item done"><span class="stemo">${esc(a.emoji)}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(a.title)}</b><small>${a.status === "approved" ? "✓ Yes" : "Not now"} · ${esc((member(a.member) || {}).name || "")}</small></span></div>`).join("");
-  const form = parent ? `<form id="rewardForm" class="choreform"><input class="field" name="title" placeholder="Add a reward, e.g. Pick the film" maxlength="60" autocomplete="off"><div class="choreopts"><input class="field" name="cost" type="number" min="1" max="1000" value="20" aria-label="Points it costs"><button class="btn" type="submit">Add</button></div></form>` : "";
+  const form = parent ? `<form id="rewardForm" class="choreform"><input class="field" name="title" placeholder="Add a reward, e.g. Pick the film" maxlength="60" autocomplete="off"><div class="choreopts"><input class="field" name="cost" type="number" min="1" max="1000" value="20" aria-label="Points it costs"><input class="field" name="minutes" type="number" min="0" max="240" placeholder="+ min" aria-label="Extra screen time in minutes (optional)" title="Extra screen time in minutes (optional). If a daily limit is set, a yes adds these minutes to today."><button class="btn" type="submit">Add</button></div></form>` : "";
   return bal + (pend ? `<div class="sechead"><h3>${parent ? "Waiting for you" : "Your requests"}</h3></div>${pend}` : "") + `<div class="sechead"><h3>Rewards</h3></div>`
     + (rows || `<div class="empty">${parent ? "Add something points can buy: a film pick, extra game time, an ice cream." : "No rewards yet. Ask a parent to add some."}</div>`) + (past ? `<div class="sechead"><h3>Recently</h3></div>${past}` : "") + form;
 }
@@ -330,6 +332,35 @@ function boardDialog(n) {
   });
 }
 
+/* ---------- birthdays: you choose the date, your family hears about it on the day ---------- */
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const bdayText = md => { const [m, d] = String(md).split("-").map(Number); return d + " " + MONTHS[m - 1]; };
+function daysToBday(md) {
+  const [m, d] = md.split("-").map(Number), now = new Date(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const leap = y => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0, on = y => (m === 2 && d === 29 && !leap(y) ? new Date(y, 1, 28) : new Date(y, m - 1, d));
+  let next = on(today.getFullYear()); if (next < today) next = on(today.getFullYear() + 1);
+  return Math.round((next - today) / 86400000);
+}
+function nextBirthday() {
+  const soon = S.members.filter(m => m.birthday).map(m => [m, daysToBday(m.birthday)]).filter(x => x[1] <= 30).sort((a, b) => a[1] - b[1])[0];
+  if (!soon) return "";
+  const [m, n] = soon; return n === 0 ? `🎂 it's ${esc(m.name)}'s birthday today!` : `🎂 ${esc(m.name)}'s birthday is ${n === 1 ? "tomorrow" : "in " + n + " days"}`;
+}
+function birthdayCardHtml() {
+  const b = me().birthday;
+  return `<section class="you"><div class="shareline"><div><b>🎂 My birthday</b><small>${b ? esc(bdayText(b)) + ". Your family hears about it on the day." : "Pick the day and your family hears about it. It is your choice."}</small></div><button class="btn sm" data-act="birthday">${b ? "Change" : "Set"}</button></div></section>`;
+}
+function birthdayDialog() {
+  const cur = me().birthday ? me().birthday.split("-").map(Number) : [new Date().getMonth() + 1, new Date().getDate()];
+  modal(`<h2>🎂 My birthday</h2><div class="sub">Your family sees it and hears about it on the day. You choose it, and you can remove it any time.</div>
+    <label class="l">Month and day</label><div style="display:flex;gap:8px"><select class="field" id="bdM">${MONTHS.map((n, i) => `<option value="${i + 1}" ${cur[0] === i + 1 ? "selected" : ""}>${n}</option>`).join("")}</select><select class="field" id="bdD" style="max-width:96px">${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}" ${cur[1] === i + 1 ? "selected" : ""}>${i + 1}</option>`).join("")}</select></div>
+    <div class="foot">${me().birthday ? '<button class="btn bad" id="bdRm" type="button">Remove it</button>' : ""}<button class="btn" id="bdNo" type="button">Cancel</button><button class="btn solid" id="bdSave" type="button">Save</button></div>`, root => {
+    const save = async (month, day) => { try { await api("/api/birthday", "POST", { month, day }); closeModal(); await refreshFamily(); toast(month ? "Saved" : "Removed"); } catch (e) { toast(e.message); } };
+    root.querySelector("#bdNo").onclick = closeModal; root.querySelector("#bdSave").onclick = () => save(+root.querySelector("#bdM").value, +root.querySelector("#bdD").value);
+    const rm = root.querySelector("#bdRm"); if (rm) rm.onclick = () => save(0, 0);
+  });
+}
+
 /* ---------- "can someone pick me up?" ---------- */
 async function pickupNow() {
   if (!S.lastPos && navigator.geolocation) { try { const p = await new Promise((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, { timeout: 4000 })); S.lastPos = { lat: p.coords.latitude, lng: p.coords.longitude }; } catch (e) { /* send without a place */ } }
@@ -358,13 +389,13 @@ function planHtml(p) {
 }
 function plansHtml() {
   const list = S.plans.slice(0, 5);
-  return `<div class="sechead"><h3>📅 Coming up</h3><button class="btn sm" data-act="addplan">＋ Plan</button></div>${list.map(planHtml).join("") || '<div class="empty">Nothing planned yet. Add a dinner, a match or a trip so everyone knows.</div>'}${S.plans.length > 5 ? `<p class="tabhelp">${S.plans.length - 5} more after these.</p>` : ""}`;
+  return `<div class="sechead"><h3>📅 Coming up</h3><span class="secbtns"><button class="btn sm" data-act="calendar">🗓️ Month</button><button class="btn sm" data-act="addplan">＋ Plan</button></span></div>${list.map(planHtml).join("") || '<div class="empty">Nothing planned yet. Add a dinner, a match or a trip so everyone knows.</div>'}${S.plans.length > 5 ? `<p class="tabhelp">${S.plans.length - 5} more after these.</p>` : ""}`;
 }
 async function refreshPlans() { try { S.plans = (await api("/api/plans")).plans; renderSide(); } catch (e) { /* keep the last list */ } }
 async function rsvp(id, answer) { try { const d = await api(`/api/plans/${id}/rsvp`, "POST", { answer }); S.plans = S.plans.map(p => p.id === id ? d.plan : p); renderSide(); } catch (e) { toast(e.message); } }
-function planDialog() {
+function planDialog(day) {
   const t = new Date(Date.now() + 3600e3), p2 = n => String(n).padStart(2, "0");
-  const dflt = `${t.getFullYear()}-${p2(t.getMonth() + 1)}-${p2(t.getDate())}`, tm = `${p2(t.getHours())}:00`;
+  const dflt = day || `${t.getFullYear()}-${p2(t.getMonth() + 1)}-${p2(t.getDate())}`, tm = day ? "18:00" : `${p2(t.getHours())}:00`;
   let emoji = "📅";
   modal(`<h2>Add a plan</h2><div class="sub">Everyone in the family sees it and can say if they are coming.</div>
     <label class="l">What is it?</label><input class="field" id="plT" maxlength="60" placeholder="For example: Dinner at Grandma's" autocomplete="off">
@@ -382,6 +413,49 @@ function planDialog() {
     };
   });
 }
+
+/* ---------- the family calendar: a month at a glance, past and future ---------- */
+const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], pad2 = n => String(n).padStart(2, "0");
+async function openCalendar(y, m, sel) {
+  const today = new Date(); y = y ?? today.getFullYear(); m = m ?? today.getMonth();
+  if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
+  const from = new Date(y, m, 1).getTime() / 1000, to = new Date(y, m + 1, 1).getTime() / 1000;
+  let plans = []; try { plans = (await api(`/api/plans?from=${from}&to=${to}`)).plans; } catch (e) { toast(e.message); }
+  const days = new Date(y, m + 1, 0).getDate(), lead = (new Date(y, m, 1).getDay() + 6) % 7, isNow = today.getFullYear() === y && today.getMonth() === m;
+  if (sel == null) sel = isNow ? today.getDate() : 1;
+  const byDay = {}, bdays = {};
+  plans.forEach(p => { const d = new Date(p.start * 1000).getDate(); (byDay[d] = byDay[d] || []).push(p); });
+  S.members.forEach(mm => { if (!mm.birthday) return; let [bm, bd] = mm.birthday.split("-").map(Number); if (bm !== m + 1) return; if (bd > days) bd = days; (bdays[bd] = bdays[bd] || []).push(mm); });
+  const cells = Array.from({ length: lead }, () => '<span class="cd off"></span>').concat(Array.from({ length: days }, (_, i) => {
+    const d = i + 1, n = (byDay[d] || []).length, b = (bdays[d] || []).length;
+    return `<button type="button" class="cd ${isNow && d === today.getDate() ? "today" : ""} ${d === sel ? "sel" : ""}" data-d="${d}" aria-label="${d} ${MONTHS[m]}${n ? ", " + n + (n === 1 ? " plan" : " plans") : ""}"><b>${d}</b><i>${b ? "🎂" : ""}${n ? "●".repeat(Math.min(n, 3)) : ""}</i></button>`;
+  })).join("");
+  const list = (byDay[sel] || []).map(p => `<div class="plan"><div class="pl-top"><span class="pl-e">${esc(p.emoji)}</span><div class="pl-m"><b>${esc(p.title)}</b><small>${clock(p.start)}${p.note ? " · " + esc(p.note) : ""}</small></div></div><div class="pl-who">${p.in.length ? "👍 " + esc(p.in.map(nameOf).join(", ")) : "Nobody has said yes yet"}${p.out.length ? ` · can't: ${esc(p.out.map(nameOf).join(", "))}` : ""}</div><div class="pl-btns"><button class="btn sm ${p.mine === "in" ? "sel" : ""}" data-cr="in" data-id="${p.id}">${p.mine === "in" ? "✓ I'm in" : "I'm in"}</button><button class="btn sm ${p.mine === "out" ? "sel" : ""}" data-cr="out" data-id="${p.id}">${p.mine === "out" ? "✓ Can't" : "Can't"}</button></div></div>`).join("")
+    + (bdays[sel] || []).map(mm => `<div class="plan"><div class="pl-top"><span class="pl-e">🎂</span><div class="pl-m"><b>${esc(mm.name)}'s birthday</b></div></div></div>`).join("");
+  modal(`<div class="calhead"><button type="button" class="btn sm" data-nav="-1" aria-label="Previous month">‹</button><h2>${MONTHS[m]} ${y}</h2><button type="button" class="btn sm" data-nav="1" aria-label="Next month">›</button></div>
+    <div class="cal">${DOW.map(d => `<span class="cw">${d}</span>`).join("")}${cells}</div>
+    <div class="callist"><div class="msec">${sel} ${MONTHS[m]}</div>${list || '<div class="empty">Nothing on this day.</div>'}</div>
+    <button type="button" class="link" id="calIcs" style="margin-top:8px;text-align:left" title="Downloads a file that Google, Apple and Outlook calendar understand">⬇ Add the family calendar to Google, Apple or Outlook</button>
+    <div class="foot"><button class="btn" id="calX" type="button">Close</button><button class="btn solid" id="calAdd" type="button">＋ Plan on this day</button></div>`, root => {
+    root.querySelector("#calX").onclick = closeModal;
+    root.querySelector("#calIcs").onclick = async () => {
+      try {
+        const r = await fetch("/api/calendar.ics", { headers: { Authorization: "Bearer " + S.token } });
+        if (!r.ok) throw new Error("Could not make the calendar file.");
+        const url = URL.createObjectURL(await r.blob()), a = document.createElement("a"); a.href = url; a.download = "homebase-family.ics"; document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000); toast("Saved. Open the file to add it to your calendar.", 5000);
+      } catch (e) { toast(e.message); }
+    };
+    root.querySelectorAll("[data-nav]").forEach(b => b.onclick = () => openCalendar(y, m + +b.dataset.nav));
+    root.querySelectorAll("[data-d]").forEach(b => b.onclick = () => openCalendar(y, m, +b.dataset.d));
+    root.querySelectorAll("[data-cr]").forEach(b => b.onclick = async () => { const id = +b.dataset.id, was = plans.find(p => p.id === id); try { await api(`/api/plans/${id}/rsvp`, "POST", { answer: was && was.mine === b.dataset.cr ? "" : b.dataset.cr }); refreshPlans(); openCalendar(y, m, sel); } catch (e) { toast(e.message); } });
+    root.querySelector("#calAdd").onclick = () => { closeModal(); planDialog(`${y}-${pad2(m + 1)}-${pad2(sel)}`); };
+  });
+}
+
+/* ---------- "please update Homebase": one message with the link (a parent can send one every half hour, never a pile of pop-ups) ---------- */
+async function askUpdate(id) { const m = member(id); try { await api(`/api/members/${id}/update-nudge`, "POST"); toast(`Asked ${m ? m.name : "them"} to update`); } catch (e) { toast(e.message); } }
+const oldAppLine = m => (isParent() && m.id !== S.me && m.app_version && S.latest && m.app_version < S.latest ? '<small class="oldapp">📲 Android app is out of date</small>' : "");
 
 /* ---------- polls: a question for the family ---------- */
 const pollAlert = () => S.polls.filter(p => !p.closed && p.mine === null).length;
@@ -443,7 +517,7 @@ function myControlsHtml() {
 
 function renderSide() {
   const t = curTab(), keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  const body = t === "me" ? youCard() + statusCardHtml() + pickupCardHtml() + myControlsHtml() : familyHtml();
+  const body = t === "me" ? youCard() + statusCardHtml() + pickupCardHtml() + birthdayCardHtml() + myControlsHtml() : familyHtml();
   const scroll = $("#side .tabbody") ? $("#side .tabbody").scrollTop : 0;
   $("#side").innerHTML = tabsBar() + `<div class="tabbody">${body}</div>`;
   const bd = $("#side .tabbody"); if (bd) bd.scrollTop = scroll;
@@ -728,9 +802,10 @@ function handleEvent(ev) {
     case "rewards": refreshRewards(); break;
     case "reward": {
       refreshRewards();
-      const t = p.status === "pending" ? [`🎁 ${p.name} asked for: ${p.title} (${p.cost} points)`, p.name + " asked for a reward"] : p.status === "approved" ? [`🎁 ${p.name} said yes: ${p.title}`, "Reward approved"] : [`${p.name} said not now to: ${p.title}`, "Reward not now"];
+      const t = p.status === "pending" ? [`🎁 ${p.name} asked for: ${p.title} (${p.cost} points)`, p.name + " asked for a reward"] : p.status === "approved" ? [`🎁 ${p.name} said yes: ${p.title}${p.minutes ? " (+" + p.minutes + " min screen time today)" : ""}`, "Reward approved"] : [`${p.name} said not now to: ${p.title}`, "Reward not now"];
       toast(t[0], 7000); notify(t[1], `${p.title} · ${p.cost} points`, { tag: "reward-" + p.id + p.status, force: false }); break; }
     case "board": refreshBoard(); break;
+    case "birthday": { refreshFamily(); const t = p.self ? `🎂 Happy birthday, ${p.name}!` : `🎂 It's ${p.name}'s birthday today!`; toast(t, 9000); notify(t, p.self ? "Your family is thinking of you." : "Send them some love.", { tag: "bday-" + p.id, force: false }); break; }
     case "plan": refreshPlans(); if (p.new) { toast(`${p.emoji || "📅"} ${p.name} planned: ${p.title}`, 5000); notify(p.name + " added a plan", `${p.title} · ${whenTxt(p.start)}`, { tag: "plan-" + p.id, force: false }); } break;
     case "plan_soon": toast(`${p.emoji || "📅"} ${p.title} starts soon · ${clock(p.start)}`, 9000); notify("Starting soon", `${p.title} · ${clock(p.start)}`, { tag: "plan-soon-" + p.id, force: true }); break;
     case "poll": refreshPolls(); if (p.new) { toast(`🗳️ ${p.name} asks: ${p.question}`, 6000); notify(p.name + " asks the family", p.question, { tag: "poll-" + p.id, force: false }); } break;
@@ -794,8 +869,12 @@ function initChrome() {
     else if (act === "more") { S.more = S.more || {}; S.more[id] = !S.more[id]; renderSide(); }
     else if (act === "delplace") { if (confirm("Remove this place?")) { await api("/api/places/" + id, "DELETE").catch(err => toast(err.message)); refreshFamily(); } }
     else if (act === "delitem") { await api("/api/list/" + id, "DELETE").catch(err => toast(err.message)); refreshItems(); }
+    else if (act === "clearitems") { await api("/api/list/clear", "POST").catch(err => toast(err.message)); refreshItems(); }
     else if (act === "pickup") pickupNow();
+    else if (act === "birthday") birthdayDialog();
     else if (act === "addplan") planDialog();
+    else if (act === "calendar") openCalendar();
+    else if (act === "updnudge") askUpdate(id);
     else if (act === "rsvp") rsvp(id, el.dataset.a);
     else if (act === "delplan") { if (confirm("Delete this plan?")) { await api("/api/plans/" + id, "DELETE").catch(err => toast(err.message)); refreshPlans(); } }
     else if (act === "addpoll") pollDialog();
@@ -820,12 +899,12 @@ function initChrome() {
   $("#side").addEventListener("submit", async e => {
     if (e.target.id !== "rewardForm") return; e.preventDefault();
     const f = e.target, title = f.title.value.trim(); if (!title) return;
-    try { await api("/api/rewards", "POST", { title, cost: +f.cost.value || 0 }); f.title.value = ""; toast("Reward added"); refreshRewards(); } catch (err) { toast(err.message); }
+    try { await api("/api/rewards", "POST", { title, cost: +f.cost.value || 0, minutes: +f.minutes.value || 0 }); f.title.value = ""; toast("Reward added"); refreshRewards(); } catch (err) { toast(err.message); }
   });
   $("#side").addEventListener("submit", async e => {
     if (e.target.id !== "choreForm") return; e.preventDefault();
     const f = e.target, title = f.title.value.trim(); if (!title) return;
-    try { await api("/api/chores", "POST", { title, points: +f.points.value || 0, to: +f.to.value || 0 }); f.title.value = ""; toast("Job added"); refreshChores(); } catch (err) { toast(err.message); }
+    try { await api("/api/chores", "POST", { title, points: +f.points.value || 0, to: +f.to.value || 0, repeat: f.repeat.value }); f.title.value = ""; toast("Job added"); refreshChores(); } catch (err) { toast(err.message); }
   });
   $("#side").onchange = async e => { const el = e.target.closest('[data-act="tick"]'); if (el) { await api("/api/list/" + el.dataset.id, "POST", { done: el.checked }).catch(err => toast(err.message)); refreshItems(); } };
   $("#side").onsubmit = async e => { if (e.target.id !== "itemForm") return; e.preventDefault(); const v = $("#itemIn").value.trim(); if (!v) return; try { await api("/api/list", "POST", { text: v }); refreshItems(); } catch (err) { toast(err.message); } };
@@ -958,7 +1037,7 @@ async function rulesDialog() {
 
 
 /* ---------- jobs: a parent sets them, a child ticks them off, a parent approves them for points ---------- */
-async function refreshChores() { try { const d = await api("/api/chores"); S.chores = d.chores; S.chorePts = d.points; S.weekPts = d.week; renderSide(); } catch (e) { /* offline: keep what we have */ } }
+async function refreshChores() { try { const d = await api("/api/chores"); S.chores = d.chores; S.chorePts = d.points; S.weekPts = d.week; S.streaks = d.streaks || {}; renderSide(); } catch (e) { /* offline: keep what we have */ } }
 function choresHtml() {
   const kids = S.members.filter(m => m.role === "child"), parent = isParent(), mine = me();
   const row = c => {
@@ -966,11 +1045,11 @@ function choresHtml() {
     let act = "";
     if (c.status === "open" && mine.role === "child" && forMe) act = `<button class="btn sm solid" data-chore="done" data-id="${c.id}">Done</button>`;
     else if (c.status === "done" && parent) act = `<button class="btn sm" data-chore="redo" data-id="${c.id}">Redo</button><button class="btn sm solid" data-chore="ok" data-id="${c.id}">Approve</button>`;
-    const state = c.status === "done" ? `<small>${esc(who ? who.name : "Someone")} finished it${parent ? "" : ". Waiting for a parent"}</small>` : c.status === "approved" ? `<small>✓ ${esc(who ? who.name : "")} · +${c.points}</small>` : `<small>${to ? "For " + esc(to.name) : "Any child"} · ${c.points} points</small>`;
+    const state = c.status === "done" ? `<small>${esc(who ? who.name : "Someone")} finished it${parent ? "" : ". Waiting for a parent"}</small>` : c.status === "approved" ? `<small>✓ ${esc(who ? who.name : "")} · +${c.points}</small>` : `<small>${c.opens_at > Date.now() / 1000 ? "Back " + whenTxt(c.opens_at) : (to ? "For " + esc(to.name) : "Any child")} · ${c.points} points${c.repeats ? " · 🔁 " + (c.repeats === "weekly" ? "every week" : "every day") : ""}</small>`;
     return `<div class="item ${c.status === "approved" ? "done" : ""}"><span class="stemo">${esc(c.emoji)}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(c.title)}</b>${state}</span>${act}${parent && c.status !== "approved" ? `<button class="link" data-chore="del" data-id="${c.id}" title="Delete" aria-label="Delete job">✕</button>` : ""}</div>`;
   };
-  const board = kids.length ? `<div class="board">${kids.map(k => `<span class="chip">${esc(k.emoji)} ${esc(k.name)} · ${S.weekPts[k.id] || 0} this week · ${S.chorePts[k.id] || 0} total</span>`).join("")}</div>` : "";
-  const form = parent ? `<form id="choreForm" class="choreform"><input class="field" name="title" placeholder="Add a job, e.g. Take out the bins" maxlength="80" autocomplete="off"><div class="choreopts"><input class="field" name="points" type="number" min="0" max="100" value="5" aria-label="Points"><select class="field" name="to" aria-label="Who is it for"><option value="0">Any child</option>${kids.map(k => `<option value="${k.id}">${esc(k.name)}</option>`).join("")}</select><button class="btn" type="submit">Add</button></div></form>` : "";
+  const board = kids.length ? `<div class="board">${kids.map(k => `<span class="chip">${esc(k.emoji)} ${esc(k.name)} · ${S.weekPts[k.id] || 0} this week · ${S.chorePts[k.id] || 0} total${S.streaks[k.id] ? " · 🔥 " + S.streaks[k.id] : ""}</span>`).join("")}</div>` : "";
+  const form = parent ? `<form id="choreForm" class="choreform"><input class="field" name="title" placeholder="Add a job, e.g. Take out the bins" maxlength="80" autocomplete="off"><div class="choreopts"><input class="field" name="points" type="number" min="0" max="100" value="5" aria-label="Points"><select class="field" name="to" aria-label="Who is it for"><option value="0">Any child</option>${kids.map(k => `<option value="${k.id}">${esc(k.name)}</option>`).join("")}</select><select class="field" name="repeat" aria-label="How often"><option value="">Once</option><option value="daily">Every day</option><option value="weekly">Every week</option></select><button class="btn" type="submit">Add</button></div></form>` : "";
   return board + (S.chores.map(row).join("") || `<div class="empty">${parent ? "No jobs yet. Add one below." : "No jobs right now."}</div>`) + form;
 }
 

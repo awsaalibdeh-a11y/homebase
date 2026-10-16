@@ -189,7 +189,7 @@ static class Native
 
 class App : ApplicationContext
 {
-    public const int Build = 20;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
+    public const int Build = 21;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -490,7 +490,18 @@ class App : ApplicationContext
     {
         int st;
         string r = Http("GET", "/api/rewards", null, out st);
-        if (st == 200) { var d = Json.Deserialize<Dictionary<string, object>>(r); pointsText = d.ContainsKey("mine") && d["mine"] != null ? "⭐ " + Convert.ToInt32(d["mine"]) + " points to spend" : ""; }
+        if (st == 200)
+        {
+            var d = Json.Deserialize<Dictionary<string, object>>(r); pointsText = "";
+            if (d.ContainsKey("mine") && d["mine"] != null)
+            {
+                pointsText = "\u2B50 " + Convert.ToInt32(d["mine"]) + " points to spend";
+                int streak = d.ContainsKey("my_streak") && d["my_streak"] != null ? Convert.ToInt32(d["my_streak"]) : 0;
+                int extra = d.ContainsKey("my_bonus") && d["my_bonus"] != null ? Convert.ToInt32(d["my_bonus"]) : 0;
+                if (streak > 0) pointsText += "   \U0001F525 " + streak + (streak == 1 ? " day" : " days");
+                if (extra > 0) pointsText += "   \u23F1 +" + extra + " min today";
+            }
+        }
         string p = Http("GET", "/api/plans", null, out st);
         if (st == 200)
         {
@@ -671,11 +682,17 @@ class App : ApplicationContext
                         }
                         else if (type == "plan_soon" && pl != null) Say("\U0001F4C5 Starting soon", Str(pl, "title") + ", " + WhenText(Num(pl, "start")));
                         else if (type == "plan" && pl != null && pl.ContainsKey("new")) { Say("\U0001F4C5 " + Str(pl, "name") + " planned something", Str(pl, "title") + ", " + WhenText(Num(pl, "start"))); lastFamily = DateTime.MinValue; }
+                        else if (type == "birthday" && pl != null)
+                        {
+                            bool mine = pl.ContainsKey("self") && Convert.ToBoolean(pl["self"]);
+                            Say("\U0001F382 " + (mine ? "Happy birthday, " + Str(pl, "name") + "!" : "It's " + Str(pl, "name") + "'s birthday"), mine ? "Your family is thinking of you." : "Send them some love today.");
+                        }
                         else if (type == "poll" && pl != null && pl.ContainsKey("new")) Say("\U0001F5F3 " + Str(pl, "name") + " asks the family", Str(pl, "question"));
                         else if (type == "reward" && pl != null)
                         {
                             string rs = Str(pl, "status"), rn = Str(pl, "name"), rt = Str(pl, "title");
-                            if (rs == "approved") Important("\U0001F381 " + rn + " said yes", rt, 12);
+                            int extra = (int)Num(pl, "minutes");
+                            if (rs == "approved") Important("\U0001F381 " + rn + " said yes", rt + (extra > 0 ? " (+" + extra + " min screen time today)" : ""), 12);
                             else if (rs == "declined") Say(rn + " said not now", rt);
                             else Say("\U0001F381 " + rn + " asked for a reward", rt + " (" + Str(pl, "cost") + " points)");
                             lastFamily = DateTime.MinValue;                                       // points changed: refresh the tray readout

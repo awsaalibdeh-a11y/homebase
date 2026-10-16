@@ -193,7 +193,7 @@ body { font-feature-settings: "tnum" 1, "cv11" 1; }
 
 /* jobs and the weekly summary */
 .board { display: flex; flex-wrap: wrap; gap: 6px; } .item .stemo { font-size: 20px; } .item small { display: block; }
-.choreform { display: grid; gap: 8px; } .choreopts { display: flex; gap: 8px; } .choreopts input[type=number] { width: 78px; flex: none; } .choreopts select { flex: 1; min-width: 0; }
+.choreform { display: grid; gap: 8px; } .choreopts { display: flex; gap: 8px; flex-wrap: wrap; } .choreopts input[name=minutes] { width: 84px; flex: none; } .choreopts input[type=number] { width: 78px; flex: none; } .choreopts select { flex: 1; min-width: 104px; }
 .weekcard { background: var(--surface2); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; margin: 12px 0 4px; display: grid; gap: 10px; }
 .weekgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; } .weekgrid span { display: block; font-size: 22px; font-weight: 700; letter-spacing: -.02em; } .weekgrid small { display: block; }
 
@@ -320,3 +320,15 @@ textarea.field { resize: vertical; min-height: 96px; font-family: inherit; line-
 .today { background: var(--surface); border: 1px solid var(--line); box-shadow: 0 1px 0 rgba(20,20,26,.03); }
 .opt i { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 #map:not(.dark) .leaflet-tile { filter: saturate(.55) brightness(1.04) contrast(.97); }
+
+/* v6: the calendar, and the "ask to update" hint */
+.secbtns { display: inline-flex; gap: 6px; }
+.calhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; } .calhead h2 { font-size: 18px; letter-spacing: -.01em; }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cw { text-align: center; font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: .04em; padding: 4px 0; }
+.cd { aspect-ratio: 1; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; border-radius: 12px; background: var(--surface2); border: 1px solid transparent; font-size: 14px; color: var(--ink); } .cd.off { background: none; }
+.cd b { font-weight: 600; } .cd i { font-style: normal; font-size: 9px; line-height: 1; color: var(--accent); min-height: 10px; letter-spacing: 1px; }
+.cd.today { border-color: var(--accent); } .cd.sel { background: var(--accent); color: var(--accent-ink); } .cd.sel i { color: var(--accent-ink); }
+.callist { margin-top: 12px; display: grid; gap: 8px; max-height: 240px; overflow-y: auto; }
+.oldapp { color: var(--warn) !important; font-weight: 600; }
+@media (max-width: 560px) { .cd { min-height: 40px; font-size: 13px; } }
