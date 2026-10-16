@@ -2293,7 +2293,7 @@ def send_group_message(gid):
 
 # ---------------------------------------------------------------- the family meal plan, and apps (like Platter) that put recipes on it
 SLOTS = ("breakfast", "lunch", "dinner", "snack")
-EXT_ORIGINS = [o.strip() for o in os.environ.get("EXT_ORIGINS", "https://platter-87b0.onrender.com,http://127.0.0.1:5075,http://localhost:5075,https://scout-15t6.onrender.com,http://127.0.0.1:5055,http://localhost:5055").split(",") if o.strip()]
+EXT_ORIGINS = [o.strip() for o in os.environ.get("EXT_ORIGINS", "https://platter-87b0.onrender.com,http://127.0.0.1:5075,http://localhost:5075,https://scout-15t6.onrender.com,http://127.0.0.1:5055,http://localhost:5055,https://alibi-d9tn.onrender.com,http://127.0.0.1:5085,http://localhost:5085").split(",") if o.strip()]
 APP_SCOPES = {"Platter": "meals", "Scout": "plans,places,share"}          # what each known app may do; anything else gets the meal plan only
 
 
@@ -2651,6 +2651,60 @@ def ext_share():
     return jsonify(id=mid)
 
 
+# ---------------------------------------------------------------- family games: start one from the family chat, and it tells the chat how to join
+ALIBI_URL = os.environ.get("ALIBI_URL", "https://alibi-d9tn.onrender.com").rstrip("/")
+FAMILY_GAMES = {"alibi": {"name": "Alibi", "emoji": "\U0001F575\ufe0f", "url": ALIBI_URL}}       # the only places a game message may point to
+GAME_LINK_LIFE = 2 * 3600
+
+
+def site_origin():
+    scheme = (request.headers.get("X-Forwarded-Proto") or request.scheme).split(",")[0].strip()
+    return f"{scheme}://{request.host}"
+
+
+@app.post("/api/games/start")
+@need
+def start_family_game():
+    """Someone taps the game button in the chat. They get a link that opens the game, and the game uses its one-time key to post the join code."""
+    game_id = str((request.get_json(silent=True) or {}).get("game") or "").lower()
+    game = FAMILY_GAMES.get(game_id)
+    if not game:
+        return err("No such game.")
+    if limited(f"game:{g.m['id']}", 10):
+        return err("Slow down a little.", 429)
+    token = "hbg_" + secrets.token_urlsafe(18)
+    now = time.time()
+    db.run(insert(db.game_links).values(family_id=g.m["family_id"], member_id=g.m["id"], token_hash=db.hash_token(token), game=game_id, created=now, expires=now + GAME_LINK_LIFE, used=False))
+    fam = db.one(select(db.families).where(db.families.c.id == g.m["family_id"]))
+    payload = {"b": site_origin(), "t": token, "n": g.m["name"], "f": fam["name"] if fam else ""}
+    code = _b64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
+    return jsonify(url=f"{game['url']}/#family={code}", game=game["name"], expires=now + GAME_LINK_LIFE)
+
+
+@app.post("/api/ext/game")
+def ext_game_started():
+    """The game says: I am open, here is my code. Works once per link, only for the family that made it, and the join address is built here, never taken from the caller."""
+    b = request.get_json(silent=True) or {}
+    token, code = str(b.get("token") or ""), str(b.get("code") or "").upper()
+    if not token.startswith("hbg_") or not re.fullmatch(r"[A-Z0-9]{4}", code):
+        return err("This game link is not valid.")
+    t = db.game_links.c
+    row = db.one(select(db.game_links).where(t.token_hash == db.hash_token(token)))
+    if not row or row["used"] or row["expires"] < time.time():
+        return err("This game link has run out. Start the game again from Homebase.", 401)
+    member = db.one(select(db.members).where(db.members.c.id == row["member_id"], db.members.c.family_id == row["family_id"]))
+    game = FAMILY_GAMES.get(row["game"])
+    if not member or not game:
+        return err("This game link is not valid any more.", 401)
+    db.run(update(db.game_links).where(t.id == row["id"]).values(used=True))
+    body = f"{game['emoji']} {member['name']} started a game of {game['name']}. Join with code {code}: {game['url']}/#join/{code}"
+    mid = say(row["family_id"], 0, body, kind="game")
+    msg = db.one(select(db.messages).where(db.messages.c.id == mid))
+    for m in family_members(row["family_id"]):
+        push(m["id"], "message", {**msg_view(msg), "name": game["name"], "emoji": game["emoji"], "quiet": False, "urgent": False})
+    return jsonify(ok=True)
+
+
 # ---------------------------------------------------------------- web push: alerts on an iPhone (or any browser) while the app is closed
 PUSH_SUB = os.environ.get("VAPID_SUB", "https://homebase-family.onrender.com")
 PUSH_SYNC = False                                                       # tests send straight away instead of on a thread
@@ -2693,6 +2747,8 @@ def web_note(kind, p):
             return {"title": f"\u2764\ufe0f {name}", "body": "is thinking of you", "tag": f"msg-{p.get('from')}"}
         if mk == "gif":
             return {"title": name, "body": "\U0001F39E\ufe0f sent a GIF", "tag": f"msg-{p.get('from')}"}
+        if mk == "game":
+            return {"title": f"\U0001F3AE {name}", "body": p.get("body") or "A family game has started. Open Homebase to join.", "tag": "game"}
         return {"title": name, "body": p.get("body") or "", "tag": f"msg-{p.get('from')}"}
     if kind == "call":
         return {"title": f"\U0001F4DE {name} is calling", "body": "Open Homebase to answer", "tag": f"call-{p.get('id')}", "urgent": True}

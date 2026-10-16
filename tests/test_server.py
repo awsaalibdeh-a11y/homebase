@@ -1881,6 +1881,95 @@ class ScoutLink(Base):
         self.assertEqual(self.ext(made["key"], "post", "/api/ext/plans", ext_id="p:1", title="No", start=self.start()).status_code, 403)
 
 
+class FamilyGames(Base):
+    """Start Alibi from the family chat: a one-time link opens the game, and the game posts its join code back, once."""
+    ALIBI = "http://127.0.0.1:5085"
+
+    def start(self, who=None, game="alibi"):
+        return self.post(who or self.kid, "/api/games/start", game=game)
+
+    def payload(self, url):
+        frag = url.split("#family=")[1]
+        return json.loads(base64.urlsafe_b64decode(frag + "=" * (-len(frag) % 4)))
+
+    def announce(self, token, code="ABCD", origin=None, **extra):
+        headers = {"Origin": origin} if origin else {}
+        return self.c.post("/api/ext/game", json={"token": token, "code": code, **extra}, headers=headers)
+
+    def test_anyone_in_the_family_can_start_one_and_gets_a_link_to_the_game(self):
+        r = self.start()
+        self.assertEqual(r.status_code, 200)
+        d = r.get_json()
+        self.assertTrue(d["url"].startswith(server.ALIBI_URL + "/#family="), d["url"])
+        p = self.payload(d["url"])
+        self.assertEqual((p["n"], p["f"]), ("Sam", "The Vales"))
+        self.assertTrue(p["t"].startswith("hbg_") and len(p["t"]) > 20)
+        self.assertTrue(p["b"].startswith("http"), "the game is told where to answer")
+        self.assertNotIn(p["t"], json.dumps(db.one(db.select(db.game_links))), "only a fingerprint of the key is kept")
+
+    def test_only_the_known_game_and_only_a_signed_in_person(self):
+        self.assertEqual(self.start(game="evilgame").status_code, 400)
+        self.assertEqual(self.start(game="").status_code, 400)
+        self.assertEqual(self.c.post("/api/games/start", json={"game": "alibi"}).status_code, 401)
+
+    def test_the_game_posts_its_code_and_the_family_chat_gets_a_join_message(self):
+        token = self.payload(self.start().get_json()["url"])["t"]
+        r = self.announce(token, "k7p2", origin=self.ALIBI)
+        self.assertEqual((r.status_code, r.headers.get("Access-Control-Allow-Origin")), (200, self.ALIBI))
+        msgs = [m for m in self.get(self.mum, "/api/messages").get_json()["messages"] if m["kind"] == "game"]
+        self.assertEqual([m["body"] for m in msgs], [f"🕵️ Sam started a game of Alibi. Join with code K7P2: {server.ALIBI_URL}/#join/K7P2"])
+        got = [e["payload"] for e in self.events(self.mum) if e["type"] == "message" and e["payload"]["kind"] == "game"]
+        self.assertEqual((len(got), got[0]["name"]), (1, "Alibi"))
+        note = server.web_note("message", got[0])
+        self.assertTrue(note and "Join with code K7P2" in note["body"])
+
+    def test_the_link_works_once_and_runs_out(self):
+        token = self.payload(self.start().get_json()["url"])["t"]
+        self.assertEqual(self.announce(token).status_code, 200)
+        self.assertEqual(self.announce(token).status_code, 401, "once")
+        again = self.payload(self.start().get_json()["url"])["t"]
+        db.run(db.update(db.game_links).where(db.game_links.c.token_hash == db.hash_token(again)).values(expires=time.time() - 1))
+        self.assertEqual(self.announce(again).status_code, 401, "ran out")
+        self.assertEqual(len([m for m in self.get(self.mum, "/api/messages").get_json()["messages"] if m["kind"] == "game"]), 1)
+
+    def test_a_bad_code_or_key_posts_nothing_and_does_not_use_up_the_link(self):
+        token = self.payload(self.start().get_json()["url"])["t"]
+        for bad in ("", "AB", "ABCDE", "AB!D", "<b>1", None):
+            self.assertEqual(self.announce(token, bad).status_code, 400, bad)
+        for wrong in ("hbg_wrong", "", "nope"):
+            self.assertIn(self.announce(wrong).status_code, (400, 401), wrong)
+        self.assertEqual(self.get(self.mum, "/api/messages").get_json()["messages"][-1]["kind"] != "game", True)
+        self.assertEqual(self.announce(token).status_code, 200, "the link still works")
+
+    def test_a_game_can_only_post_to_the_family_that_made_the_link(self):
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        token = self.payload(self.start(who=zed).get_json()["url"])["t"]
+        self.announce(token, "ZZZZ")
+        self.assertEqual([m for m in self.get(self.mum, "/api/messages").get_json()["messages"] if m["kind"] == "game"], [])
+        self.assertEqual(len([m for m in self.get(zed, "/api/messages").get_json()["messages"] if m["kind"] == "game"]), 1)
+
+    def test_nobody_can_forge_a_game_message_or_point_it_somewhere_else(self):
+        forged = self.post(self.kid, "/api/messages", kind="game", body="Join: https://evil.example.com")
+        self.assertEqual(forged.get_json()["message"]["kind"], "text", "a person's message can never be a game message, so it never gets a Join button")
+        token = self.payload(self.start().get_json()["url"])["t"]
+        self.announce(token, "ABCD", url="https://evil.example.com", game="evil", name="Boss")
+        body = [m for m in self.get(self.mum, "/api/messages").get_json()["messages"] if m["kind"] == "game"][0]["body"]
+        self.assertNotIn("evil", body)
+        self.assertTrue(body.endswith(f"{server.ALIBI_URL}/#join/ABCD"))
+
+    def test_the_browser_check_and_the_rate_limit(self):
+        pre = self.c.options("/api/ext/game", headers={"Origin": self.ALIBI, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type"})
+        self.assertIn(pre.status_code, (200, 204))
+        self.assertEqual(pre.headers["Access-Control-Allow-Origin"], self.ALIBI)
+        token = self.payload(self.start().get_json()["url"])["t"]
+        evil = self.announce(token, "ABCD", origin="https://evil.example.com")
+        self.assertNotIn("Access-Control-Allow-Origin", evil.headers)
+        server._hits.clear()
+        codes = [self.start().status_code for _ in range(12)]
+        self.assertEqual(codes[:10], [200] * 10)
+        self.assertEqual(codes[10:], [429, 429])
+
+
 class GifMessages(Base):
     def send(self, body, who=None):
         return self.post(who or self.kid, "/api/messages", kind="gif", body=body)

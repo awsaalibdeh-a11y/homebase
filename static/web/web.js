@@ -680,6 +680,7 @@ function bubble(m) {
   if (m.kind === "checkin") { cls = "loc"; body = "✅ " + esc(m.body || "I'm OK") + (m.lat != null ? " · 📍 tap to see where" : ""); }
   if (m.kind === "late") body = "⏰ " + esc(m.body);
   if (m.kind === "sos") { cls = "sos loc"; body = "🆘 <b>" + esc(m.body || "I need help") + "</b>" + (m.lat != null ? " · 📍 tap to see where" : ""); }
+  if (m.kind === "game") { cls = "gamemsg"; const gm = /code ([A-Z0-9]{4}): (\S+)$/.exec(m.body || ""), href = gm ? gameJoinHref(gm[2]) : ""; body = esc((m.body || "").replace(/ Join with code .*$/, "")) + (href ? `<div class="gjoin"><b>Code ${gm[1]}</b><a class="btn solid sm" href="${esc(href)}" target="_blank" rel="noopener">Join the game</a></div>` : ""); }
   if (m.kind === "gif") { cls = "gifb"; body = `<img class="gif" src="${esc(m.body)}" alt="GIF" loading="lazy">`; }
   if (m.kind === "pickup") { cls = "loc"; body = "🚗 <b>" + esc(m.body || "Can someone pick me up?") + "</b>" + (m.lat != null ? " · 📍 tap to see where" : "") + (mine || m.pending ? "" : `<div class="pk">${[5, 10, 20, 30].map(n => `<button type="button" data-pk="${n}">On my way · ${n} min</button>`).join("")}</div>`); }
   const rx = Object.entries(m.reactions || {}).map(([e, ids]) => `<button type="button" data-rx="${e}" class="${ids.includes(S.me) ? "mine" : ""}" aria-label="${e} ${ids.length}">${e} ${ids.length}</button>`).join("");

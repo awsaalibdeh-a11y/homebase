@@ -3,6 +3,32 @@
 Object.assign(S, { meals: [], groups: [], requests: [], links: [], feed: [], stickers: null, cal: null, gdlg: null, gtimer: 0 });
 const PLATTER_URL = localStorage.getItem("hb_platter") || "https://platter-87b0.onrender.com";
 const SCOUT_URL = localStorage.getItem("hb_scout") || "https://scout-15t6.onrender.com";
+const ALIBI_URL = localStorage.getItem("hb_alibi") || "https://alibi-d9tn.onrender.com";
+const FAMILY_GAMES = [{ id: "alibi", emoji: "🕵️", name: "Alibi", sub: "A murder party for the whole family: one of you is the killer. 4 to 8 players, and bots fill any empty chairs." }];
+/** Where a "Join the game" button goes: only ever to the game's own address, with the person's name so they do not have to type it. */
+function gameJoinHref(url) {
+  const base = ALIBI_URL + "/#join/";
+  if (typeof url !== "string" || !url.startsWith(base) || !/^[A-Z0-9]{4}$/.test(url.slice(base.length))) return "";
+  const me = (typeof member === "function" && member(S.me)) || null;
+  return url + (me && me.name ? "/" + encodeURIComponent(me.name) : "");
+}
+function gameDialog() {
+  modal(`<h2>🎮 Start a family game</h2><div class="sub">It opens the game on this device as the host, and the family chat gets the code and a Join button.</div>
+    ${FAMILY_GAMES.map(g => `<div class="item"><span class="stemo">${g.emoji}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(g.name)}</b><small>${esc(g.sub)}</small></span><button class="btn solid" data-game="${g.id}" type="button">Start</button></div>`).join("")}
+    <div class="foot"><button class="btn" id="gX" type="button">Close</button></div>`, root => {
+    root.querySelector("#gX").onclick = closeModal;
+    root.querySelectorAll("[data-game]").forEach(b => b.onclick = () => startFamilyGame(b.dataset.game));
+  });
+}
+async function startFamilyGame(id) {
+  const tab = window.open("", "_blank");                              // opened now, inside the tap, so a phone does not block it
+  try {
+    const d = await api("/api/games/start", "POST", { game: id });
+    if (tab) { tab.location.href = d.url; closeModal(); return; }
+    modal(`<h2>🎮 ${esc(d.game)} is ready</h2><div class="sub">Your browser blocked the new tab. Open the game here, then everyone is told in the family chat.</div>
+      <div class="foot" style="justify-content:flex-start"><a class="btn solid" href="${esc(d.url)}" target="_blank" rel="noopener">Open ${esc(d.game)}</a></div><div class="foot"><button class="btn" id="gX2" type="button">Close</button></div>`, root => { root.querySelector("#gX2").onclick = closeModal; });
+  } catch (e) { if (tab) tab.close(); toast(e.message); }
+}
 const LINKABLE = { Platter: { url: () => PLATTER_URL, icon: "🍽️", what: "Recipes you plan there appear in the family meal plan, with ingredients and method." },
                    Scout: { url: () => SCOUT_URL, icon: "🧭", what: "Put a place on the family calendar, save it as a family place, or share it in the chat." } };
 const SLOT_ICON = { breakfast: "🥣", lunch: "🥪", dinner: "🍽️", snack: "🍎" }, SLOT_ORDER = ["breakfast", "lunch", "dinner", "snack"];
@@ -28,7 +54,7 @@ function tonightHtml() {
 }
 function quickActionsHtml() {
   const q = (act, e, t) => `<button type="button" class="qa" data-act="${act}"><i>${e}</i><span>${t}</span></button>`;
-  return `<div class="qas">${q("qok", "✅", "I'm OK")}${q("qlate", "⏰", "Running late")}${q("pickup", "🚗", "Pick me up")}${q("addplan", "📅", "Add a plan")}${q("addmeal", "🍽️", "Add a meal")}${q("addpoll", "🗳️", "Ask the family")}${isParent() ? q("announce", "📢", "Announce") : q("status", "🙂", "My status")}${q("search", "🔎", "Search")}</div>`;
+  return `<div class="qas">${q("qok", "✅", "I'm OK")}${q("qlate", "⏰", "Running late")}${q("pickup", "🚗", "Pick me up")}${q("addplan", "📅", "Add a plan")}${q("addmeal", "🍽️", "Add a meal")}${q("addpoll", "🗳️", "Ask the family")}${q("game", "🎮", "Family game")}${isParent() ? q("announce", "📢", "Announce") : q("status", "🙂", "My status")}${q("search", "🔎", "Search")}</div>`;
 }
 function peopleStripHtml() {
   return `<div class="strip">${S.members.map(m => `<button type="button" class="sp" data-act="pickmap" data-id="${m.id}">${mavatar(m)}<small>${esc(m.id === S.me ? "You" : m.name)}</small></button>`).join("")}</div>`;
@@ -224,6 +250,7 @@ function linkedHtml() {
   const have = n => S.links.some(l => l.name === n);
   return `<p class="tabhelp">Link <b>Platter</b> to get recipes on the family meal plan, and <b>Scout</b> to put places on the calendar. Each linked app can only do the one thing it is for. You can unlink it any time.</p>
     ${S.links.map(l => `<div class="item"><span class="stemo">${(LINKABLE[l.name] || {}).icon || "🔗"}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(l.name)}</b><small>${l.last_used ? "Used " + ago(l.last_used) : "Not used yet"}</small></span><button class="btn sm" data-act="unlink" data-id="${l.id}">Unlink</button></div>`).join("")}
+    <p class="tabhelp">🕵️ <b>Alibi</b> needs no linking: tap 🎮 in the family chat to start a game for everyone.</p>
     ${Object.keys(LINKABLE).filter(n => !have(n)).map(n => `<button class="btn solid" data-act="linkapp" data-id="${n}" style="width:100%;margin-top:6px">${LINKABLE[n].icon} Link ${n}</button>`).join("")}`;
 }
 async function linkApp(name) {
@@ -302,6 +329,7 @@ async function hb2Act(act, id, el) {
   if (act === "grpnew") return newGroupDialog();
   if (act === "grpjoin") return joinGroupDialog();
   if (act === "grpok" || act === "grpno") { try { await api(`/api/groups/${id}/approve`, "POST", { member: +el.dataset.m, ok: act === "grpok" }); refreshGroups(); } catch (e) { toast(e.message); } return; }
+  if (act === "game") return gameDialog();
   if (act === "linkapp") return linkApp(el.dataset.id);
   if (act === "unlink") { if (confirm("Unlink this app? It will not be able to add meals any more.")) { await api("/api/integrations/" + id, "DELETE").catch(e => toast(e.message)); refreshLinks(); } return; }
 }
@@ -327,6 +355,6 @@ function hb2Boot() {
   if (!hb2Boot.done) {
     hb2Boot.done = true;
     const _close = closeModal; closeModal = function () { S.gdlg = null; clearInterval(S.gtimer); _close(); };         // a group conversation stops polling when its window closes
-    const gb = $("#gifBtn"); if (gb) gb.onclick = gifPicker; const sb = $("#bSearch"); if (sb) sb.onclick = searchDialog;
+    const gm = $("#gameBtn"); if (gm) gm.onclick = gameDialog; const gb = $("#gifBtn"); if (gb) gb.onclick = gifPicker; const sb = $("#bSearch"); if (sb) sb.onclick = searchDialog;
   }
 }

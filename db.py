@@ -131,6 +131,9 @@ integrations = Table("integrations", meta,                                # an a
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("name", String(40)), Column("key_hash", String(64), unique=True),
     Column("created_by", Integer), Column("created", Float), Column("last_used", Float, default=0),
     Column("scopes", String(60), default="meals"))                         # what the key may do: meals | plans | places | share
+game_links = Table("game_links", meta,                                    # a one-time link for starting a family game (Alibi) from the chat: the game uses it once to post its code
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer),
+    Column("token_hash", String(64), unique=True), Column("game", String(12)), Column("created", Float), Column("expires", Float), Column("used", Boolean, default=False))
 friend_groups = Table("friend_groups", meta,                              # a group of friends: separate from the family, but a child's parents can read it
     Column("id", Integer, primary_key=True), Column("name", String(40)), Column("emoji", String(8), default="\U0001F465"), Column("code", String(10), unique=True),
     Column("created_by", Integer), Column("created", Float))
