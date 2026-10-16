@@ -71,14 +71,14 @@ async function refreshMeals() { try { S.meals = (await api("/api/meals")).meals;
 function mealCard(m) {
   const cook = m.cook ? (m.cook === S.me ? "You are cooking" : nameOf(m.cook) + " is cooking") : "", canDel = isParent() || m.by === S.me;
   const has = m.ingredients.length || m.steps.length || m.source;
-  return `<div class="meal"><div class="ml-top">${m.photo ? `<img class="ml-ph" src="${esc(m.photo)}" alt="" loading="lazy">` : `<span class="ml-e">${SLOT_ICON[m.slot] || "🍽️"}</span>`}<div class="ml-m"><b>${esc(m.title)}</b><small>${cap(m.slot)}${m.servings ? " · serves " + m.servings : ""}${m.via && m.via !== "homebase" ? " · from " + esc(cap(m.via)) : ""}</small>${cook ? `<small class="cook">🍳 ${esc(cook)}</small>` : ""}</div>${canDel ? `<button class="link" data-act="delmeal" data-id="${m.id}" title="Remove" aria-label="Remove this meal">✕</button>` : ""}</div>
-    <div class="pl-btns">${has ? `<button class="btn sm" data-act="meal" data-id="${m.id}">Recipe</button>` : ""}<button class="btn sm ${m.cook === S.me ? "sel" : ""}" data-act="cook" data-id="${m.id}">${m.cook === S.me ? "✓ I'm cooking" : "I'll cook"}</button>${m.ingredients.length ? `<button class="btn sm" data-act="meallist" data-id="${m.id}">＋ To the list</button>` : ""}</div></div>`;
+  return `<div class="meal"><div class="ml-top">${m.photo ? `<img class="ml-ph" src="${esc(m.photo)}" alt="" loading="lazy">` : `<span class="ml-e">${SLOT_ICON[m.slot] || "🍽️"}</span>`}<div class="ml-m"><b>${esc(m.title)}</b><small>${cap(m.slot)}${m.servings ? " · serves " + m.servings : ""}${m.via && m.via !== "homebase" ? " · from " + esc(cap(m.via)) : ""}</small>${cook ? `<small class="cook">🍳 ${esc(cook)}</small>` : ""}${m.suggested ? `<small class="cook">💡 Suggested by ${esc(nameOf(m.by))}</small>` : ""}</div>${canDel ? `<button class="link" data-act="delmeal" data-id="${m.id}" title="Remove" aria-label="Remove this meal">✕</button>` : ""}</div>
+    <div class="pl-btns">${m.suggested ? (isParent() ? `<button class="btn sm solid" data-act="mealyes" data-id="${m.id}">Yes, plan it</button><button class="btn sm" data-act="mealno" data-id="${m.id}">Not now</button>` : "<small>A parent will say yes or not now.</small>") : ""}${has ? `<button class="btn sm" data-act="meal" data-id="${m.id}">Recipe</button>` : ""}<button class="btn sm ${m.cook === S.me ? "sel" : ""}" data-act="cook" data-id="${m.id}">${m.cook === S.me ? "✓ I'm cooking" : "I'll cook"}</button>${m.ingredients.length ? `<button class="btn sm" data-act="meallist" data-id="${m.id}">＋ To the list</button>` : ""}</div></div>`;
 }
 function mealsHtml() {
   const by = {}; S.meals.forEach(m => (by[m.day] = by[m.day] || []).push(m));
   const days = Object.keys(by).filter(k => k >= todayKey()).sort().slice(0, 7);
   const body = days.map(k => `<div class="mday"><h4>${esc(dayLabel(k))}</h4>${by[k].sort((a, b) => SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot)).map(mealCard).join("")}</div>`).join("");
-  return `<div class="sechead"><h3>🍽️ Meal plan</h3><button class="btn sm" data-act="addmeal">＋ Meal</button></div>${body || `<div class="empty">Nothing planned yet. Add a meal, or link Platter (More, Linked apps) and plan recipes from there.</div>`}`;
+  return `<div class="sechead"><h3>🍽️ Meal plan</h3><span class="secbtns"><button class="btn sm" data-act="recipes">🔎 Recipes</button><button class="btn sm" data-act="addmeal">＋ Meal</button></span></div>${body || `<div class="empty">Nothing planned yet. Add a meal, or link Platter (More, Linked apps) and plan recipes from there.</div>`}`;
 }
 function mealDialog(id) {
   const m = S.meals.find(x => x.id === id) || (S.cal && S.cal.meals.find(x => x.id === id)); if (!m) return;
@@ -307,7 +307,29 @@ function searchDialog() {
 }
 
 /* ---------- wiring ---------- */
+/* ---------- search recipes (the library comes with Mellow; a child suggests, a parent says yes; anyone can open it in Platter) ---------- */
+const recipeSearch = (q, random) => api("/api/recipes?q=" + encodeURIComponent(q || "") + (random ? "&random=1" : ""));
+function recipeDialog(day) {
+  modal(`<h2>🔎 Search recipes</h2><div class="sub">${isParent() ? "Pick one and add it to the meal plan." : "Pick one and suggest it. A parent says yes."}</div>
+    <div style="display:flex;gap:8px"><input class="field" id="rcQ" placeholder="Chicken, pasta, soup…" autocomplete="off"><button class="btn solid" id="rcGo" type="button">Search</button></div>
+    <div class="foot" style="justify-content:flex-start"><button class="btn sm" id="rcRand" type="button">🎲 Surprise me</button></div>
+    <div id="rcOut" class="sq-out"></div><div class="foot"><button class="btn" id="rcX" type="button">Close</button></div>`, root => {
+    const out = root.querySelector("#rcOut");
+    const show = async random => {
+      out.innerHTML = '<div class="empty">Looking…</div>';
+      try {
+        const d = await recipeSearch(root.querySelector("#rcQ").value.trim(), random);
+        out.innerHTML = d.recipes.length ? d.recipes.map(r => `<div class="item"><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(r.title)}</b><small>${r.min ? r.min + " min · " : ""}${r.serves ? "serves " + r.serves : ""}</small></span><a class="btn sm" href="${esc(r.platter)}" target="_blank" rel="noopener">Platter</a><button class="btn sm solid" data-add="${esc(r.id)}" type="button">${isParent() ? "Add" : "Suggest"}</button></div>`).join("") : '<div class="empty">No recipes found.</div>';
+        out.querySelectorAll("[data-add]").forEach(b => b.onclick = async () => { try { const x = await api("/api/meals", "POST", { recipe: b.dataset.add, day: day || todayKey(), slot: "dinner" }); toast(x.suggested ? "Suggested. A parent will see it." : "Added to the meal plan"); refreshMeals(); loadCal(); } catch (e) { toast(e.message); } });
+      } catch (e) { out.innerHTML = '<div class="empty">Could not load recipes.</div>'; }
+    };
+    root.querySelector("#rcGo").onclick = () => show(false); root.querySelector("#rcQ").onkeydown = e => { if (e.key === "Enter") show(false); };
+    root.querySelector("#rcRand").onclick = () => show(true); root.querySelector("#rcX").onclick = closeModal; show(true);
+  });
+}
 async function hb2Act(act, id, el) {
+  if (act === "recipes") return recipeDialog();
+  if (act === "mealyes" || act === "mealno") { try { await api(`/api/meals/${id}/approve`, "POST", { ok: act === "mealyes" }); refreshMeals(); loadCal(); } catch (e) { toast(e.message); } return; }
   if (act === "qok") return checkIn();
   if (act === "qlate") return lateDialog();
   if (act === "addpoll") return pollDialog();
@@ -343,6 +365,8 @@ async function downloadIcs() {
 }
 function hb2Event(type, p) {
   if (type === "meals") { refreshMeals(); loadCal(); return; }
+  if (type === "meal_suggest") { refreshMeals(); toast(`💡 ${p.name} suggests ${p.title}`, 7000); return; }
+  if (type === "meal_ok") { refreshMeals(); toast(p.approved ? `✅ ${p.name} said yes to ${p.title}` : `${p.name} said not now to ${p.title}`, 6000); return; }
   if (type === "group") { refreshGroups(); if (p.approved) toast(`✅ A parent said yes. You are in ${p.group}.`, 6000); if (p.declined) toast("A parent said not now.", 6000); return; }
   if (type === "group_request") { refreshGroups(); toast(`👥 ${p.name} wants to join ${p.group}`, 8000); notify("👥 " + p.name + " wants to join " + p.group, "Open Mellow to say yes or not now.", { tag: "greq-" + p.gid, force: true }); return; }
   if (type === "group_flag") { refreshGroups(); toast(`⚠️ ${p.name}'s message in ${p.group} was censored (${p.cat} language)`, 10000); notify("⚠️ " + p.name + "'s message was censored", "In " + p.group + ". Open Mellow to read it.", { tag: "gflag-" + p.id, force: true }); if (S.gdlg && S.gdlg.id === p.gid) groupFetch(false); return; }

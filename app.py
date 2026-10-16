@@ -28,7 +28,7 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "10"))
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "11"))
 KEEP_LOCATIONS_DAYS = 7
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _hits = defaultdict(list)
@@ -2367,10 +2367,11 @@ def meal_view(r):
             return []
         return d if isinstance(d, list) else []
     return {"id": r["id"], "day": r["day"], "slot": r["slot"], "title": r["title"], "photo": r["photo"] or "", "source": r["source"] or "", "servings": r["servings"] or 0,
-            "ingredients": lines(r["ingredients"]), "steps": lines(r["steps"]), "via": r["via"], "by": r["added_by"], "ext": r["ext_id"] or "", "cook": r["cook"] or 0}
+            "ingredients": lines(r["ingredients"]), "steps": lines(r["steps"]), "via": r["via"], "by": r["added_by"], "ext": r["ext_id"] or "", "cook": r["cook"] or 0,
+            "suggested": bool(r.get("suggested"))}
 
 
-def save_meal(fid, who, via, b, ext_id=""):
+def save_meal(fid, who, via, b, ext_id="", suggested=False):
     """Adds a meal, or (for a linked app that sends the same id again) updates it. Returns (meal row id, error text)."""
     day, title = clean_day(b.get("day")), clean(b.get("title"), 120)
     if not day:
@@ -2392,7 +2393,7 @@ def save_meal(fid, who, via, b, ext_id=""):
             return old["id"], None
     if len(db.many(select(t.id).where(t.family_id == fid))) >= 600:
         return None, "That is a lot of meals planned already. Remove some old ones first."
-    return db.run(insert(db.meals).values(family_id=fid, ext_id=ext_id, via=via, added_by=who, created=time.time(), **values)), None
+    return db.run(insert(db.meals).values(family_id=fid, ext_id=ext_id, via=via, added_by=who, created=time.time(), suggested=suggested, **values)), None
 
 
 @app.get("/api/meals")
@@ -2408,14 +2409,90 @@ def get_meals():
     return jsonify(meals=[meal_view(r) for r in rows])
 
 
+PLATTER_URL = os.environ.get("PLATTER_URL", "https://platter-87b0.onrender.com").rstrip("/")
+_recipes = {}
+
+
+def recipe_library():
+    """Platter's recipe library (kept with Mellow, so searching needs no other server). Loaded once."""
+    if "all" not in _recipes:
+        try:
+            with open(os.path.join(BASE, "data", "recipes.json"), encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            d = {"tags": [], "recipes": []}
+        _recipes["tags"] = d["tags"]
+        _recipes["all"] = d["recipes"]
+        _recipes["by_id"] = {r["id"]: r for r in d["recipes"]}
+    return _recipes
+
+
+def recipe_view(r):
+    return {**r, "platter": f"{PLATTER_URL}/#/t/{r['tag']}/r/{r['id']}"}
+
+
+@app.get("/api/recipes")
+@need
+def search_recipes():
+    """Search the recipe library by name, ingredient or tag. ?random=1 picks a few at random ("surprise me")."""
+    lib = recipe_library()
+    q = re.sub(r"\s+", " ", str(request.args.get("q") or "")).strip().lower()[:60]
+    tag = str(request.args.get("tag") or "")[:40]
+    pool = [r for r in lib["all"] if not tag or r["tag"] == tag]
+    if request.args.get("random"):
+        import random
+        return jsonify(recipes=[recipe_view(r) for r in random.sample(pool, min(6, len(pool)))], tags=lib["tags"])
+    if q:
+        words = q.split(" ")
+        scored = []
+        for r in pool:
+            title, ing = r["title"].lower(), " ".join(r["ing"]).lower()
+            if all(w in title or w in ing or w in r["tag"] for w in words):
+                scored.append((sum(3 for w in words if w in title) + sum(1 for w in words if w in ing), r))
+        pool = [r for _, r in sorted(scored, key=lambda x: -x[0])]
+    return jsonify(recipes=[recipe_view(r) for r in pool[:30]], tags=lib["tags"])
+
+
 @app.post("/api/meals")
 @need
 def add_meal():
-    mid, problem = save_meal(g.m["family_id"], g.m["id"], "homebase", request.get_json(silent=True) or {})
+    b = request.get_json(silent=True) or {}
+    via = "homebase"
+    if b.get("recipe"):                                                # a recipe picked from the library: its title, photo, ingredients and method come with it
+        r = recipe_library()["by_id"].get(str(b.get("recipe")))
+        if not r:
+            return err("That recipe was not found.", 404)
+        b = {"day": b.get("day"), "slot": b.get("slot"), "title": r["title"], "photo": r["img"] if r["img"].startswith("https://") else "", "servings": r["serves"],
+             "ingredients": r["ing"], "steps": r["steps"], "source": recipe_view(r)["platter"]}
+        via = "platter"
+    child = g.m["role"] != "parent"
+    mid, problem = save_meal(g.m["family_id"], g.m["id"], via, b, suggested=child)
     if problem:
         return err(problem)
+    if child:                                                          # a child can suggest; the parents are told and can say yes or not now
+        for p in family_members(g.m["family_id"]):
+            if p["role"] == "parent":
+                push(p["id"], "meal_suggest", {"id": mid, "name": g.m["name"], "emoji": g.m["emoji"], "title": clean(b.get("title"), 120)})
     push_family(g.m["family_id"], "meals", {"id": mid}, skip=g.m["id"])
-    return jsonify(id=mid)
+    return jsonify(id=mid, suggested=child)
+
+
+@app.post("/api/meals/<int:mid>/approve")
+@parent_only
+def approve_meal(mid):
+    """A parent says yes (the meal is planned) or not now (it is removed) to a child's suggestion."""
+    r = db.one(select(db.meals).where(db.meals.c.id == mid, db.meals.c.family_id == g.m["family_id"]))
+    if not r or not r["suggested"]:
+        return err("Nothing to answer.", 404)
+    ok = bool((request.get_json(silent=True) or {}).get("ok", True))
+    if ok:
+        db.run(update(db.meals).where(db.meals.c.id == mid).values(suggested=False))
+    else:
+        db.run(delete(db.meals).where(db.meals.c.id == mid))
+    if r["added_by"] and r["added_by"] != g.m["id"] and same_family(r["added_by"]):
+        push(r["added_by"], "meal_ok", {"id": mid, "title": r["title"], "approved": ok, "name": g.m["name"]})
+    push_family(g.m["family_id"], "meals", {"id": mid}, skip=g.m["id"])
+    return jsonify(ok=True, approved=ok)
 
 
 @app.delete("/api/meals/<int:mid>")
@@ -2800,6 +2877,8 @@ def web_note(kind, p):
         return {"title": f"\U0001F4DE {name} is calling", "body": "Open Homebase to answer", "tag": f"call-{p.get('id')}", "urgent": True}
     if kind == "ping":
         return {"title": f"\U0001F4CD {name} asks where you are", "body": "Open Homebase to answer, or say not now.", "tag": f"ping-{p.get('id')}"}
+    if kind == "meal_suggest":
+        return {"title": f"\U0001F4A1 {name} suggests a meal", "body": p.get("title") or "", "tag": f"meal-{p.get('id')}"}
     if kind == "plan_soon":
         return {"title": f"{p.get('emoji') or ''} Starting soon".strip(), "body": p.get("title") or "", "tag": f"plan-{p.get('id')}"}
     if kind == "plan" and p.get("new"):
@@ -3077,7 +3156,7 @@ def busy(member_id):
 def start_call():
     m, b = g.m, request.get_json(silent=True) or {}
     callee = same_family(b.get("to"))
-    offer = str(b.get("offer") or "")[:20000]
+    offer = str(b.get("offer") or "")[:100000]
     if not callee or callee["id"] == m["id"] or not offer:
         return err("Pick someone to call.")
     if not parent_may(m, callee, "calls"):
@@ -3121,7 +3200,7 @@ def call_seen(cid):
 @need
 def answer_call(cid):
     c = my_call(cid)
-    answer = str((request.get_json(silent=True) or {}).get("answer") or "")[:20000]
+    answer = str((request.get_json(silent=True) or {}).get("answer") or "")[:100000]
     if not c or c["callee_id"] != g.m["id"] or c["status"] != "ringing" or not answer:
         return err("That call is over.", 404)
     db.run(update(db.calls).where(db.calls.c.id == cid).values(status="active", answered=time.time(), answer=answer))

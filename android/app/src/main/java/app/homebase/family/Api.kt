@@ -160,6 +160,13 @@ class Api(private val store: Store) {
     suspend fun setCook(id: Int, cook: Int) { raw("POST", "/api/meals/$id/cook", obj { put("cook", cook) }) }
     suspend fun mealToList(id: Int): Int = ask<AddedResp>("POST", "/api/meals/$id/to-list").added
 
+    suspend fun recipes(q: String = "", tag: String? = null, random: Boolean = false): RecipesResp =
+        ask("GET", "/api/recipes?q=" + java.net.URLEncoder.encode(q, "UTF-8") + (if (tag != null) "&tag=" + java.net.URLEncoder.encode(tag, "UTF-8") else "") + (if (random) "&random=1" else ""))
+    /** Puts a library recipe on the plan. Returns true when it was only a suggestion (a child asked), false when it was planned. */
+    suspend fun addRecipeMeal(recipe: String, day: String, slot: String): Boolean =
+        Net.parseToJsonElement(raw("POST", "/api/meals", obj { put("recipe", recipe); put("day", day); put("slot", slot) })).jsonObject["suggested"]?.jsonPrimitive?.contentOrNull == "true"
+    suspend fun approveMeal(id: Int, ok: Boolean) { raw("POST", "/api/meals/$id/approve", obj { put("ok", ok) }) }
+
     // friend groups
     suspend fun groups(): GroupsResp = ask("GET", "/api/groups")
     suspend fun makeGroup(name: String, emoji: String): MakeGroupResp = ask("POST", "/api/groups", obj { put("name", name); put("emoji", emoji) })

@@ -128,6 +128,7 @@ fun HomeTab(nav: Nav) {
         TwoUp({ BigButton("I'm OK ✓", color = Mint) { sendQuick(ctx, "checkin", "I'm OK", 0, true, "Checked in") } }, { SoftButton("Running late ⏰") { lateOpen = true } })
         TwoUp({ SoftButton("Pick me up 🚗") { sendQuick(ctx, "pickup", "Can someone pick me up?", 0, true, "Sent to the family") } }, { SoftButton("🎮 Family game") { startFamilyGame(ctx) } })
         TwoUp({ SoftButton("📅 Add a plan") { planOpen = true } }, { SoftButton("🗳️ Ask the family") { pollOpen = true } })
+        TwoUp({ SoftButton("🔎 Search recipes") { nav.go(Screen.Recipes()) } }, { SoftButton("🎉 Fun") { nav.go(Screen.Fun) } })
         val waiting = polls.count { !it.closed && it.mine == null }
         if (waiting > 0) SoftButton("🗳️ $waiting to vote on") { state.tab.value = 2 }
         if (plans.isNotEmpty()) {

@@ -256,6 +256,14 @@ class HomebaseService : Service() {
                 if (p.str("text").isNotBlank()) Notifications.post(this, Notifications.CH_ALERTS, "\uD83D\uDCE2 ${p.str("name")}", p.str("text"))
             }
             "meals" -> app.state.refreshMeals()
+            "meal_suggest" -> {
+                app.state.refreshMeals()
+                Notifications.post(this, Notifications.CH_MESSAGES, "💡 ${p.str("name")} suggests a meal", p.str("title"), "meals")
+            }
+            "meal_ok" -> {
+                app.state.refreshMeals()
+                Notifications.post(this, Notifications.CH_MESSAGES, if (p.flag("approved")) "✅ ${p.str("name")} said yes to your meal" else "${p.str("name")} said not now", p.str("title"), "meals")
+            }
             "group" -> {
                 app.state.refreshGroups()
                 if (p.flag("approved")) Notifications.post(this, Notifications.CH_MESSAGES, "✅ A parent said yes", "You are in ${p.str("group")}.", "groups")

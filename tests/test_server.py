@@ -2270,5 +2270,64 @@ class PhotoMessages(Base):
         self.assertEqual(server.web_note("message", {"kind": "image", "name": "Sam", "from": 1})["body"], "\U0001F4F7 sent a photo")
 
 
+class RecipeSearchAndSuggestions(Base):
+    def search(self, who, **q):
+        return self.c.get("/api/recipes", headers=who, query_string=q)
+
+    def test_the_library_can_be_searched_by_name_and_ingredient(self):
+        r = self.search(self.kid, q="chicken").get_json()
+        self.assertTrue(r["recipes"] and len(r["recipes"]) <= 30)
+        self.assertTrue(all("chicken" in (x["title"] + " ".join(x["ing"])).lower() for x in r["recipes"]))
+        self.assertTrue(r["tags"])
+        first = r["recipes"][0]
+        self.assertTrue(first["platter"].startswith(server.PLATTER_URL + "/#/t/") and first["platter"].endswith("/r/" + first["id"]))
+        self.assertEqual(self.search(self.kid, q="zzzzqqqq").get_json()["recipes"], [])
+        tagged = self.search(self.kid, tag=r["tags"][0]["id"]).get_json()["recipes"]
+        self.assertTrue(tagged and all(x["tag"] == r["tags"][0]["id"] for x in tagged))
+        self.assertEqual(len(self.search(self.kid, random=1).get_json()["recipes"]), 6)
+        self.assertEqual(self.c.get("/api/recipes").status_code, 401)
+
+    def test_a_recipe_goes_on_the_plan_with_its_details_and_a_link_back_to_platter(self):
+        rec = self.search(self.mum, q="burger").get_json()["recipes"][0]
+        day = (datetime.date.today() + datetime.timedelta(days=2)).isoformat()
+        r = self.post(self.mum, "/api/meals", recipe=rec["id"], day=day, slot="dinner").get_json()
+        self.assertFalse(r["suggested"])
+        meal = [m for m in self.get(self.mum, "/api/meals").get_json()["meals"] if m["id"] == r["id"]][0]
+        self.assertEqual((meal["title"], meal["via"], meal["suggested"], meal["source"]), (rec["title"], "platter", False, rec["platter"]))
+        self.assertEqual(meal["ingredients"], rec["ing"][:len(meal["ingredients"])])
+        self.assertEqual(self.post(self.mum, "/api/meals", recipe="no-such", day=day).status_code, 404)
+
+    def test_a_child_suggests_and_a_parent_says_yes_or_not_now(self):
+        rec = self.search(self.kid, q="pasta").get_json()["recipes"][0]
+        day = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
+        r = self.post(self.kid, "/api/meals", recipe=rec["id"], day=day).get_json()
+        self.assertTrue(r["suggested"])
+        told = [e["payload"] for e in self.events(self.mum) if e["type"] == "meal_suggest"]
+        self.assertEqual((len(told), told[0]["name"], told[0]["title"]), (1, "Sam", rec["title"]))
+        self.assertEqual(self.post(self.kid, f"/api/meals/{r['id']}/approve", ok=True).status_code, 403, "a child cannot approve")
+        self.assertEqual(self.post(self.mum, f"/api/meals/{r['id']}/approve", ok=True).status_code, 200)
+        self.assertFalse([m for m in self.get(self.kid, "/api/meals").get_json()["meals"] if m["id"] == r["id"]][0]["suggested"])
+        self.assertEqual(self.post(self.mum, f"/api/meals/{r['id']}/approve", ok=True).status_code, 404, "already answered")
+        r2 = self.post(self.kid, "/api/meals", title="Tacos", day=day).get_json()                # typing one in is a suggestion too
+        self.assertTrue(r2["suggested"])
+        self.post(self.mum, f"/api/meals/{r2['id']}/approve", ok=False)
+        self.assertFalse([m for m in self.get(self.kid, "/api/meals").get_json()["meals"] if m["id"] == r2["id"]])
+        said = [e["payload"] for e in self.events(self.kid) if e["type"] == "meal_ok"]
+        self.assertEqual([x["approved"] for x in said], [True, False])
+
+    def test_a_suggestion_is_an_alert_on_a_closed_app_too(self):
+        self.assertEqual(server.web_note("meal_suggest", {"name": "Sam", "title": "Tacos", "id": 3})["body"], "Tacos")
+
+
+class BigCallDescriptions(Base):
+    def test_a_long_video_call_offer_arrives_whole(self):
+        offer = "v=0\r\n" + "a=rtpmap:96 VP8/90000\r\n" * 2500                        # about 55,000 characters, like an audio and video offer
+        c = self.post(self.mum, "/api/calls", to=self.kid_id, offer=offer).get_json()
+        got = [e["payload"] for e in self.events(self.kid) if e["type"] == "call"][0]
+        self.assertEqual(got["offer"], offer)
+        self.post(self.kid, f"/api/calls/{c['id']}/answer", answer=offer)
+        self.assertEqual(self.get(self.mum, f"/api/calls/{c['id']}").get_json()["answer"], offer)
+
+
 if __name__ == "__main__":
     unittest.main()

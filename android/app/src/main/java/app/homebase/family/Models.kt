@@ -282,6 +282,7 @@ data class Meal(
     val by: Int = 0,
     val ext: String = "",
     val cook: Int = 0,
+    val suggested: Boolean = false,                                  // a child put it forward and a parent has not said yes yet
 )
 
 @Serializable
@@ -363,3 +364,24 @@ data class FeedResp(val items: List<FeedItem> = emptyList())
 
 @Serializable
 data class GameStartResp(val url: String = "", val game: String = "")
+
+/** A recipe from the library. [platter] opens it in Platter. */
+@Serializable
+data class Recipe(
+    val id: String,
+    val title: String = "",
+    val tag: String = "",
+    val area: String = "",
+    val img: String = "",
+    val min: Int = 0,
+    val serves: Int = 0,
+    val ing: List<String> = emptyList(),
+    val steps: List<String> = emptyList(),
+    val platter: String = "",
+)
+
+@Serializable
+data class RecipeTag(val id: String, val name: String = "")
+
+@Serializable
+data class RecipesResp(val recipes: List<Recipe> = emptyList(), val tags: List<RecipeTag> = emptyList())

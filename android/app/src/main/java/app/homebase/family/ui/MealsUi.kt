@@ -83,6 +83,15 @@ fun mealToList(ctx: Context, m: Meal) {
     }
 }
 
+/** A parent's answer to a child's meal suggestion. */
+fun answerMeal(ctx: Context, m: Meal, ok: Boolean) {
+    ctx.hb.scope.launch {
+        runCatching { ctx.hb.api.approveMeal(m.id, ok) }
+            .onSuccess { ctx.hb.state.refreshMeals(); toast(ctx, if (ok) "Planned" else "Removed") }
+            .onFailure { toast(ctx, it.message ?: "Could not save that") }
+    }
+}
+
 @Composable
 fun MealCard(m: Meal, nav: Nav, nameOf: (Int) -> String) {
     val ctx = LocalContext.current
@@ -97,6 +106,13 @@ fun MealCard(m: Meal, nav: Nav, nameOf: (Int) -> String) {
                 Text(slotName(m.slot) + (if (m.servings > 0) " · serves ${m.servings}" else "") + (if (m.via.isNotBlank() && m.via != "homebase") " · from ${slotName(m.via)}" else ""), color = Muted, style = MaterialTheme.typography.bodyMedium)
                 if (cook.isNotBlank()) Text("🍳 $cook", color = Ink, style = MaterialTheme.typography.bodyMedium)
             }
+        }
+        if (m.suggested) {
+            Chip("💡 Suggested by ${nameOf(m.by)}", SunSoft, Ink)
+            if (ctx.hb.store.isParent) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Yes, plan it", true) { answerMeal(ctx, m, true) }
+                Pill("Not now", false) { answerMeal(ctx, m, false) }
+            } else Text("A parent will say yes or not now.", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Pill(if (m.cook == me) "✓ I'm cooking" else "I'll cook", m.cook == me) { toggleCook(ctx, m) }
@@ -117,7 +133,7 @@ fun MealsSection(nav: Nav, nameOf: (Int) -> String, onAdd: () -> Unit) {
         list.sortedBy { MEAL_SLOTS.indexOf(it.slot) }.forEach { MealCard(it, nav, nameOf) }
     }
     if (byDay.isEmpty()) CenterNote("Nothing planned yet. Add a meal, or plan one from Platter and it shows up here.")
-    SoftButton("＋ Add a meal", onClick = onAdd)
+    TwoUp({ SoftButton("＋ Add a meal", onClick = onAdd) }, { SoftButton("🔎 Search recipes") { nav.go(Screen.Recipes()) } })
 }
 
 @Composable

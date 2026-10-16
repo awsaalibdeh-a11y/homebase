@@ -126,7 +126,8 @@ meals = Table("meals", meta,                                              # the 
     Column("slot", String(10), default="dinner"), Column("title", String(120)), Column("photo", String(400), default=""), Column("source", String(400), default=""),
     Column("servings", Integer, default=0), Column("ingredients", Text, default=""), Column("steps", Text, default=""),            # JSON lists of text
     Column("ext_id", String(80), default="", index=True), Column("via", String(20), default="homebase"), Column("added_by", Integer, default=0), Column("created", Float),
-    Column("cook", Integer, default=0))                                  # who said they will cook it (0 = nobody yet)
+    Column("cook", Integer, default=0),                                  # who said they will cook it (0 = nobody yet)
+    Column("suggested", Boolean, default=False))                         # a child put it forward and a parent has not said yes yet
 integrations = Table("integrations", meta,                                # an app the family linked (Platter): its own revocable key that can only touch the meal plan
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("name", String(40)), Column("key_hash", String(64), unique=True),
     Column("created_by", Integer), Column("created", Float), Column("last_used", Float, default=0),
@@ -162,7 +163,7 @@ for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABL
             "ALTER TABLE members ADD COLUMN app_version INTEGER DEFAULT 0",
             "ALTER TABLE families ADD COLUMN notice VARCHAR(200) DEFAULT ''", "ALTER TABLE families ADD COLUMN notice_until FLOAT DEFAULT 0", "ALTER TABLE families ADD COLUMN notice_by INTEGER DEFAULT 0",
             "ALTER TABLE plans ADD COLUMN lat FLOAT", "ALTER TABLE plans ADD COLUMN lng FLOAT", "ALTER TABLE plans ADD COLUMN ext_id VARCHAR(80) DEFAULT ''",
-            "ALTER TABLE plans ADD COLUMN via VARCHAR(20) DEFAULT ''", "ALTER TABLE integrations ADD COLUMN scopes VARCHAR(60) DEFAULT 'meals'"):
+            "ALTER TABLE meals ADD COLUMN suggested BOOLEAN DEFAULT FALSE", "ALTER TABLE plans ADD COLUMN via VARCHAR(20) DEFAULT ''", "ALTER TABLE integrations ADD COLUMN scopes VARCHAR(60) DEFAULT 'meals'"):
     try:
         with engine.begin() as _c:
             _c.exec_driver_sql(_sql)
