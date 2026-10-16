@@ -55,7 +55,7 @@ class Toast : Form
                 int idx = i; bool two = buttons.Length > 1;
                 int w = buttons.Length == 1 ? 200 : 148, col = buttons.Length == 1 ? 0 : i % 2, row = buttons.Length == 1 ? 0 : i / 2;
                 if (buttons.Length > 2 && buttons.Length % 2 == 1 && i == buttons.Length - 1) { w = 304; col = 0; }
-                Button go = new Button { Text = buttons[i], Left = 16 + col * 156, Top = 74 + row * 34, Width = w, Height = 28, AutoSize = false, FlatStyle = FlatStyle.Flat, BackColor = i == 0 ? Color.FromArgb(91, 147, 255) : Color.FromArgb(40, 40, 46), ForeColor = i == 0 ? Color.FromArgb(8, 16, 31) : Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+                Button go = new Button { Text = buttons[i], Left = 16 + col * 156, Top = 74 + row * 34, Width = w, Height = 28, AutoSize = false, FlatStyle = FlatStyle.Flat, BackColor = i == 0 ? Color.FromArgb(230, 184, 102) : Color.FromArgb(40, 40, 46), ForeColor = i == 0 ? Color.FromArgb(27, 19, 6) : Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
                 go.FlatAppearance.BorderSize = 0; go.Click += delegate { try { if (onPick != null) onPick(idx); } catch { } Close(); }; Controls.Add(go);
             }
         }
@@ -131,7 +131,7 @@ class RingWindow : Form
         Label sub = new Label { Text = "is calling you…", Left = 0, Top = 150, Width = 420, Height = 26, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.FromArgb(170, 170, 180), Font = new Font("Segoe UI", 11f) };
         Controls.Add(top); Controls.Add(who); Controls.Add(sub);
         Button no = new Button { Text = "Decline", Left = 40, Top = 230, Width = 150, Height = 54, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(255, 107, 116), ForeColor = Color.White, Font = new Font("Segoe UI", 13f, FontStyle.Bold) };
-        Button yes = new Button { Text = "Answer", Left = 230, Top = 230, Width = 150, Height = 54, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(61, 212, 155), ForeColor = Color.FromArgb(8, 16, 31), Font = new Font("Segoe UI", 13f, FontStyle.Bold) };
+        Button yes = new Button { Text = "Answer", Left = 230, Top = 230, Width = 150, Height = 54, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(61, 212, 155), ForeColor = Color.FromArgb(27, 19, 6), Font = new Font("Segoe UI", 13f, FontStyle.Bold) };
         no.FlatAppearance.BorderSize = 0; yes.FlatAppearance.BorderSize = 0;
         no.Click += delegate { try { onDecline(); } catch { } Close(); };
         yes.Click += delegate { Answered = true; try { onAnswer(); } catch { } Close(); };
@@ -176,7 +176,7 @@ static class Native
 
 class App : ApplicationContext
 {
-    public const int Build = 18;                                              // bump with windows/BUILD on the server; computers update themselves when the server's is higher
+    public const int Build = 19;                                              // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -327,7 +327,7 @@ class App : ApplicationContext
         Label help = new Label { Text = "In Homebase open Menu, then Screen time, then \"Get the Windows tracker\". Type the 6 digits you see there.", Left = 24, Top = 56, Width = 360, Height = 50, ForeColor = Color.FromArgb(160, 160, 170) };
         TextBox box = new TextBox { Left = 24, Top = 112, Width = 360, MaxLength = 6, Font = new Font("Consolas", 22f, FontStyle.Bold), TextAlign = HorizontalAlignment.Center, BackColor = Color.FromArgb(10, 10, 11), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
         Label note = new Label { Text = "It counts only time spent playing or watching, and your family can see exactly the same numbers.", Left = 24, Top = 160, Width = 360, Height = 40, ForeColor = Color.FromArgb(130, 130, 140), Font = new Font("Segoe UI", 8.5f) };
-        Button ok = new Button { Text = "Link this computer", Left = 24, Top = 208, Width = 360, Height = 36, BackColor = Color.FromArgb(91, 147, 255), ForeColor = Color.FromArgb(8, 16, 31), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold), DialogResult = DialogResult.OK };
+        Button ok = new Button { Text = "Link this computer", Left = 24, Top = 208, Width = 360, Height = 36, BackColor = Color.FromArgb(230, 184, 102), ForeColor = Color.FromArgb(27, 19, 6), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold), DialogResult = DialogResult.OK };
         ok.FlatAppearance.BorderSize = 0;
         f.Controls.AddRange(new Control[] { title, help, box, note, ok }); f.AcceptButton = ok;
         if (f.ShowDialog() != DialogResult.OK) return null;
