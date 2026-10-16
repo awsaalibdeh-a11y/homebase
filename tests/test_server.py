@@ -1,8 +1,11 @@
+import base64
 import calendar
+import json
 import os
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -1446,6 +1449,200 @@ class CalendarFile(Base):
         self.assertNotIn("Private plan", other)
         self.assertEqual(other.count("BEGIN:VEVENT"), 0)
         self.assertEqual(self.c.get("/api/calendar.ics").status_code, 401)
+
+
+class WebPush(Base):
+    SUB = {"endpoint": "https://push.example.com/send/abc123", "keys": {"p256dh": "BPyub-" + "A" * 80, "auth": "authsecret123456"}}
+
+    def setUp(self):
+        super().setUp()
+        server.PUSH_SYNC = True                                             # send on the spot so the test can look at what went out
+        self.addCleanup(setattr, server, "PUSH_SYNC", False)
+        self.sent = []
+        patcher = mock.patch("pywebpush.webpush", side_effect=lambda sub, data, **kw: self.sent.append((sub, json.loads(data), kw)))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def subscribe(self, who, **over):
+        return self.post(who, "/api/push/subscribe", subscription={**self.SUB, **over})
+
+    def rows(self, endpoint=None):
+        q = db.select(db.push_subs)
+        return db.many(q.where(db.push_subs.c.endpoint == endpoint) if endpoint else q)
+
+    def test_the_servers_key_is_made_once_and_is_a_real_public_key(self):
+        a = self.get(self.kid, "/api/push/key").get_json()["key"]
+        self.assertEqual(self.get(self.mum, "/api/push/key").get_json()["key"], a, "the same key for everyone, every time")
+        raw = base64.urlsafe_b64decode(a + "=" * (-len(a) % 4))
+        self.assertEqual((len(raw), raw[0]), (65, 4), "an uncompressed P-256 point, which is what browsers expect")
+        self.assertEqual(self.c.get("/api/push/key").status_code, 401)
+
+    def test_what_counts_as_a_usable_address(self):
+        self.assertEqual(self.subscribe(self.kid, endpoint="http://insecure.example.com/x").status_code, 400)
+        self.assertEqual(self.subscribe(self.kid, endpoint="").status_code, 400)
+        self.assertEqual(self.subscribe(self.kid, keys={"p256dh": "x"}).status_code, 400)
+        self.assertEqual(self.post(self.kid, "/api/push/subscribe").status_code, 400)
+        self.assertEqual(self.subscribe(self.kid).status_code, 200)
+        self.assertEqual(len(self.rows(self.SUB["endpoint"])), 1)
+        self.assertEqual(self.c.post("/api/push/subscribe", json={"subscription": self.SUB}).status_code, 401)
+
+    def test_a_device_belongs_to_one_person_and_only_they_can_remove_it(self):
+        self.subscribe(self.kid)
+        self.subscribe(self.mum)
+        self.assertEqual([r["member_id"] for r in self.rows(self.SUB["endpoint"])], [self.mum_id], "it moved to whoever signed in last")
+        self.post(self.kid, "/api/push/unsubscribe", endpoint=self.SUB["endpoint"])
+        self.assertEqual(len(self.rows(self.SUB["endpoint"])), 1, "someone else cannot remove it")
+        self.post(self.mum, "/api/push/unsubscribe", endpoint=self.SUB["endpoint"])
+        self.assertEqual(self.rows(self.SUB["endpoint"]), [])
+
+    def test_ten_devices_at_most_per_person(self):
+        for i in range(12):
+            self.subscribe(self.kid, endpoint=f"https://push.example.com/send/d{i}")
+        mine = [r for r in self.rows() if r["member_id"] == self.kid_id]
+        self.assertEqual(len(mine), 10)
+        self.assertEqual({r["endpoint"].rsplit("/", 1)[1] for r in mine}, {f"d{i}" for i in range(2, 12)}, "the two oldest were dropped")
+
+    def test_a_message_reaches_a_closed_app_signed_with_the_servers_key(self):
+        self.subscribe(self.kid)
+        self.post(self.mum, "/api/messages", body="Tea is ready", to=self.kid_id)
+        self.assertEqual(len(self.sent), 1)
+        sub, note, kw = self.sent[0]
+        self.assertEqual((sub["endpoint"], note["title"], note["body"]), (self.SUB["endpoint"], "Mum", "Tea is ready"))
+        self.assertTrue(kw["vapid_claims"]["sub"].startswith("https://"))
+        self.assertEqual(kw["vapid_private_key"].__class__.__name__, "Vapid02")
+
+    def test_quiet_hours_hold_back_chat_but_never_an_sos_or_a_pickup(self):
+        minute = int(time.time() // 60) % 1440
+        db.run(db.update(db.members).where(db.members.c.id == self.kid_id).values(quiet_from=(minute - 30) % 1440, quiet_to=(minute + 30) % 1440, tz_offset=0))
+        self.subscribe(self.kid)
+        self.post(self.mum, "/api/messages", body="Are you up?", to=self.kid_id)
+        self.assertEqual(self.sent, [], "a normal message waits")
+        self.post(self.mum, "/api/messages", kind="sos", body="Call me now")
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("needs help", self.sent[0][1]["title"])
+        self.assertTrue(self.sent[0][1]["urgent"])
+
+    def test_only_things_worth_a_lock_screen_alert_are_sent(self):
+        self.subscribe(self.mum)
+        self.where(self.kid, 51.5, -0.12)
+        self.post(self.kid, "/api/status", emoji="\U0001F4DA", text="Studying", hours=1)
+        self.assertEqual(self.sent, [], "locations and status changes are bookkeeping, not alerts")
+        self.post(self.kid, "/api/messages", kind="pickup")
+        self.post(self.kid, "/api/plans", title="Dinner", start=time.time() + 7200)
+        self.assertEqual([n["title"].split(" ")[-1] for _, n, _ in self.sent][:1], ["pickup"])
+        self.assertEqual(len(self.sent), 2)
+        self.assertIn("planned something", self.sent[1][1]["title"])
+
+    def test_nothing_is_sent_for_people_who_never_asked(self):
+        self.post(self.mum, "/api/messages", body="Hello", to=self.kid_id)
+        self.assertEqual(self.sent, [])
+
+    def test_an_address_the_browser_says_is_gone_is_forgotten_but_other_errors_are_not(self):
+        self.subscribe(self.kid)
+
+        class Gone(Exception):
+            response = types.SimpleNamespace(status_code=410)
+
+        class Down(Exception):
+            response = types.SimpleNamespace(status_code=500)
+
+        with mock.patch("pywebpush.webpush", side_effect=Down("push service is down")):
+            self.post(self.mum, "/api/messages", body="one", to=self.kid_id)
+        self.assertEqual(len(self.rows(self.SUB["endpoint"])), 1, "a hiccup does not lose the address")
+        with mock.patch("pywebpush.webpush", side_effect=Gone("gone")):
+            self.post(self.mum, "/api/messages", body="two", to=self.kid_id)
+        self.assertEqual(self.rows(self.SUB["endpoint"]), [], "410 means gone for good")
+
+    def test_a_push_failure_never_breaks_the_request_that_caused_it(self):
+        self.subscribe(self.kid)
+        with mock.patch("pywebpush.webpush", side_effect=RuntimeError("network unreachable")):
+            r = self.post(self.mum, "/api/messages", body="still delivered", to=self.kid_id)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(any(e["type"] == "message" for e in self.events(self.kid)), "the in-app event is stored either way")
+
+
+class IPhonePages(Base):
+    def test_the_iphone_page_explains_the_steps_and_the_limits(self):
+        r = self.c.get("/iphone")
+        self.assertEqual(r.status_code, 200)
+        text = r.get_data(as_text=True)
+        for needle in ("Add to Home Screen", "Safari", "iOS 16.4", "/qr.svg", "does not allow"):
+            self.assertIn(needle, text)
+        self.assertNotIn("5b93ff", text.lower(), "no blue")
+
+    def test_the_qr_code_opens_this_servers_app(self):
+        r = self.c.get("/qr.svg", headers={"X-Forwarded-Proto": "https", "Host": "family.example.org"})
+        self.assertEqual((r.status_code, r.mimetype), (200, "image/svg+xml"))
+        self.assertIn("<svg", r.get_data(as_text=True))
+        import segno
+        expected = segno.make("https://family.example.org/app", error="m")
+        self.assertEqual(r.get_data(as_text=True), self._svg(expected), "it encodes https://<this host>/app")
+
+    @staticmethod
+    def _svg(code):
+        import io as _io
+        buf = _io.BytesIO()
+        code.save(buf, kind="svg", scale=8, border=2, dark="#17171a", light="#ffffff")
+        return buf.getvalue().decode("utf-8")
+
+    def test_the_app_page_is_ready_to_be_a_home_screen_app(self):
+        page = self.c.get("/app").get_data(as_text=True)
+        for needle in ("apple-mobile-web-app-capable", "apple-touch-icon", "apple-mobile-web-app-title", "manifest.webmanifest"):
+            self.assertIn(needle, page)
+        manifest = self.c.get("/manifest.webmanifest").get_json()
+        self.assertEqual((manifest["display"], manifest["start_url"]), ("standalone", "/app"))
+        self.assertEqual(self.c.get("/static/web/apple-touch-icon.png").status_code, 200)
+
+    def test_the_service_worker_can_show_a_push(self):
+        sw = self.c.get("/sw.js").get_data(as_text=True)
+        self.assertIn('addEventListener("push"', sw)
+        self.assertIn("showNotification", sw)
+
+
+class Notices(Base):
+    def notice_for(self, who):
+        return self.get(who, "/api/family").get_json()["family"]["notice"]
+
+    def test_a_parent_announces_and_everyone_sees_it_and_is_told(self):
+        self.assertIsNone(self.notice_for(self.kid))
+        self.assertEqual(self.post(self.mum, "/api/notice", text="Dinner at 6, everyone home", hours=3).status_code, 200)
+        for who in (self.mum, self.kid):
+            n = self.notice_for(who)
+            self.assertEqual((n["text"], n["by"]), ("Dinner at 6, everyone home", "Mum"))
+        self.assertGreater(self.notice_for(self.kid)["until"], time.time() + 2.9 * 3600)
+        told = [e["payload"] for e in self.events(self.kid) if e["type"] == "notice"]
+        self.assertEqual((len(told), told[0]["name"], told[0]["text"]), (1, "Mum", "Dinner at 6, everyone home"))
+        self.assertFalse(any(e["type"] == "notice" for e in self.events(self.mum)), "the person who wrote it is not buzzed")
+        self.assertTrue(any("Dinner at 6" in m["body"] for m in self.get(self.kid, "/api/messages").get_json()["messages"]), "it stays in the chat")
+
+    def test_it_ends_by_itself_and_a_parent_can_clear_it(self):
+        self.post(self.mum, "/api/notice", text="Shoes by the door")
+        fid = db.one(db.select(db.members).where(db.members.c.id == self.mum_id))["family_id"]
+        db.run(db.update(db.families).where(db.families.c.id == fid).values(notice_until=time.time() - 5))
+        self.assertIsNone(self.notice_for(self.kid), "an old announcement is gone")
+        self.post(self.mum, "/api/notice", text="New one")
+        self.assertEqual(self.c.delete("/api/notice", headers=self.mum).status_code, 200)
+        self.assertIsNone(self.notice_for(self.kid))
+
+    def test_only_parents_and_only_real_text(self):
+        self.assertEqual(self.post(self.kid, "/api/notice", text="Free pizza").status_code, 403)
+        self.assertEqual(self.c.delete("/api/notice", headers=self.kid).status_code, 403)
+        self.assertEqual(self.post(self.mum, "/api/notice", text="   ").status_code, 400)
+        self.assertEqual(self.post(self.mum, "/api/notice", text="Hi", hours="lots").status_code, 400)
+        self.assertEqual(self.c.post("/api/notice", json={"text": "x"}).status_code, 401)
+
+    def test_the_length_of_time_is_kept_sensible_and_it_cannot_be_spammed(self):
+        self.post(self.mum, "/api/notice", text="Long one", hours=5000)
+        self.assertLessEqual(self.notice_for(self.kid)["until"], time.time() + 72 * 3600 + 5)
+        self.post(self.mum, "/api/notice", text="Short one", hours=-4)
+        self.assertGreaterEqual(self.notice_for(self.kid)["until"], time.time() + 0.9 * 3600)
+        codes = [self.post(self.mum, "/api/notice", text=f"Note {i}").status_code for i in range(12)]
+        self.assertEqual(codes[-1], 429)
+
+    def test_another_family_never_sees_it(self):
+        self.post(self.mum, "/api/notice", text="Private")
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertIsNone(self.notice_for(zed))
 
 
 if __name__ == "__main__":

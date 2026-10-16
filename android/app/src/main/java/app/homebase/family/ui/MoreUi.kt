@@ -311,3 +311,36 @@ fun BirthdayDialog(current: String?, onDismiss: () -> Unit) {
         },
     )
 }
+
+/** A parent tells the whole family something. Everyone sees it on the Today card and gets an alert, and it ends by itself. */
+@Composable
+fun AnnounceDialog(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    var text by remember { mutableStateOf("") }
+    var hours by remember { mutableStateOf(24) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface,
+        title = { Text("\uD83D\uDCE2 Announce to the family") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Everyone sees it at the top and gets an alert. It goes away by itself.", color = Muted, fontSize = 13.sp)
+                OutlinedTextField(text, { text = it.take(200) }, Modifier.fillMaxWidth(), placeholder = { Text("For example: Dinner at 6, everyone home") }, maxLines = 4)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(3 to "3 hours", 24 to "A day", 72 to "3 days").forEach { (h, label) -> Pill(label, hours == h) { hours = h } }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton({
+                if (text.isBlank()) toast(ctx, "Write what you want them to know")
+                else ctx.hb.scope.launch {
+                    runCatching { ctx.hb.api.setNotice(text.trim(), hours) }
+                        .onSuccess { ctx.hb.state.refreshFamily(); toast(ctx, "Announced"); onDismiss() }
+                        .onFailure { toast(ctx, it.message ?: "Could not announce") }
+                }
+            }) { Text("Announce") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
+    )
+}

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f6f7">
+  <title>Homebase on iPhone and iPad</title>
+  <link rel="icon" href="/static/web/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/web/apple-touch-icon.png">
+  <style>
+    :root { --bg:#f6f6f7; --surface:#ffffff; --surface2:#efeff2; --line:#e1e1e6; --ink:#17171a; --muted:#62626b; --accent:#a96a0e; --accent-ink:#ffffff; --ok:#18a46a; color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:17px/1.55 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
+    main { max-width: 40rem; margin: 0 auto; padding: 2rem 1.1rem 4rem; }
+    h1 { font-size: 1.9rem; letter-spacing: -.02em; margin: .2rem 0 .4rem; }
+    h2 { font-size: 1.15rem; margin: 2rem 0 .6rem; }
+    p { color: var(--muted); margin: .3rem 0 1rem; }
+    .back { color: var(--muted); text-decoration: none; font-size: .95rem; }
+    .steps { list-style: none; padding: 0; margin: 1rem 0; display: grid; gap: .7rem; counter-reset: s; }
+    .steps li { counter-increment: s; background: var(--surface); border: 1px solid var(--line); border-radius: 1.1rem; padding: 1rem 1.1rem 1rem 3.4rem; position: relative; }
+    .steps li::before { content: counter(s); position: absolute; left: 1rem; top: .95rem; width: 1.7rem; height: 1.7rem; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-weight: 700; display: grid; place-items: center; font-size: .95rem; }
+    .steps b { color: var(--ink); }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 1.1rem; padding: 1rem 1.2rem; margin: 1rem 0; }
+    .card h3 { margin: 0 0 .4rem; font-size: 1rem; }
+    .card ul { margin: .3rem 0 0 1.1rem; padding: 0; color: var(--muted); } .card li { margin: .2rem 0; }
+    .qr { display: flex; gap: 1.2rem; align-items: center; flex-wrap: wrap; }
+    .qr img { width: 160px; height: 160px; border-radius: .8rem; border: 1px solid var(--line); background: #fff; padding: 6px; }
+    .btn { display: inline-block; text-align: center; padding: .9rem 1.4rem; border-radius: .9rem; background: var(--accent); color: var(--accent-ink); font-weight: 700; text-decoration: none; margin: .4rem .5rem .2rem 0; }
+    .btn.alt { background: var(--surface2); color: var(--ink); border: 1px solid var(--line); }
+    .ok { color: var(--ok); }
+  </style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">← Homebase</a>
+  <h1>🍎 Homebase on iPhone and iPad</h1>
+  <p>Apple only lets App Store apps install the usual way, so on an iPhone or iPad Homebase installs from Safari and lives on your Home Screen. It opens full screen like any app, and it can send you alerts, even when it is closed.</p>
+
+  <div class="card qr">
+    <img src="/qr.svg" alt="QR code that opens Homebase" width="160" height="160">
+    <div><h3>Start here on your iPhone</h3><p style="margin:0">Point the camera at this code and tap the link. It opens Homebase in Safari. Or open this page on the phone and tap the button below.</p><a class="btn" href="/app">Open Homebase</a></div>
+  </div>
+
+  <h2>Put it on your Home Screen</h2>
+  <ol class="steps">
+    <li>Open Homebase in <b>Safari</b>. It has to be Safari, not another browser.</li>
+    <li>Tap the <b>Share</b> button, the square with an arrow pointing up, at the bottom of the screen.</li>
+    <li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+    <li>Open <b>Homebase</b> from your Home Screen, sign in or join with your family code, and tap <b>Set everything up</b>.</li>
+    <li>Say <b>Allow</b> when it asks for alerts and for your location. That is all.</li>
+  </ol>
+  <p>You need <b>iOS 16.4 or newer</b>. If alerts do not appear, open Settings, Notifications, Homebase and check they are on.</p>
+
+  <div class="card">
+    <h3 class="ok">What works on iPhone</h3>
+    <ul><li>Messages, reactions and quick replies</li><li>Alerts for messages, calls, SOS, pick-me-up requests, plans and birthdays, even when the app is closed</li><li>The family map, the calendar, plans, votes, jobs, rewards and the family board</li><li>Calls, while Homebase is open</li></ul>
+  </div>
+  <div class="card">
+    <h3>What Apple does not allow for a Home Screen app</h3>
+    <ul><li>Sharing your location while Homebase is closed. It shares while the app is open on screen.</li><li>Counting screen time. That needs the Android app or the Windows tracker.</li></ul>
+    <p style="margin-top:.6rem">A full App Store app would remove those limits. It needs an Apple developer account and a Mac, and it is the next step if you want it.</p>
+  </div>
+
+  <p><a class="btn alt" href="/update">Android and Windows downloads</a></p>
+</main>
+</body>
+</html>

@@ -74,6 +74,7 @@ fun MeTab(nav: Nav) {
             }
         }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SetupBanner()
         Heading("Hi, ${me?.name ?: app.store.myName} ${me?.emoji ?: ""}", app.store.familyName)
         me?.let { meM ->
             SoftCard {

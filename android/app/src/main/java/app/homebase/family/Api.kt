@@ -128,6 +128,8 @@ class Api(private val store: Store) {
     suspend fun dropPlan(id: Int) { raw("DELETE", "/api/plans/$id") }
     suspend fun plansBetween(from: Long, to: Long): List<Plan> = ask<PlansResp>("GET", "/api/plans?from=$from&to=$to").plans
     suspend fun askUpdate(memberId: Int) { raw("POST", "/api/members/$memberId/update-nudge") }
+    suspend fun setNotice(text: String, hours: Int) { raw("POST", "/api/notice", obj { put("text", text); put("hours", hours) }) }
+    suspend fun clearNotice() { raw("DELETE", "/api/notice") }
     suspend fun polls(): List<Poll> = ask<PollsResp>("GET", "/api/polls").polls
     suspend fun askPoll(question: String, options: List<String>) {
         raw("POST", "/api/polls", obj { put("question", question); put("options", kotlinx.serialization.json.JsonArray(options.map { JsonPrimitive(it) })) })

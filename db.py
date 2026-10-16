@@ -17,7 +17,8 @@ engine = create_engine(url, pool_pre_ping=True, **({} if url.startswith("sqlite"
 meta = MetaData()
 
 families = Table("families", meta,
-    Column("id", Integer, primary_key=True), Column("name", String(60)), Column("created", Float), Column("rules", Text, default=""))   # rules: the house rules text
+    Column("id", Integer, primary_key=True), Column("name", String(60)), Column("created", Float), Column("rules", Text, default=""),   # rules: the house rules text
+    Column("notice", String(200), default=""), Column("notice_until", Float, default=0), Column("notice_by", Integer, default=0))   # a parent's announcement, which ends by itself
 members = Table("members", meta,
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("name", String(40)),
     Column("role", String(8)),                                     # parent | child
@@ -113,6 +114,11 @@ bonus = Table("bonus", meta,                                              # extr
 board = Table("board", meta,                                              # the family board: what everyone should be able to find (Wi-Fi, the doctor, allergies)
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("title", String(40)), Column("emoji", String(8), default="📌"),
     Column("body", Text, default=""), Column("updated_by", Integer), Column("updated", Float))
+push_subs = Table("push_subs", meta,                                      # a browser or home-screen app that asked for alerts while it is closed
+    Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("endpoint", Text, index=False),
+    Column("p256dh", Text), Column("auth", Text), Column("created", Float), Column("ua", String(80), default=""))
+settings = Table("settings", meta,                                        # small things the server keeps for itself (its push keys)
+    Column("key", String(40), primary_key=True), Column("value", Text))
 meta.create_all(engine)
 try:                                                                  # older databases get the new column
     with engine.begin() as _c:
@@ -125,7 +131,8 @@ for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABL
             "ALTER TABLE chores ADD COLUMN repeats VARCHAR(8) DEFAULT ''", "ALTER TABLE chores ADD COLUMN opens_at FLOAT DEFAULT 0",
             "ALTER TABLE rewards ADD COLUMN minutes INTEGER DEFAULT 0", "ALTER TABLE redemptions ADD COLUMN minutes INTEGER DEFAULT 0",
             "ALTER TABLE members ADD COLUMN birthday VARCHAR(5) DEFAULT ''", "ALTER TABLE members ADD COLUMN bday_year INTEGER DEFAULT 0",
-            "ALTER TABLE members ADD COLUMN app_version INTEGER DEFAULT 0"):
+            "ALTER TABLE members ADD COLUMN app_version INTEGER DEFAULT 0",
+            "ALTER TABLE families ADD COLUMN notice VARCHAR(200) DEFAULT ''", "ALTER TABLE families ADD COLUMN notice_until FLOAT DEFAULT 0", "ALTER TABLE families ADD COLUMN notice_by INTEGER DEFAULT 0"):
     try:
         with engine.begin() as _c:
             _c.exec_driver_sql(_sql)

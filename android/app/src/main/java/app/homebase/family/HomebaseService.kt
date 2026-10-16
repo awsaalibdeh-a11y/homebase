@@ -245,6 +245,10 @@ class HomebaseService : Service() {
                 if (p.flag("self")) Notifications.post(this, Notifications.CH_MESSAGES, "🎂 Happy birthday, ${p.str("name")}!", "Your family is thinking of you.")
                 else Notifications.post(this, Notifications.CH_MESSAGES, "🎂 It's ${p.str("name")}'s birthday", "Send them some love today.", "chat:${p.int("id")}")
             }
+            "notice" -> {
+                app.state.refreshFamily()
+                if (p.str("text").isNotBlank()) Notifications.post(this, Notifications.CH_ALERTS, "\uD83D\uDCE2 ${p.str("name")}", p.str("text"))
+            }
             "rewards" -> app.state.refreshRewards()
             "board" -> app.state.refreshNotes()
             "reward" -> {

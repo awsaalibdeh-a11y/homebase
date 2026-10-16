@@ -130,6 +130,8 @@ async function startApp(fresh) {
   try { await refreshFamily(); } catch (e) { if (!e.offline) return; }
   loadThread(0); refreshItems(); refreshChores(); refreshPlans(); refreshPolls(); refreshRewards(); refreshBoard(); flushOutbox();
   fetch("/api/config").then(r => r.json()).then(c => { S.latest = c.version_code || 0; renderSide(); }).catch(() => { /* offline: no hint */ });
+  subscribePush();
+  setTimeout(() => { if (!localStorage.getItem("hb_setup") && !setupDone() && !document.querySelector(".tr-scrim") && !$("#over").classList.contains("on")) setupDialog(); }, 2500);   // a new device offers to set everything up, once
   const ans = location.hash.match(/answer=(\d+)/); if (ans) { history.replaceState(null, "", location.pathname); setTimeout(() => window.Calls && window.Calls.answerNow(+ans[1]), 600); }
   if (!S.running) { S.running = true; eventLoop(); }
   setInterval(() => { if (!document.hidden && S.token && S.online) refreshFamily().catch(() => {}); }, 12000);
@@ -171,7 +173,7 @@ function youCard() {
   return `<section class="you"><div class="head"><div class="ava ${on ? "on" : paused ? "paused" : ""}">${avaInner(m)}</div><div><b>${esc(m.name)} (you)</b><br><small>${m.role === "parent" ? "Parent" : "Child"}</small></div></div>
     <div class="shareline"><div><b>Share my location</b><small>${hint}</small></div><button class="tg ${on ? "on" : ""}" id="tShare" aria-label="Share my location"></button></div>
     ${on && !S.geo ? `<button class="btn solid" id="bAllow">Allow this laptop to share</button>` : ""}
-    ${notifyState() === "default" ? `<button class="btn" id="bNotify">🔔 Turn on desktop notifications for messages and calls</button>` : ""}
+    ${notifyState() === "default" ? `<button class="btn" id="bNotify">🔔 Turn on alerts for messages and calls (they work when Homebase is closed)</button>` : ""}
     ${on || paused ? `<div class="quick">Pause for <button class="btn sm" data-pause="15">15 min</button><button class="btn sm" data-pause="60">1 hour</button>${paused ? `<button class="btn sm" data-pause="0">Resume</button>` : ""}</div>` : ""}</section>`;
 }
 /* ---------- the left panel: five clearly labelled tabs instead of one long scroll ---------- */
@@ -252,8 +254,8 @@ function todayHtml() {
   const bits = [`${ms.length} ${ms.length === 1 ? "person" : "people"}`, live ? `${live} live on the map` : "nobody live right now"]; if (home) bits.push(`${home} at home`);
   const bd = nextBirthday(); if (bd) bits.push(bd);
   const nx = (S.plans || [])[0]; if (nx) bits.push(`next: ${nx.emoji} ${esc(nx.title)}, ${whenTxt(nx.start).toLowerCase()}`);
-  return `<section class="today"><div><b>${esc(S.family ? S.family.name : "Your family")}</b><small>${bits.join(" · ")}</small></div>
-    <div class="tbtns"><button class="btn sm" data-act="status">${st ? esc(st.emoji || "💬") + " " + esc(st.text || "My status") : "🙂 What I'm up to"}</button><button class="btn sm" data-act="chatall">💬 Message the family</button><button class="btn sm" data-act="fit">📍 Show everyone</button></div></section>`;
+  return `<section class="today">${noticeHtml()}<div><b>${esc(S.family ? S.family.name : "Your family")}</b><small>${bits.join(" · ")}</small></div>
+    <div class="tbtns"><button class="btn sm" data-act="status">${st ? esc(st.emoji || "💬") + " " + esc(st.text || "My status") : "🙂 What I'm up to"}</button><button class="btn sm" data-act="chatall">💬 Message the family</button><button class="btn sm" data-act="fit">📍 Show everyone</button>${isParent() ? '<button class="btn sm" data-act="announce">📢 Announce</button>' : ""}</div></section>`;
 }
 function statusCardHtml() {
   const st = me().status;
@@ -330,6 +332,57 @@ function boardDialog(n) {
     };
     const del = root.querySelector("#bdDel"); if (del) del.onclick = async () => { if (!confirm("Delete this note?")) return; try { await api("/api/board/" + n.id, "DELETE"); closeModal(); refreshBoard(); } catch (e) { toast(e.message); } };
   });
+}
+
+/* ---------- set up this device: the Home Screen, alerts while closed and location, in one tap ---------- */
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = () => navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const keyBytes = b64 => { const p = (b64 + "=".repeat((4 - b64.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/"), raw = atob(p); return Uint8Array.from(raw, c => c.charCodeAt(0)); };
+/* asks this browser for a push address and gives it to the server, so alerts arrive even when Homebase is closed (an iPhone needs Homebase on the Home Screen first) */
+async function subscribePush() {
+  if (!pushSupported() || Notification.permission !== "granted" || !S.token) return false;
+  try {
+    const reg = await navigator.serviceWorker.ready; let sub = await reg.pushManager.getSubscription();
+    if (!sub) { const { key } = await api("/api/push/key"); sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) }); }
+    await api("/api/push/subscribe", "POST", { subscription: sub.toJSON() }); return true;
+  } catch (e) { console.warn("push:", e); return false; }
+}
+function setupItems() {
+  const needHome = isIOS() && !isStandalone(), ns = notifyState();
+  return [
+    { k: "home", done: !needHome, t: "On your Home Screen", d: needHome ? "Tap Share in Safari, then Add to Home Screen. That is what lets an iPhone show alerts." : "Homebase opens like an app." },
+    { k: "notify", done: ns === "granted", t: "Alerts, even when Homebase is closed", d: ns === "denied" ? "Blocked. Allow it in your browser or phone settings." : ns === "unsupported" ? (needHome ? "Available once it is on your Home Screen." : "This browser cannot show alerts.") : "Messages, calls, SOS and plans." },
+    { k: "loc", done: me().share !== "on" || S.geo != null, t: "Sharing your location", d: "Only while you choose to share. You can pause or stop any time." },
+  ];
+}
+const setupDone = () => setupItems().every(i => i.done);
+function setupCardHtml() {
+  if (setupDone()) return "";
+  return `<section class="you"><div class="shareline"><div><b>📲 Set up this device</b><small>${setupItems().filter(i => !i.done).map(i => esc(i.t)).join(" · ")}</small></div><button class="btn sm solid" data-act="setup">Set up</button></div></section>`;
+}
+function setupDialog() {
+  const items = setupItems();
+  modal(`<h2>📲 Set up Homebase on this device</h2><div class="sub">One tap sets it all up, so Homebase works even when it is closed.</div>
+    <ul class="chk">${items.map(i => `<li class="${i.done ? "ok" : ""}"><i>${i.done ? "✓" : "○"}</i><span><b>${esc(i.t)}</b><small>${esc(i.d)}</small></span></li>`).join("")}</ul>
+    <div class="foot"><button class="btn" id="suX" type="button">Not now</button><button class="btn solid" id="suGo" type="button">${setupDone() ? "All done" : "Set everything up"}</button></div>`, root => {
+    root.querySelector("#suX").onclick = () => { store("hb_setup", "1"); closeModal(); };
+    root.querySelector("#suGo").onclick = () => { setupEverything(); };
+  });
+}
+async function setupEverything() {
+  closeModal(); store("hb_setup", "1");
+  if (isIOS() && !isStandalone()) return iphoneHowTo();
+  if (notifyState() === "default") await askNotify(); else if (notifyState() === "granted") await subscribePush();
+  if (me().share === "on" && S.geo == null) startGeo();
+  if (window.__installPrompt) { try { window.__installPrompt.prompt(); } catch (e) { /* already shown */ } }
+  renderSide(); toast("All set. Homebase will tell you about messages, calls and plans.", 5000);
+}
+function iphoneHowTo() {
+  modal(`<h2>🍎 Add Homebase to your iPhone</h2><div class="sub">It takes about twenty seconds. You need iOS 16.4 or newer, and Safari.</div>
+    <ol class="steps"><li>Open this page in <b>Safari</b> (not another browser).</li><li>Tap the <b>Share</b> button, the square with an arrow, at the bottom of the screen.</li><li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open <b>Homebase</b> from your Home Screen and tap <b>Set everything up</b>. Allow alerts and location when it asks.</li></ol>
+    <div class="sub">Alerts then arrive even when Homebase is closed. Location is shared while the app is open, because Apple does not let websites track in the background.</div>
+    <div class="foot"><button class="btn solid" id="ihX" type="button">Got it</button></div>`, root => { root.querySelector("#ihX").onclick = closeModal; });
 }
 
 /* ---------- birthdays: you choose the date, your family hears about it on the day ---------- */
@@ -457,6 +510,23 @@ async function openCalendar(y, m, sel) {
 async function askUpdate(id) { const m = member(id); try { await api(`/api/members/${id}/update-nudge`, "POST"); toast(`Asked ${m ? m.name : "them"} to update`); } catch (e) { toast(e.message); } }
 const oldAppLine = m => (isParent() && m.id !== S.me && m.app_version && S.latest && m.app_version < S.latest ? '<small class="oldapp">📲 Android app is out of date</small>' : "");
 
+/* ---------- announcements: a parent tells the whole family something, and it ends by itself ---------- */
+function noticeHtml() {
+  const n = S.family && S.family.notice; if (!n) return "";
+  return `<div class="notice"><span>📢</span><div><b>${esc(n.text)}</b><small>${esc(n.by)} · until ${whenTxt(n.until)}</small></div>${isParent() ? '<button class="link" data-act="clearnotice" title="Clear it" aria-label="Clear the announcement">✕</button>' : ""}</div>`;
+}
+function announceDialog() {
+  let hours = 24;
+  modal(`<h2>📢 Announce to the family</h2><div class="sub">Everyone sees it at the top and gets an alert. It goes away by itself.</div>
+    <label class="l">What do you want them to know?</label><textarea class="field" id="anT" maxlength="200" rows="3" placeholder="For example: Dinner at 6, everyone home"></textarea>
+    <label class="l">Show it for</label><div class="seg" id="anH">${[[3, "3 hours"], [24, "A day"], [72, "3 days"]].map(([h, l]) => `<button type="button" class="btn ${h === 24 ? "sel" : ""}" data-h="${h}">${l}</button>`).join("")}</div>
+    <div class="foot"><button class="btn" id="anX" type="button">Cancel</button><button class="btn solid" id="anOk" type="button">Announce</button></div>`, root => {
+    root.querySelectorAll("[data-h]").forEach(b => b.onclick = () => { hours = +b.dataset.h; root.querySelectorAll("[data-h]").forEach(x => x.classList.toggle("sel", x === b)); });
+    root.querySelector("#anX").onclick = closeModal; root.querySelector("#anT").focus();
+    root.querySelector("#anOk").onclick = async () => { const text = root.querySelector("#anT").value.trim(); if (!text) return toast("Write what you want them to know"); try { await api("/api/notice", "POST", { text, hours }); closeModal(); await refreshFamily(); toast("Announced"); } catch (e) { toast(e.message); } };
+  });
+}
+
 /* ---------- polls: a question for the family ---------- */
 const pollAlert = () => S.polls.filter(p => !p.closed && p.mine === null).length;
 function pollHtml(p) {
@@ -517,7 +587,7 @@ function myControlsHtml() {
 
 function renderSide() {
   const t = curTab(), keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  const body = t === "me" ? youCard() + statusCardHtml() + pickupCardHtml() + birthdayCardHtml() + myControlsHtml() : familyHtml();
+  const body = t === "me" ? setupCardHtml() + youCard() + statusCardHtml() + pickupCardHtml() + birthdayCardHtml() + myControlsHtml() : familyHtml();
   const scroll = $("#side .tabbody") ? $("#side .tabbody").scrollTop : 0;
   $("#side").innerHTML = tabsBar() + `<div class="tabbody">${body}</div>`;
   const bd = $("#side .tabbody"); if (bd) bd.scrollTop = scroll;
@@ -707,7 +777,7 @@ async function meDialog() {
     ${perms}
     <div class="msec">Quiet hours</div><div class="sub">Messages stay quiet and calls do not ring. An urgent "ring anyway" still works.</div>
     <div style="display:flex;gap:10px;align-items:center"><input class="field" type="time" id="qFrom" value="${hm(q.from)}"><span class="muted">to</span><input class="field" type="time" id="qTo" value="${hm(q.to)}"><button class="btn sm" id="qSave">Save</button><button class="btn sm" id="qOff">Off</button></div>
-    <div class="msec">Your data</div><div class="seg"><button class="btn sm" id="mHist">Delete my location history</button><a class="btn sm" href="/download">Android app</a>${window.__installPrompt ? '<button class="btn sm" id="mInstall">Install on this computer</button>' : ""}</div>
+    <div class="msec">Your data</div><div class="seg"><button class="btn sm" id="mHist">Delete my location history</button><a class="btn sm" href="/download">Android app</a><a class="btn sm" href="/iphone">iPhone / iPad</a>${window.__installPrompt ? '<button class="btn sm" id="mInstall">Install on this computer</button>' : ""}</div>
     <div class="foot" style="justify-content:space-between"><button class="btn bad" id="mLeave">Leave family</button><span><button class="btn" id="mOut">Sign out</button> <button class="btn solid" id="mDone">Done</button></span></div>`, root => {
     root.querySelectorAll("#segTheme [data-v]").forEach(b => b.onclick = () => { store("hb_theme", b.dataset.v); applyTheme(); root.querySelectorAll("#segTheme .btn").forEach(x => x.classList.toggle("sel", x === b)); });
     root.querySelectorAll("#segMap [data-v]").forEach(b => b.onclick = () => { store("hb_map", b.dataset.v); paintLayer(); root.querySelectorAll("#segMap .btn").forEach(x => x.classList.toggle("sel", x === b)); });
@@ -756,7 +826,7 @@ function notifyState() { return "Notification" in window ? Notification.permissi
 async function askNotify() {
   if (notifyState() === "unsupported") return toast("This browser cannot show notifications.");
   const r = await Notification.requestPermission(); renderSide();
-  if (r === "granted") { toast("Notifications are on"); notify("Homebase", "You will see messages and calls like this.", { force: true }); } else toast("Notifications are blocked. You can allow them from the lock icon in the address bar.");
+  if (r === "granted") { const pushed = await subscribePush(); toast(pushed ? "Alerts are on, even when Homebase is closed" : "Notifications are on"); notify("Homebase", "You will see messages and calls like this.", { force: true }); } else toast("Notifications are blocked. You can allow them from the lock icon in the address bar.");
 }
 /** A desktop notification like any other app: it shows for new messages, calls and requests, and clicking it opens that conversation.
  *  It stays quiet only when you are already looking at that conversation. */
@@ -805,6 +875,7 @@ function handleEvent(ev) {
       const t = p.status === "pending" ? [`🎁 ${p.name} asked for: ${p.title} (${p.cost} points)`, p.name + " asked for a reward"] : p.status === "approved" ? [`🎁 ${p.name} said yes: ${p.title}${p.minutes ? " (+" + p.minutes + " min screen time today)" : ""}`, "Reward approved"] : [`${p.name} said not now to: ${p.title}`, "Reward not now"];
       toast(t[0], 7000); notify(t[1], `${p.title} · ${p.cost} points`, { tag: "reward-" + p.id + p.status, force: false }); break; }
     case "board": refreshBoard(); break;
+    case "notice": refreshFamily(); if (p.text) { toast(`📢 ${p.name}: ${p.text}`, 12000); notify("📢 " + p.name, p.text, { tag: "notice", force: true }); } break;
     case "birthday": { refreshFamily(); const t = p.self ? `🎂 Happy birthday, ${p.name}!` : `🎂 It's ${p.name}'s birthday today!`; toast(t, 9000); notify(t, p.self ? "Your family is thinking of you." : "Send them some love.", { tag: "bday-" + p.id, force: false }); break; }
     case "plan": refreshPlans(); if (p.new) { toast(`${p.emoji || "📅"} ${p.name} planned: ${p.title}`, 5000); notify(p.name + " added a plan", `${p.title} · ${whenTxt(p.start)}`, { tag: "plan-" + p.id, force: false }); } break;
     case "plan_soon": toast(`${p.emoji || "📅"} ${p.title} starts soon · ${clock(p.start)}`, 9000); notify("Starting soon", `${p.title} · ${clock(p.start)}`, { tag: "plan-soon-" + p.id, force: true }); break;
@@ -872,6 +943,9 @@ function initChrome() {
     else if (act === "clearitems") { await api("/api/list/clear", "POST").catch(err => toast(err.message)); refreshItems(); }
     else if (act === "pickup") pickupNow();
     else if (act === "birthday") birthdayDialog();
+    else if (act === "setup") setupDialog();
+    else if (act === "announce") announceDialog();
+    else if (act === "clearnotice") { await api("/api/notice", "DELETE").catch(err => toast(err.message)); refreshFamily(); }
     else if (act === "addplan") planDialog();
     else if (act === "calendar") openCalendar();
     else if (act === "updnudge") askUpdate(id);

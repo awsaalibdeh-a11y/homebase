@@ -189,7 +189,7 @@ static class Native
 
 class App : ApplicationContext
 {
-    public const int Build = 21;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
+    public const int Build = 22;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -682,6 +682,7 @@ class App : ApplicationContext
                         }
                         else if (type == "plan_soon" && pl != null) Say("\U0001F4C5 Starting soon", Str(pl, "title") + ", " + WhenText(Num(pl, "start")));
                         else if (type == "plan" && pl != null && pl.ContainsKey("new")) { Say("\U0001F4C5 " + Str(pl, "name") + " planned something", Str(pl, "title") + ", " + WhenText(Num(pl, "start"))); lastFamily = DateTime.MinValue; }
+                        else if (type == "notice" && pl != null && Str(pl, "text") != "") Important("\U0001F4E2 " + Str(pl, "name"), Str(pl, "text"), 15);
                         else if (type == "birthday" && pl != null)
                         {
                             bool mine = pl.ContainsKey("self") && Convert.ToBoolean(pl["self"]);

@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.homebase.family.Member
 import app.homebase.family.hb
 import kotlinx.coroutines.launch
@@ -46,8 +47,10 @@ fun FamilyTab(nav: Nav) {
     val rewardInfo by ctx.hb.state.rewards.collectAsState()
     val call = rememberCaller()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SetupBanner()
         Heading(fam?.family?.name ?: me.familyName.ifBlank { "Family" }, "${fam?.members?.size ?: 1} people")
         var statusOpen by remember { mutableStateOf(false) }
+        var announceOpen by remember { mutableStateOf(false) }
         run {
             val now = System.currentTimeMillis() / 1000.0
             val all = fam?.members.orEmpty()
@@ -55,6 +58,15 @@ fun FamilyTab(nav: Nav) {
             val home = all.count { it.home }
             val mine = all.firstOrNull { it.id == me.myId }?.status
             SoftCard(tint = AccentSoft) {
+                fam?.family?.notice?.let { n ->
+                    Row(Modifier.padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("\uD83D\uDCE2 ${n.text}", style = MaterialTheme.typography.titleMedium)
+                            Text(n.by, color = Muted, fontSize = 12.sp)
+                        }
+                        if (me.isParent) TextButton({ ctx.hb.scope.launch { runCatching { ctx.hb.api.clearNotice() }; ctx.hb.state.refreshFamily() } }) { Text("\u2715") }
+                    }
+                }
                 Text("Today", style = MaterialTheme.typography.titleMedium)
                 Text(listOfNotNull("${all.size} people", if (live > 0) "$live live on the map" else "nobody live right now", if (home > 0) "$home at home" else null).joinToString(" · "), color = Muted, style = MaterialTheme.typography.bodyMedium)
                 plans.firstOrNull()?.let { p -> Text("Next: ${p.emoji} ${p.title} · ${planWhen(p.start)}", Modifier.padding(top = 4.dp), color = Ink, style = MaterialTheme.typography.bodyMedium) }
@@ -64,9 +76,11 @@ fun FamilyTab(nav: Nav) {
                 SoftButton(if (mine != null) "${mine.emoji} ${mine.text}".trim() else "🙂 What I'm up to", Modifier.padding(top = 10.dp)) { statusOpen = true }
                 val waiting = polls.count { !it.closed && it.mine == null }
                 SoftButton("📅 Plans and votes" + (if (waiting > 0) " · $waiting to vote" else ""), Modifier.padding(top = 8.dp)) { nav.go(Screen.Plans) }
+                if (me.isParent) SoftButton("\uD83D\uDCE2 Announce to the family", Modifier.padding(top = 8.dp)) { announceOpen = true }
             }
         }
         if (statusOpen) StatusDialog { statusOpen = false }
+        if (announceOpen) AnnounceDialog { announceOpen = false }
         if (me.isParent) {
             val kids = fam?.members.orEmpty().filter { !it.isParent }
             if (kids.isNotEmpty()) SoftCard(tint = AccentSoft) {

@@ -6,11 +6,13 @@ and there is no hidden mode. Parents never get silent access to a child's phone:
 
 import calendar
 import hmac
+import io
 import json
 import math
 import os
 import re
 import secrets
+import threading
 import time
 from collections import defaultdict
 
@@ -24,7 +26,7 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "5"))
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "6"))
 KEEP_LOCATIONS_DAYS = 7
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _hits = defaultdict(list)
@@ -103,6 +105,12 @@ def same_family(member_id):
 
 def push(member_id, kind, payload):
     db.run(insert(db.events).values(member_id=member_id, type=kind, payload=json.dumps(payload, ensure_ascii=False), created=time.time()))
+    try:                                                              # a phone or browser with the app closed still hears about the things that matter
+        note = web_note(kind, payload)
+        if note:
+            send_web_push(member_id, note)
+    except Exception:
+        pass
 
 
 def push_family(fid, kind, payload, skip=0):
@@ -242,7 +250,11 @@ def lock_budget(m, now=None):
 
 def family_view(m):
     fam = db.one(select(db.families).where(db.families.c.id == m["family_id"]))
-    return {"id": fam["id"], "name": fam["name"]}
+    notice = None
+    if fam["notice"] and (fam["notice_until"] or 0) > time.time():
+        by = db.one(select(db.members).where(db.members.c.id == fam["notice_by"]))
+        notice = {"text": fam["notice"], "by": by["name"] if by else "A parent", "until": fam["notice_until"]}
+    return {"id": fam["id"], "name": fam["name"], "notice": notice}
 
 
 def ice_servers():
@@ -1971,6 +1983,131 @@ def drop_board(bid):
     return jsonify(ok=True)
 
 
+# ---------------------------------------------------------------- web push: alerts on an iPhone (or any browser) while the app is closed
+PUSH_SUB = os.environ.get("VAPID_SUB", "https://homebase-family.onrender.com")
+PUSH_SYNC = False                                                       # tests send straight away instead of on a thread
+_vapid = {}
+
+
+def vapid_pair():
+    """The server's own push keys. Made once and kept in the database, so nobody has to create or paste anything."""
+    if "pair" in _vapid:
+        return _vapid["pair"]
+    row = db.one(select(db.settings).where(db.settings.c.key == "vapid"))
+    if not row:
+        from cryptography.hazmat.primitives import serialization
+        from py_vapid import Vapid
+        v = Vapid()
+        v.generate_keys()
+        pem = v.private_pem().decode()
+        pub = _b64.urlsafe_b64encode(v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)).rstrip(b"=").decode()
+        try:
+            db.run(insert(db.settings).values(key="vapid", value=json.dumps({"pem": pem, "public": pub})))
+        except Exception:                                                # another process saved its keys first: use those
+            pass
+        row = db.one(select(db.settings).where(db.settings.c.key == "vapid"))
+    _vapid["pair"] = json.loads(row["value"])
+    return _vapid["pair"]
+
+
+def web_note(kind, p):
+    """What to say on the lock screen for an event, or None for the quiet bookkeeping ones (locations, refreshes)."""
+    name = p.get("name") or "Homebase"
+    if kind == "message":
+        mk = p.get("kind")
+        if mk == "system" or (p.get("quiet") and mk not in ("sos", "pickup")):
+            return None
+        if mk == "sos":
+            return {"title": f"\U0001F6A8 {name} needs help", "body": p.get("body") or "Open Homebase to see where they are.", "tag": "sos", "urgent": True}
+        if mk == "pickup":
+            return {"title": f"\U0001F697 {name} needs a pickup", "body": p.get("body") or "Open Homebase to see where they are.", "tag": "pickup", "urgent": True}
+        if mk == "heart":
+            return {"title": f"\u2764\ufe0f {name}", "body": "is thinking of you", "tag": f"msg-{p.get('from')}"}
+        return {"title": name, "body": p.get("body") or "", "tag": f"msg-{p.get('from')}"}
+    if kind == "call":
+        return {"title": f"\U0001F4DE {name} is calling", "body": "Open Homebase to answer", "tag": f"call-{p.get('id')}", "urgent": True}
+    if kind == "ping":
+        return {"title": f"\U0001F4CD {name} asks where you are", "body": "Open Homebase to answer, or say not now.", "tag": f"ping-{p.get('id')}"}
+    if kind == "plan_soon":
+        return {"title": f"{p.get('emoji') or ''} Starting soon".strip(), "body": p.get("title") or "", "tag": f"plan-{p.get('id')}"}
+    if kind == "plan" and p.get("new"):
+        return {"title": f"\U0001F4C5 {name} planned something", "body": p.get("title") or "", "tag": f"plan-{p.get('id')}"}
+    if kind == "poll" and p.get("new"):
+        return {"title": f"\U0001F5F3\ufe0f {name} asks the family", "body": p.get("question") or "", "tag": f"poll-{p.get('id')}"}
+    if kind == "reward":
+        status = p.get("status")
+        title = {"pending": f"\U0001F381 {name} asked for a reward", "approved": f"\U0001F381 {name} said yes", "declined": f"{name} said not now"}.get(status)
+        if title:
+            extra = f" (+{p['minutes']} min screen time today)" if status == "approved" and p.get("minutes") else ""
+            return {"title": title, "body": (p.get("title") or "") + extra, "tag": f"reward-{p.get('id')}"}
+    if kind == "birthday":
+        return {"title": f"\U0001F382 Happy birthday, {name}!" if p.get("self") else f"\U0001F382 It's {name}'s birthday", "body": "Your family is thinking of you." if p.get("self") else "Send them some love today.", "tag": f"bday-{p.get('id')}"}
+    if kind == "nudge":
+        return {"title": "Time for a break?", "body": p.get("text") or "", "tag": "nudge"}
+    if kind == "notice" and p.get("text"):
+        return {"title": f"\U0001F4E2 {name}", "body": p["text"], "tag": "notice"}
+    return None
+
+
+def send_web_push(member_id, note):
+    subs = db.many(select(db.push_subs).where(db.push_subs.c.member_id == member_id))
+    if not subs:
+        return
+    if PUSH_SYNC:
+        _deliver(subs, note)
+    else:
+        threading.Thread(target=_deliver, args=(subs, note), daemon=True).start()
+
+
+def _deliver(subs, note):
+    try:
+        import pywebpush
+        from py_vapid import Vapid
+        key = Vapid.from_pem(vapid_pair()["pem"].encode())
+    except Exception:
+        return
+    payload = json.dumps(note, ensure_ascii=False)
+    for sub in subs:
+        try:
+            pywebpush.webpush({"endpoint": sub["endpoint"], "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]}}, payload, vapid_private_key=key,
+                              vapid_claims={"sub": PUSH_SUB}, ttl=3600, timeout=10)
+        except Exception as e:
+            code = getattr(getattr(e, "response", None), "status_code", 0)
+            if code in (404, 410):                                      # the browser says this address is gone for good
+                db.run(delete(db.push_subs).where(db.push_subs.c.id == sub["id"]))
+
+
+@app.get("/api/push/key")
+@need
+def push_key():
+    return jsonify(key=vapid_pair()["public"])
+
+
+@app.post("/api/push/subscribe")
+@need
+def push_subscribe():
+    sub = (request.get_json(silent=True) or {}).get("subscription") or {}
+    keys = sub.get("keys") or {}
+    endpoint, p256dh, auth = str(sub.get("endpoint") or ""), str(keys.get("p256dh") or ""), str(keys.get("auth") or "")
+    if not endpoint.startswith("https://") or len(endpoint) > 700 or not p256dh or not auth or len(p256dh) > 200 or len(auth) > 100:
+        return err("That browser did not give a usable address for alerts.")
+    t = db.push_subs.c
+    db.run(delete(db.push_subs).where(t.endpoint == endpoint))               # a device belongs to one person at a time
+    mine = db.many(select(t.id).where(t.member_id == g.m["id"]).order_by(t.id))
+    for old in mine[:max(0, len(mine) - 9)]:                                 # keep their ten newest devices
+        db.run(delete(db.push_subs).where(t.id == old["id"]))
+    db.run(insert(db.push_subs).values(member_id=g.m["id"], endpoint=endpoint, p256dh=p256dh, auth=auth, created=time.time(), ua=clean(request.headers.get("User-Agent"), 80)))
+    return jsonify(ok=True)
+
+
+@app.post("/api/push/unsubscribe")
+@need
+def push_unsubscribe():
+    endpoint = str((request.get_json(silent=True) or {}).get("endpoint") or "")
+    db.run(delete(db.push_subs).where(db.push_subs.c.endpoint == endpoint, db.push_subs.c.member_id == g.m["id"]))
+    return jsonify(ok=True)
+
+
 # ---------------------------------------------------------------- the calendar as a file other calendars understand
 def ics_text(value):
     return str(value or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\r", "").replace("\n", "\\n")
@@ -2010,6 +2147,36 @@ def calendar_file():
     lines.append("END:VCALENDAR")
     body = "\r\n".join(part for line in lines for part in ics_fold(line)) + "\r\n"
     return app.response_class(body, mimetype="text/calendar", headers={"Content-Disposition": 'attachment; filename="homebase-family.ics"', "Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------- announcements: a parent tells the whole family something, and it ends by itself
+@app.post("/api/notice")
+@parent_only
+def set_notice():
+    b = request.get_json(silent=True) or {}
+    text = clean(b.get("text"), 200)
+    if not text:
+        return err("Write what you want the family to know.")
+    try:
+        hours = max(1, min(72, int(b.get("hours") or 24)))
+    except (TypeError, ValueError):
+        return err("Hours should be a number.")
+    if limited(f"notice:{g.m['id']}", 10):
+        return err("Slow down a little.", 429)
+    fid = g.m["family_id"]
+    db.run(update(db.families).where(db.families.c.id == fid).values(notice=text, notice_until=time.time() + hours * 3600, notice_by=g.m["id"]))
+    say(fid, g.m["id"], f"\U0001F4E2 {g.m['name']}: {text}")                    # it stays in the chat history too
+    push_family(fid, "notice", {"text": text, "name": g.m["name"], "emoji": g.m["emoji"]}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
+@app.delete("/api/notice")
+@parent_only
+def clear_notice():
+    fid = g.m["family_id"]
+    db.run(update(db.families).where(db.families.c.id == fid).values(notice="", notice_until=0, notice_by=0))
+    push_family(fid, "notice", {"cleared": True}, skip=g.m["id"])
+    return jsonify(ok=True)
 
 
 # ---------------------------------------------------------------- "please update Homebase": one clear message, not a pile of pop-ups
@@ -2246,6 +2413,25 @@ def web_manifest():
 @app.get("/update")
 def update_page():
     return render_template("update.html", version=VERSION_CODE)
+
+
+@app.get("/iphone")
+def iphone_page():
+    """How to put Homebase on an iPhone or iPad (a Home Screen app, with alerts), and what Apple does not allow."""
+    return render_template("iphone.html", version=VERSION_CODE)
+
+
+@app.get("/qr.svg")
+def qr_svg():
+    """A QR code that opens Homebase, to point a phone camera at. Made for whatever address this server is reached on."""
+    try:
+        import segno
+    except ImportError:
+        return err("QR codes are not available here.", 404)
+    scheme = (request.headers.get("X-Forwarded-Proto") or request.scheme).split(",")[0].strip()
+    buf = io.BytesIO()
+    segno.make(f"{scheme}://{request.host}/app", error="m").save(buf, kind="svg", scale=8, border=2, dark="#17171a", light="#ffffff")
+    return app.response_class(buf.getvalue(), mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/download")

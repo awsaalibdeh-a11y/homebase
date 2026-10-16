@@ -39,7 +39,11 @@ data class Member(
 data class Place(val id: Int, val name: String, val emoji: String = "📍", val lat: Double, val lng: Double, val radius: Int = 150)
 
 @Serializable
-data class FamilyInfo(val id: Int, val name: String)
+data class FamilyInfo(val id: Int, val name: String, val notice: NoticeInfo? = null)
+
+/** A parent's announcement for the whole family. It ends by itself. */
+@Serializable
+data class NoticeInfo(val text: String = "", val by: String = "", val until: Double = 0.0)
 
 @Serializable
 data class IceServer(val urls: List<String>, val username: String? = null, val credential: String? = null)
