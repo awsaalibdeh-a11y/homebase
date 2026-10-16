@@ -8,7 +8,7 @@
   const S = (e, t, b) => ({ e, t, b });
   const TOURS = {
     homebase: { ready: () => { const a = document.getElementById("app"); return a && !a.classList.contains("hidden"); }, steps: [
-      S("🏠", "Welcome to Homebase", "Your family on a map, with messages and calls. It is honest about everything it shares, and you can always pause. This takes a minute."),
+      S("🏠", "Welcome to Mellow", "Your family on a map, with messages and calls. It is honest about everything it shares, and you can always pause. This takes a minute."),
       S("🧭", "Five sections", "The left panel has Home, Map, Plan, Chat and More. Home is today at a glance. Map is your people and places. Plan has the calendar and the meals. Chat has the family chat and friend groups. More has rewards, jobs, the family board, rules and linked apps."),
       S("🗺️", "The map", "Everyone who is sharing shows up as a pin, parents too. If someone goes offline you still see where they were last, and how long ago."),
       S("📍", "Share my location", "In the left panel, the Share my location switch is yours. You can pause for 15 minutes or an hour. The family always sees when it is paused, so nobody wonders."),
