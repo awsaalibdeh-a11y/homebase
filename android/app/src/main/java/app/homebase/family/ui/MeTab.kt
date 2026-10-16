@@ -48,6 +48,7 @@ fun MeTab(nav: Nav) {
     var statusOpen by remember { mutableStateOf(false) }
     var birthdayOpen by remember { mutableStateOf(false) }
     var tutorial by remember { mutableStateOf(false) }
+    var linkApps by remember { mutableStateOf(false) }
     var quietFrom by remember { mutableIntStateOf(-1) }
     var quietTo by remember { mutableIntStateOf(-1) }
     LaunchedEffect(Unit) {
@@ -128,6 +129,7 @@ fun MeTab(nav: Nav) {
         TwoUp({ SoftButton("✅ Jobs and points") { nav.go(Screen.Chores) } }, { SoftButton("🎁 Rewards") { nav.go(Screen.Rewards) } })
         TwoUp({ SoftButton("📌 Family board") { nav.go(Screen.Board) } }, { SoftButton("🛒 Family list") { nav.go(Screen.Lists) } })
         TwoUp({ SoftButton("📍 Saved places") { nav.go(Screen.Places) } }, { SoftButton("🕓 Activity") { nav.go(Screen.Feed) } })
+        if (ctx.hb.store.isParent) SoftButton("🔗 Link Platter and Scout") { linkApps = true }
         if (ctx.hb.store.isParent) TwoUp({ SoftButton("📋 Rules") { nav.go(Screen.Rules) } }, { SoftButton("＋ Invite") { nav.go(Screen.Invite) } })
 
         SectionLabel("More")
@@ -138,6 +140,7 @@ fun MeTab(nav: Nav) {
         Gap(8)
     }
     if (tutorial) TutorialDialog { tutorial = false }
+    if (linkApps) LinkAppsDialog { linkApps = false }
     if (statusOpen) StatusDialog { statusOpen = false }
     if (birthdayOpen) BirthdayDialog(me?.birthday) { birthdayOpen = false }
     if (pause) PickDialog("Pause sharing for…", listOf("15 minutes" to 15, "1 hour" to 60, "3 hours" to 180, "Until tomorrow" to 720), { setSharing("paused", it) }, { pause = false })

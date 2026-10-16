@@ -249,6 +249,7 @@ function linkedHtml() {
   if (!isParent()) return '<p class="tabhelp">A parent can link apps like Platter and Scout, so recipes and places you pick there show up for the family.</p>';
   const have = n => S.links.some(l => l.name === n);
   return `<p class="tabhelp">Link <b>Platter</b> to get recipes on the family meal plan, and <b>Scout</b> to put places on the calendar. Each linked app can only do the one thing it is for. You can unlink it any time.</p>
+    <ol class="tabhelp" style="padding-left:20px;display:grid;gap:4px"><li>Open the app and install it (the browser menu has Install or Add to Home Screen).</li><li>Tap <b>Link</b> below. Mellow makes a private link.</li><li>Open that link on the device where you use the app. It connects by itself.</li></ol>
     ${S.links.map(l => `<div class="item"><span class="stemo">${(LINKABLE[l.name] || {}).icon || "🔗"}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(l.name)}</b><small>${l.last_used ? "Used " + ago(l.last_used) : "Not used yet"}</small></span><button class="btn sm" data-act="unlink" data-id="${l.id}">Unlink</button></div>`).join("")}
     <p class="tabhelp">🕵️ <b>Alibi</b> needs no linking: tap 🎮 in the family chat to start a game for everyone.</p>
     ${Object.keys(LINKABLE).filter(n => !have(n)).map(n => `<button class="btn solid" data-act="linkapp" data-id="${n}" style="width:100%;margin-top:6px">${LINKABLE[n].icon} Link ${n}</button>`).join("")}`;
@@ -351,17 +352,34 @@ function hb2Event(type, p) {
   }
 }
 /* a one-time welcome after the rename: shown once per browser */
+/* a one-time popup for a parent who has not linked Platter or Scout yet: what they are, how to install and link them */
+function linkPrompt() {
+  if (!isParent() || !S.links) return;
+  const need = Object.keys(LINKABLE).filter(n => !S.links.some(l => l.name === n));
+  if (!need.length) return;
+  try { if (localStorage.getItem("mellow_linkprompt_1")) return; } catch (e) { return; }
+  const seen = () => { try { localStorage.setItem("mellow_linkprompt_1", "1"); } catch (e) { /* private window */ } };
+  modal(`<h2>Link Platter and Scout</h2><div class="sub">Two sister apps work with Mellow. Install each one, link it once, and it shares with your family.</div>
+    ${need.map(n => `<div class="item"><span class="stemo">${LINKABLE[n].icon}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${n}</b><small>${esc(LINKABLE[n].what)}</small></span></div>
+      <div class="foot" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><a class="btn sm" href="${esc(LINKABLE[n].url())}" target="_blank" rel="noopener">1 · Open ${n} and install it</a><button class="btn sm solid" data-lk="${n}" type="button">2 · Link ${n}</button></div>`).join("")}
+    <p class="sub">Linking makes a private link. Open it on the device where you use the app, in the same browser or app, and it connects by itself. You can unlink any time in More, then Linked apps.</p>
+    <div class="foot"><button class="btn" id="lpLater" type="button">Not now</button></div>`, root => {
+    root.querySelector("#lpLater").onclick = () => { seen(); closeModal(); };
+    root.querySelectorAll("[data-lk]").forEach(b => b.onclick = () => { seen(); linkApp(b.dataset.lk); });
+  });
+}
 function mellowWelcome() {
   try { if (localStorage.getItem("mellow_welcome_1")) return; } catch (e) { return; }
   modal(`<h2>Welcome to Mellow</h2><div class="sub">Homebase has a new name and a calmer look. Your family, messages, plans and settings are all still here.</div>
     <ul class="ing"><li>A black and white look on a contour-line background, with a Dark version in the menu</li><li>Five sections: Home, Map, Plan, Chat and More</li><li>Meals, friend groups, stickers and GIFs, family games</li></ul>
     <p class="sub">If you open Mellow in a different browser, sign in again with an invite code: your sign-in is kept in the browser you used.</p>
     <div class="foot"><button class="btn solid" id="mwOk" type="button">Got it</button></div>`, root => {
-    root.querySelector("#mwOk").onclick = () => { try { localStorage.setItem("mellow_welcome_1", "1"); } catch (e) { /* private window */ } closeModal(); };
+    root.querySelector("#mwOk").onclick = () => { try { localStorage.setItem("mellow_welcome_1", "1"); } catch (e) { /* private window */ } closeModal(); setTimeout(linkPrompt, 400); };
   });
 }
 function hb2Boot() {
   setTimeout(mellowWelcome, 600);
+  setTimeout(() => { const o = $("#over"); if (!(o && o.classList.contains("on"))) linkPrompt(); }, 3500);
   refreshMeals(); refreshGroups(); refreshLinks(); refreshFeed(); loadStickers();
   if (!hb2Boot.done) {
     hb2Boot.done = true;

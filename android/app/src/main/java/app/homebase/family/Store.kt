@@ -46,6 +46,9 @@ class Store(context: Context) {
     var mellowWelcome: Boolean                                 // the one-time welcome popup has been seen
         get() = p.getBoolean("mellowWelcome", false)
         set(v) = p.edit().putBoolean("mellowWelcome", v).apply()
+    var linkPrompt: Boolean                                    // the "link Platter and Scout" popup has been answered
+        get() = p.getBoolean("linkPrompt", false)
+        set(v) = p.edit().putBoolean("linkPrompt", v).apply()
     var tourDone: Boolean
         get() = p.getBoolean("tourDone", false)
         set(v) = p.edit().putBoolean("tourDone", v).apply()

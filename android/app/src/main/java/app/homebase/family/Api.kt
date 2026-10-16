@@ -172,6 +172,12 @@ class Api(private val store: Store) {
 
     // stickers, the activity feed, family games
     suspend fun uploadImage(dataUrl: String): String = Net.parseToJsonElement(raw("POST", "/api/images", obj { put("image", dataUrl) })).jsonObject["url"]?.jsonPrimitive?.contentOrNull ?: error("The photo did not upload.")
+    /** Names of the apps already linked (a parent can ask). */
+    suspend fun linkedApps(): List<String> =
+        (Net.parseToJsonElement(raw("GET", "/api/integrations")).jsonObject["integrations"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull }
+    /** Makes a private key for Platter or Scout; it goes in the link that connects the app. */
+    suspend fun linkApp(name: String): String =
+        Net.parseToJsonElement(raw("POST", "/api/integrations", obj { put("name", name) })).jsonObject["key"]?.jsonPrimitive?.contentOrNull ?: error("Could not make the link.")
     suspend fun stickers(): List<Sticker> = ask<StickersResp>("GET", "/api/stickers").stickers
     suspend fun feed(): List<FeedItem> = ask<FeedResp>("GET", "/api/feed").items
     suspend fun startGame(game: String): GameStartResp = ask("POST", "/api/games/start", obj { put("game", game) })

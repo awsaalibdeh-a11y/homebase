@@ -70,6 +70,14 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
     if (welcome) androidx.compose.material3.AlertDialog(onDismissRequest = {}, containerColor = Surface, title = { Text("Welcome to Mellow") },
         text = { Text("Homebase has a new name and a calmer look. Your family, messages and settings are all still here.\n\nNew: five tabs (Home, Map, Plan, Chat, More), meals, friend groups, stickers and GIFs, photos in chat, video calls, and a Dark look in Settings.") },
         confirmButton = { TextButton({ ctxU.hb.store.mellowWelcome = true; welcome = false }) { Text("Got it") } })
+    var linkOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(welcome) {
+        if (!welcome && ctxU.hb.store.isParent && !ctxU.hb.store.linkPrompt) {
+            val have = runCatching { ctxU.hb.api.linkedApps() }.getOrNull()
+            if (have != null && LINKABLE_APPS.any { it.name !in have }) linkOpen = true
+        }
+    }
+    if (linkOpen) LinkAppsDialog { linkOpen = false }
     newApk?.let { url ->
         androidx.compose.material3.AlertDialog(onDismissRequest = { newApk = null }, title = { Text("A new Mellow is ready") },
             text = { Text("Tap Update, then open the file when it finishes downloading. Your family, places and settings stay as they are.") },
