@@ -144,6 +144,9 @@ friend_members = Table("friend_members", meta,
 friend_messages = Table("friend_messages", meta,
     Column("id", Integer, primary_key=True), Column("group_id", Integer, index=True), Column("from_id", Integer), Column("kind", String(6), default="text"),
     Column("body", Text), Column("original", Text, default=""), Column("flags", Text, default=""), Column("created", Float, index=True))
+message_images = Table("message_images", meta,                       # photos sent in family chats: a small JPEG or PNG, found by a long random token
+    Column("id", Integer, primary_key=True), Column("token", String(40), unique=True, index=True), Column("family_id", Integer, index=True),
+    Column("from_id", Integer), Column("mime", String(16)), Column("data", Text), Column("created", Float))
 meta.create_all(engine)
 try:                                                                  # older databases get the new column
     with engine.begin() as _c:

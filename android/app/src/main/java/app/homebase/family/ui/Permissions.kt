@@ -88,12 +88,12 @@ fun PermissionsScreen(nav: Nav) {
     }
     LaunchedEffect(Unit) { delay(2000); begin() }                                   // nobody has to hunt for a button: setup starts by itself
     Page {
-        Heading("Setting everything up", "Homebase asks for what it needs, one step after another. You can change any of it later in Android settings.")
+        Heading("Setting everything up", "Mellow asks for what it needs, one step after another. You can change any of it later in Android settings.")
         Reason("📍", "Location", "So your family can see you on the map. Choose \"Allow all the time\" so it keeps working when the screen is off. You can pause sharing any time.")
         Reason("🔔", "Notifications", "For messages, check-ins, and the ring of an incoming call.")
         Reason("🎙️", "Microphone", "Only used while you are on a call you answered or made. Never otherwise.")
-        Reason("🔋", "Battery", "Tell Android not to put Homebase to sleep, so a call can ring when the device is idle.")
-        if (!ctx.hb.store.isParent) Reason("⏱️", "Screen time", "Homebase counts only time spent playing or watching, so your family can see it. You see exactly what they see.")
+        Reason("🔋", "Battery", "Tell Android not to put Mellow to sleep, so a call can ring when the device is idle.")
+        if (!ctx.hb.store.isParent) Reason("⏱️", "Screen time", "Mellow counts only time spent playing or watching, so your family can see it. You see exactly what they see.")
         Gap(16)
         BigButton(if (started) "Setting up…" else "Set everything up", enabled = !started) { begin() }
         Gap(4)
@@ -128,7 +128,7 @@ fun SetupBanner() {
         }
     }
     SoftCard(tint = SunSoft) {
-        Text("📲 Finish setting up Homebase", style = MaterialTheme.typography.titleMedium)
+        Text("📲 Finish setting up Mellow", style = MaterialTheme.typography.titleMedium)
         Text("Still to allow: " + missing.joinToString(", "), color = Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 2.dp))
         SoftButton("Continue", Modifier.padding(top = 10.dp)) { next() }
     }

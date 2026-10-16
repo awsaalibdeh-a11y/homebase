@@ -27,8 +27,8 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
-app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "6"))
+app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "7"))
 KEEP_LOCATIONS_DAYS = 7
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _hits = defaultdict(list)
@@ -546,6 +546,45 @@ def get_avatar(member_id):
         return err("No photo.", 404)
     mime = next((m for magic, m in AVATAR_MAGIC.items() if blob.startswith(magic)), "image/jpeg")
     return app.response_class(blob, mimetype=mime, headers={"Cache-Control": "private, max-age=86400"})
+
+
+# ---------------------------------------------------------------- photos in the family chat
+IMAGE_LIMIT, IMAGES_PER_FAMILY = 900 * 1024, 300                      # the phone shrinks a photo to about 200 KB first; this is the ceiling
+IMAGE_MAGIC = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png"}
+
+
+@app.post("/api/images")
+@need
+def upload_image():
+    """A photo for the family chat. It is kept under a long random address, and only a message in this family points at it. The oldest ones go once a family has 300."""
+    if limited(f"img:{g.m['id']}", 40):
+        return err("Slow down a little.", 429)
+    raw = str((request.get_json(silent=True) or {}).get("image") or "")
+    try:
+        blob = _b64.b64decode(raw.split(",", 1)[-1], validate=True)
+    except Exception:
+        return err("That photo did not come through. Try another one.")
+    if not blob or len(blob) > IMAGE_LIMIT:
+        return err("That photo is too big. Pick a smaller one.")
+    mime = next((m for magic, m in IMAGE_MAGIC.items() if blob.startswith(magic)), None)
+    if not mime:
+        return err("That is not a photo Homebase can use (use a normal JPEG or PNG).")
+    fid, t = g.m["family_id"], db.message_images.c
+    token = secrets.token_urlsafe(16)
+    db.run(insert(db.message_images).values(token=token, family_id=fid, from_id=g.m["id"], mime=mime, data=_b64.b64encode(blob).decode(), created=time.time()))
+    old = db.many(select(t.id).where(t.family_id == fid).order_by(t.id.desc()).offset(IMAGES_PER_FAMILY))
+    if old:
+        db.run(delete(db.message_images).where(t.id.in_([r["id"] for r in old])))
+    return jsonify(url=f"/api/img/{token}")
+
+
+@app.get("/api/img/<token>")
+def get_image(token):
+    """The picture behind a photo message. The address is the key (it cannot be guessed), so a plain <img> tag or an image loader can show it."""
+    row = db.one(select(db.message_images).where(db.message_images.c.token == token[:40]))
+    if not row:
+        return err("No photo.", 404)
+    return app.response_class(_b64.b64decode(row["data"]), mimetype=row["mime"], headers={"Cache-Control": "private, max-age=604800"})
 
 
 # ---------------------------------------------------------------- linking a computer or tablet with a 6-digit code (no scripts, no copying keys)
@@ -1345,7 +1384,7 @@ def delete_screentime():
 
 
 # ---------------------------------------------------------------- messages: texts, check-ins, running late, SOS, hearts
-KINDS = ("text", "checkin", "late", "sos", "heart", "pickup", "gif")
+KINDS = ("text", "checkin", "late", "sos", "heart", "pickup", "gif", "image")
 
 
 REACTIONS = ("👍", "❤️", "😂", "😮", "🙏", "🎉")
@@ -1380,7 +1419,12 @@ def send_message():
         body = gif_url(body)
         if not body:
             return err("That is not a GIF link we can show. Pick a sticker, or paste a link ending in .gif from Giphy, Tenor or Imgur.")
-    if to_id and kind in ("text", "heart", "gif") and not parent_may(m, same_family(to_id), "messages"):
+    if kind == "image":                                                # a photo uploaded to /api/images by someone in this family
+        token = body.rsplit("/", 1)[-1] if body.startswith("/api/img/") else ""
+        if not token or not db.one(select(db.message_images.c.id).where(db.message_images.c.token == token, db.message_images.c.family_id == m["family_id"])):
+            return err("That photo is not available. Send it again.")
+        body = f"/api/img/{token}"
+    if to_id and kind in ("text", "heart", "gif", "image") and not parent_may(m, same_family(to_id), "messages"):
         return denied(same_family(to_id), "messages")
     if limited(f"msg:{m['id']}", 120):
         return err("Slow down a little.", 429)
@@ -1396,7 +1440,7 @@ def send_message():
     for x in family_members(m["family_id"]):
         if x["id"] == m["id"] or (to_id and x["id"] != to_id):
             continue
-        if kind in ("text", "heart", "gif") and not parent_may(m, x, "messages"):
+        if kind in ("text", "heart", "gif", "image") and not parent_may(m, x, "messages"):
             continue
         push(x["id"], "message", {**msg_view(row), "name": m["name"], "emoji": m["emoji"], "quiet": in_quiet(x) and kind not in ("sos", "pickup"), "urgent": kind == "sos"})
     return jsonify(message=msg_view(row))
@@ -2747,6 +2791,8 @@ def web_note(kind, p):
             return {"title": f"\u2764\ufe0f {name}", "body": "is thinking of you", "tag": f"msg-{p.get('from')}"}
         if mk == "gif":
             return {"title": name, "body": "\U0001F39E\ufe0f sent a GIF", "tag": f"msg-{p.get('from')}"}
+        if mk == "image":
+            return {"title": name, "body": "\U0001F4F7 sent a photo", "tag": f"msg-{p.get('from')}"}
         if mk == "game":
             return {"title": f"\U0001F3AE {name}", "body": p.get("body") or "A family game has started. Open Homebase to join.", "tag": "game"}
         return {"title": name, "body": p.get("body") or "", "tag": f"msg-{p.get('from')}"}

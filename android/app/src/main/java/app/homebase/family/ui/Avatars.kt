@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,7 +34,8 @@ object Avatars {
 
 /** A member's photo if they have one, otherwise their emoji. Same round shape either way. */
 @Composable
-fun MemberAvatar(m: Member, size: Int = 52, tint: Color = AccentSoft) {
+fun MemberAvatar(m: Member, size: Int = 52, tint: Color = AccentSoft, circle: Boolean = false) {
+    val shape = if (circle) CircleShape else RoundedCornerShape((size * 0.3f).dp)
     val ctx = LocalContext.current
     val url = m.avatar
     val bmp = if (url != null) Avatars.cache[url] else null
@@ -46,8 +48,8 @@ fun MemberAvatar(m: Member, size: Int = 52, tint: Color = AccentSoft) {
             }.onSuccess { if (it != null) Avatars.cache[url] = it }
         }
     }
-    Box(Modifier.size(size.dp).clip(CircleShape).background(tint), contentAlignment = Alignment.Center) {
-        if (bmp != null) Image(bmp, null, Modifier.size(size.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+    Box(Modifier.size(size.dp).clip(shape).background(tint), contentAlignment = Alignment.Center) {
+        if (bmp != null) Image(bmp, null, Modifier.size(size.dp).clip(shape), contentScale = ContentScale.Crop)
         else Text(m.emoji, fontSize = (size * 0.5).sp)
     }
 }

@@ -2216,5 +2216,59 @@ class FriendGroups(Base):
         self.assertEqual(self.post(self.mum, "/api/groups", name="One too many").status_code, 400)
 
 
+class PhotoMessages(Base):
+    JPEG = b"\xff\xd8\xff\xe0" + b"photo-bytes" * 20
+
+    def upload(self, who=None, blob=None):
+        import base64
+        return self.post(who or self.kid, "/api/images", image="data:image/jpeg;base64," + base64.b64encode(blob or self.JPEG).decode())
+
+    def test_a_photo_can_be_uploaded_sent_and_shown(self):
+        up = self.upload()
+        self.assertEqual(up.status_code, 200)
+        url = up.get_json()["url"]
+        self.assertRegex(url, r"^/api/img/[A-Za-z0-9_-]{16,}$")
+        r = self.post(self.kid, "/api/messages", kind="image", body=url)
+        self.assertEqual((r.status_code, r.get_json()["message"]["kind"], r.get_json()["message"]["body"]), (200, "image", url))
+        got = [e["payload"] for e in self.events(self.mum) if e["type"] == "message" and e["payload"]["kind"] == "image"]
+        self.assertEqual((len(got), got[0]["name"], got[0]["body"]), (1, "Sam", url))
+        pic = self.c.get(url)                                           # the address is the key: no sign-in needed to show it
+        self.assertEqual((pic.status_code, pic.mimetype, pic.data), (200, "image/jpeg", self.JPEG))
+        pic.close()
+
+    def test_only_a_real_photo_from_your_own_family_can_be_sent(self):
+        url = self.upload().get_json()["url"]
+        other = self.c.post("/api/family", json={"family": "The Parks", "name": "Pat"}).get_json()
+        pat = {"Authorization": "Bearer " + other["token"]}
+        self.assertEqual(self.post(pat, "/api/messages", kind="image", body=url).status_code, 400, "another family cannot use this photo")
+        for bad in ("/api/img/not-a-photo", "https://evil.example.com/x.jpg", "/static/stickers/x.gif", "", "/api/img/"):
+            self.assertEqual(self.post(self.kid, "/api/messages", kind="image", body=bad).status_code, 400, bad)
+        self.assertEqual(self.c.get("/api/img/nothing-here").status_code, 404)
+
+    def test_uploads_must_be_small_normal_photos(self):
+        self.assertEqual(self.post(self.kid, "/api/images", image="@@not base64@@").status_code, 400)
+        self.assertEqual(self.upload(blob=b"GIF89a" + b"x" * 50).status_code, 400, "only JPEG and PNG")
+        self.assertEqual(self.upload(blob=b"\xff\xd8\xff" + b"x" * (server.IMAGE_LIMIT + 1)).status_code, 400, "too big")
+        self.assertEqual(self.c.post("/api/images", json={"image": ""}).status_code, 401, "and you must be signed in")
+
+    def test_a_child_can_switch_messages_off_for_parents_and_that_includes_photos(self):
+        self.c.patch("/api/me", headers=self.kid, json={"perms": {"messages": False}})
+        url = self.upload(self.mum).get_json()["url"]
+        r = self.post(self.mum, "/api/messages", kind="image", body=url, to=self.kid_id)
+        self.assertEqual(r.status_code, 403)
+
+    def test_a_family_keeps_only_its_newest_photos(self):
+        old = server.IMAGES_PER_FAMILY
+        server.IMAGES_PER_FAMILY = 3
+        try:
+            urls = [self.upload().get_json()["url"] for _ in range(5)]
+        finally:
+            server.IMAGES_PER_FAMILY = old
+        self.assertEqual([self.c.get(u).status_code for u in urls], [404, 404, 200, 200, 200])
+
+    def test_a_photo_is_an_alert_on_a_closed_app_too(self):
+        self.assertEqual(server.web_note("message", {"kind": "image", "name": "Sam", "from": 1})["body"], "\U0001F4F7 sent a photo")
+
+
 if __name__ == "__main__":
     unittest.main()

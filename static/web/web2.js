@@ -169,7 +169,7 @@ function chatSectionHtml() {
   const ids = [0, ...S.members.filter(m => m.id !== S.me).map(m => m.id)];
   const rows = ids.map(id => {
     const last = (S.msgs[id] || []).filter(x => x.kind !== "system").slice(-1)[0], n = S.unread[id] || 0, m = id ? member(id) : null;
-    return `<button type="button" class="thrrow" data-act="openthread" data-id="${id}">${m ? mavatar(m) : '<span class="ava">👨‍👩‍👧</span>'}<span class="pl-m"><b>${esc(threadName(id))}</b><small>${last ? esc(last.kind === "gif" ? "🎞️ GIF" : last.body || "") : "Say hello"}</small></span>${n ? `<i class="tb2">${n}</i>` : ""}</button>`;
+    return `<button type="button" class="thrrow" data-act="openthread" data-id="${id}">${m ? mavatar(m) : '<span class="ava">👨‍👩‍👧</span>'}<span class="pl-m"><b>${esc(threadName(id))}</b><small>${last ? esc(last.kind === "gif" ? "🎞️ GIF" : last.kind === "image" ? "📷 Photo" : last.body || "") : "Say hello"}</small></span>${n ? `<i class="tb2">${n}</i>` : ""}</button>`;
   }).join("");
   return requestsHtml() + `<div class="sechead"><h3>💬 Family</h3></div>${rows}` + groupsHtml();
 }

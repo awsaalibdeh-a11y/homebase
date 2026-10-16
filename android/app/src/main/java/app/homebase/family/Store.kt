@@ -40,6 +40,9 @@ class Store(context: Context) {
     var cursor: Int
         get() = p.getInt("cursor", -1)
         set(v) = p.edit().putInt("cursor", v).apply()
+    var darkLook: Boolean                                      // Mellow's Dark look; White is the main one
+        get() = p.getBoolean("darkLook", false)
+        set(v) = p.edit().putBoolean("darkLook", v).apply()
     var tourDone: Boolean
         get() = p.getBoolean("tourDone", false)
         set(v) = p.edit().putBoolean("tourDone", v).apply()
@@ -61,7 +64,9 @@ class Store(context: Context) {
 
     fun signOut() {
         val keepServer = server
+        val keepLook = darkLook
         p.edit().clear().apply()
         server = keepServer
+        darkLook = keepLook
     }
 }

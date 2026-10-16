@@ -31,7 +31,7 @@ fun JoinScreen(nav: Nav) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     Page {
-        Heading("Join your family", "Ask a parent to open Homebase, tap Family, then Invite, and read you the code.")
+        Heading("Join your family", "Ask a parent to open Mellow, tap More, then Invite, and read you the code.")
         OutlinedTextField(code, { code = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(8) }, label = { Text("Invite code") }, singleLine = true,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters), modifier = Modifier.fillMaxWidth())
         Gap(8)
@@ -81,7 +81,7 @@ fun ConsentScreen(nav: Nav, s: Screen.Consent) {
         }
         Gap(12)
         SoftCard(tint = RoseSoft) {
-            Text("Homebase will never", style = MaterialTheme.typography.titleMedium)
+            Text("Mellow will never", style = MaterialTheme.typography.titleMedium)
             Gap(6)
             Bullets(listOf("Hide itself, or share anything in secret", "Read your other apps, browsing or private messages", "Switch on your microphone or camera by itself", "Lock your device or limit your screen time"), "✕")
         }
@@ -109,7 +109,7 @@ fun ConsentScreen(nav: Nav, s: Screen.Consent) {
 @Composable
 fun AboutScreen(nav: Nav) {
     Page {
-        Heading("What Homebase will never do", "Homebase is for staying in touch, not for watching over someone's shoulder.")
+        Heading("What Mellow will never do", "Mellow is for staying in touch, not for watching over someone's shoulder.")
         SoftCard(tint = MintSoft) {
             Bullets(listOf("It never hides. A notification always shows when it is running.", "It never reads your other apps, your browsing or your private messages.", "It never turns on your microphone or camera by itself. Calls only start when you answer.",
                 "It never locks your tablet or limits your screen time.", "Location is kept for 7 days, then deleted. Leave the family and everything you shared goes."), "•")

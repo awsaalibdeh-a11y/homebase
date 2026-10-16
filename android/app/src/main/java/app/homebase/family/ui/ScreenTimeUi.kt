@@ -116,11 +116,11 @@ fun ScreenTimeScreen(nav: Nav, memberId: Int) {
             SectionLabel("Apps")
             if (shown.apps.isEmpty() && loaded) SoftCard {
                 Text(if (mine) "Nothing counted for this day yet." else "Nothing recorded for this day.", style = MaterialTheme.typography.titleMedium)
-                Text(if (mine) "Turn on \"Track my screen time\" in Me, then it counts while you play or watch." else "${m?.name ?: "They"} may not have turned tracking on yet. It is their choice, and it counts only on their own phone.", Modifier.padding(top = 4.dp), color = Muted)
+                Text(if (mine) "Turn on \"Track my screen time\" in More, then it counts while you play or watch." else "${m?.name ?: "They"} may not have turned tracking on yet. It is their choice, and it counts only on their own phone.", Modifier.padding(top = 4.dp), color = Muted)
             }
             shown.apps.sortedByDescending { it.sec }.forEach { a -> AppRow(a, shown.apps.maxOf { it.sec }.coerceAtLeast(1)) }
             if (mine && days.isNotEmpty()) SoftButton("Delete my screen time data") { scope.launch { runCatching { ctx.hb.api.deleteScreenTime() }.onSuccess { ctx.hb.store.screenData = "{}"; reload++; toast(ctx, "Deleted") } } }
-            Text("Screen time is kept for a month, then deleted. Homebase only counts minutes per app. It never sees what is on the screen.", color = Muted)
+            Text("Screen time is kept for a month, then deleted. Mellow only counts minutes per app. It never sees what is on the screen.", color = Muted)
         }
         Gap(8)
     }
@@ -171,7 +171,7 @@ fun ScreenTimeCard(nav: Nav) {
             })
         }
         if (on && !access) {
-            Text("One more step: allow \"Usage access\" for Homebase on the page that opened. Android asks for this once.", Modifier.padding(top = 8.dp), color = Sun)
+            Text("One more step: allow \"Usage access\" for Mellow on the page that opened. Android asks for this once.", Modifier.padding(top = 8.dp), color = Sun)
             TextButton({ ScreenTimeTracker.openAccessSettings(ctx) }) { Text("Open the page again") }
         } else if (on) {
             Text("Today: ${durationText(today)}", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleMedium)
@@ -186,7 +186,7 @@ fun ScreenTimeCard(nav: Nav) {
     }
     if (!android.provider.Settings.canDrawOverlays(ctx)) SoftCard {
         Text("Parent locks", style = MaterialTheme.typography.titleMedium)
-        Text("A parent can lock your device for a while (never more than 4 hours a day). To show the lock over other apps, allow \"Display over other apps\" for Homebase. You can always ask to be unlocked or send an SOS.", color = Muted)
+        Text("A parent can lock your device for a while (never more than 4 hours a day). To show the lock over other apps, allow \"Display over other apps\" for Mellow. You can always ask to be unlocked or send an SOS.", color = Muted)
         TextButton({ ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:" + ctx.packageName)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }) { Text("Allow the lock screen") }
     }
 }

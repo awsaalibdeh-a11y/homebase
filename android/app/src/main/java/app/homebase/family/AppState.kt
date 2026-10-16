@@ -23,6 +23,8 @@ data class CallUi(
     val startedAt: Long = 0,
     val muted: Boolean = false,
     val speaker: Boolean = false,
+    val cameraOn: Boolean = false,                                 // my camera is on
+    val remoteCam: Boolean = false,                                // theirs is on
     val note: String = "",
 )
 
@@ -40,11 +42,19 @@ class AppState(val store: Store, val api: Api) {
     val polls = MutableStateFlow<List<Poll>>(emptyList())
     val rewards = MutableStateFlow(RewardsResp())
     val notes = MutableStateFlow<List<BoardItem>>(emptyList())
+    val meals = MutableStateFlow<List<Meal>>(emptyList())
+    val mealsSeen = HashMap<Int, Meal>()                              // every meal we have loaded, so a meal opened from the calendar can be shown
+    val groups = MutableStateFlow<List<FriendGroup>>(emptyList())
+    val groupAsks = MutableStateFlow<List<GroupAsk>>(emptyList())
+    val stickers = MutableStateFlow<List<Sticker>?>(null)
+    val feed = MutableStateFlow<List<FeedItem>>(emptyList())
+    val tab = MutableStateFlow(0)                                    // the bottom bar: 0 Home, 1 Map, 2 Plan, 3 Chat, 4 More (kept here so it survives opening a screen and coming back)
     val call = MutableStateFlow<CallUi?>(null)
     val pingAsk = MutableStateFlow<PingAsk?>(null)
     val openThread = MutableStateFlow<Int?>(null)
     val flash = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val showOnMap = MutableSharedFlow<Spot>(extraBufferCapacity = 4)
+    val openGroup = MutableStateFlow<Int?>(null)                     // the friend group on screen right now, so its messages do not also ping
 
     val me: Member? get() = family.value?.members?.firstOrNull { it.id == store.myId }
     fun member(id: Int): Member? = family.value?.members?.firstOrNull { it.id == id }
@@ -97,6 +107,24 @@ class AppState(val store: Store, val api: Api) {
         runCatching { api.polls() }.onSuccess { polls.value = it }
     }
 
+    fun noteMeals(list: List<Meal>) { list.forEach { mealsSeen[it.id] = it } }
+
+    suspend fun refreshMeals() {
+        runCatching { api.meals() }.onSuccess { meals.value = it; it.forEach { m -> mealsSeen[m.id] = m } }
+    }
+
+    suspend fun refreshGroups() {
+        runCatching { api.groups() }.onSuccess { groups.value = it.groups; groupAsks.value = it.requests }
+    }
+
+    suspend fun loadStickers() {
+        if (stickers.value == null) runCatching { api.stickers() }.onSuccess { stickers.value = it }
+    }
+
+    suspend fun refreshFeed() {
+        runCatching { api.feed() }.onSuccess { feed.value = it }
+    }
+
     suspend fun refreshItems() {
         runCatching { api.items() }.onSuccess { items.value = it }
     }
@@ -117,6 +145,7 @@ class HomebaseApp : Application() {
     override fun onCreate() {
         super.onCreate()
         store = Store(this)
+        app.homebase.family.ui.Look.dark = store.darkLook
         api = Api(store)
         state = AppState(store, api)
         calls = CallManager(this, api, state, scope)

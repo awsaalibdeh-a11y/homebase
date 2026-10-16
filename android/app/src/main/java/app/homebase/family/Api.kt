@@ -152,6 +152,30 @@ class Api(private val store: Store) {
     }
     suspend fun dropNote(id: Int) { raw("DELETE", "/api/board/$id") }
 
+    // the meal plan
+    suspend fun meals(from: String? = null, to: String? = null): List<Meal> =
+        ask<MealsResp>("GET", "/api/meals" + (if (from != null && to != null) "?from=$from&to=$to" else "")).meals
+    suspend fun addMeal(title: String, day: String, slot: String) { raw("POST", "/api/meals", obj { put("title", title); put("day", day); put("slot", slot) }) }
+    suspend fun dropMeal(id: Int) { raw("DELETE", "/api/meals/$id") }
+    suspend fun setCook(id: Int, cook: Int) { raw("POST", "/api/meals/$id/cook", obj { put("cook", cook) }) }
+    suspend fun mealToList(id: Int): Int = ask<AddedResp>("POST", "/api/meals/$id/to-list").added
+
+    // friend groups
+    suspend fun groups(): GroupsResp = ask("GET", "/api/groups")
+    suspend fun makeGroup(name: String, emoji: String): MakeGroupResp = ask("POST", "/api/groups", obj { put("name", name); put("emoji", emoji) })
+    suspend fun joinGroup(code: String): JoinGroupResp = ask("POST", "/api/groups/join", obj { put("code", code) })
+    suspend fun approveGroup(gid: Int, member: Int, ok: Boolean) { raw("POST", "/api/groups/$gid/approve", obj { put("member", member); put("ok", ok) }) }
+    suspend fun leaveGroup(gid: Int) { raw("POST", "/api/groups/$gid/leave") }
+    suspend fun removeFromGroup(gid: Int, member: Int) { raw("DELETE", "/api/groups/$gid/members/$member") }
+    suspend fun groupMessages(gid: Int, after: Int = 0): GroupMessagesResp = ask("GET", "/api/groups/$gid/messages" + (if (after > 0) "?after=$after" else ""))
+    suspend fun sendGroup(gid: Int, kind: String, body: String): GroupSendResp = ask("POST", "/api/groups/$gid/messages", obj { put("kind", kind); put("body", body) })
+
+    // stickers, the activity feed, family games
+    suspend fun uploadImage(dataUrl: String): String = Net.parseToJsonElement(raw("POST", "/api/images", obj { put("image", dataUrl) })).jsonObject["url"]?.jsonPrimitive?.contentOrNull ?: error("The photo did not upload.")
+    suspend fun stickers(): List<Sticker> = ask<StickersResp>("GET", "/api/stickers").stickers
+    suspend fun feed(): List<FeedItem> = ask<FeedResp>("GET", "/api/feed").items
+    suspend fun startGame(game: String): GameStartResp = ask("POST", "/api/games/start", obj { put("game", game) })
+
     // "where are you?"
     suspend fun ping(to: Int): Int = ask<IdResp>("POST", "/api/ping", obj { put("to", to) }).id
     suspend fun answerPing(id: Int, accept: Boolean, lat: Double? = null, lng: Double? = null) {

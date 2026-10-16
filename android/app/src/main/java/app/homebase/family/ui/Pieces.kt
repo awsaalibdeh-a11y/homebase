@@ -66,7 +66,7 @@ fun SosButton(onFire: () -> Unit) {
         },
         contentAlignment = Alignment.Center,
     ) {
-        Text(if (holding) "Keep holding…" else "🚨  Hold 2 seconds for SOS", color = if (holding) OnAccent else Rose, style = MaterialTheme.typography.labelLarge)
+        Text(if (holding) "Keep holding…" else "🚨  Hold 2 seconds for SOS", color = if (holding) Color.White else Rose, style = MaterialTheme.typography.labelLarge)
     }
 }
 

@@ -72,8 +72,12 @@ fun planWhen(start: Double): String {
     }
 }
 
+/** The same page, opened from a notification with a Back button on top. */
 @Composable
-fun PlansScreen(nav: Nav) {
+fun PlansScreen(nav: Nav) = WithBack(nav) { PlanTab(nav) }
+
+@Composable
+fun PlanTab(nav: Nav) {
     val ctx = LocalContext.current
     val app = ctx.hb
     val plans by app.state.plans.collectAsState()
@@ -83,16 +87,17 @@ fun PlansScreen(nav: Nav) {
     var addPlan by remember { mutableStateOf(false) }
     var askPoll by remember { mutableStateOf(false) }
     var addPlanDay by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(Unit) { app.state.refreshPlans(); app.state.refreshPolls() }
+    var addMeal by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { app.state.refreshPlans(); app.state.refreshPolls(); app.state.refreshMeals() }
     val nameOf: (Int) -> String = { id -> if (id == me) "You" else fam?.members?.firstOrNull { it.id == id }?.name ?: "Someone" }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { TextButton({ nav.back() }) { Text("Back") } }
-        Heading("Plans and votes", "Put things on the family calendar and ask everyone a question.")
-        CalendarCard(nameOf, fam?.members.orEmpty(), plans) { ms -> addPlanDay = ms; addPlan = true }
+        Heading("Plan", "The calendar, what we are eating, and family votes.")
+        CalendarCard(nav, nameOf, fam?.members.orEmpty(), plans) { ms -> addPlanDay = ms; addPlan = true }
         SectionLabel("📅 Coming up")
         plans.forEach { PlanCard(it, nameOf) }
         if (plans.isEmpty()) CenterNote("Nothing planned yet.")
         SoftButton("＋ Add a plan") { addPlanDay = null; addPlan = true }
+        MealsSection(nav, nameOf) { addMeal = true }
         SectionLabel("🗳️ Family votes")
         polls.forEach { PollCard(it, nameOf) }
         if (polls.isEmpty()) CenterNote("Ask the family something: pizza or tacos?")
@@ -100,6 +105,7 @@ fun PlansScreen(nav: Nav) {
         Gap(8)
     }
     if (addPlan) AddPlanDialog(addPlanDay) { addPlan = false; addPlanDay = null }
+    if (addMeal) AddMealDialog(null) { addMeal = false }
     if (askPoll) AskPollDialog { askPoll = false }
 }
 
@@ -129,7 +135,7 @@ private fun votePoll(ctx: Context, id: Int, option: Int) {
 }
 
 @Composable
-private fun PlanCard(p: Plan, nameOf: (Int) -> String) {
+fun PlanCard(p: Plan, nameOf: (Int) -> String) {
     val ctx = LocalContext.current
     val app = ctx.hb
     val inText = if (p.going.isEmpty()) "Nobody has said yes yet" else "👍 " + p.going.joinToString(", ") { nameOf(it) }
@@ -144,9 +150,11 @@ private fun PlanCard(p: Plan, nameOf: (Int) -> String) {
             if (p.maker == app.store.myId || app.store.isParent) TextButton({ app.scope.launch { runCatching { app.api.dropPlan(p.id) }; app.state.refreshPlans() } }) { Text("✕") }
         }
         Text(inText + outText, Modifier.padding(top = 6.dp), color = Muted, fontSize = 13.sp)
+        if (p.via.isNotBlank()) Text("From ${slotName(p.via)}", color = Muted, fontSize = 12.sp)
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Pill(if (p.mine == "in") "✓ I'm in" else "I'm in", p.mine == "in") { answerPlan(ctx, p.id, if (p.mine == "in") "" else "in") }
             Pill(if (p.mine == "out") "✓ Can't" else "Can't", p.mine == "out") { answerPlan(ctx, p.id, if (p.mine == "out") "" else "out") }
+            if (p.lat != null && p.lng != null) Pill("📍 Directions", false) { openDirections(ctx, p.lat, p.lng, p.title) }
         }
     }
 }
@@ -189,7 +197,7 @@ private fun PollCard(p: Poll, nameOf: (Int) -> String) {
 }
 
 @Composable
-private fun AddPlanDialog(startMs: Long?, onDismiss: () -> Unit) {
+fun AddPlanDialog(startMs: Long?, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var title by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
@@ -235,7 +243,7 @@ private fun AddPlanDialog(startMs: Long?, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun AskPollDialog(onDismiss: () -> Unit) {
+fun AskPollDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var question by remember { mutableStateOf("") }
     val answers = remember { mutableStateListOf("", "", "", "") }
@@ -270,16 +278,18 @@ private fun AskPollDialog(onDismiss: () -> Unit) {
 
 /** A month at a glance: dots for plans, a cake for birthdays. Tap a day to see it, answer "I'm in", or add a plan on it. */
 @Composable
-private fun CalendarCard(nameOf: (Int) -> String, members: List<Member>, refresh: Any, onAdd: (Long) -> Unit) {
+private fun CalendarCard(nav: Nav, nameOf: (Int) -> String, members: List<Member>, refresh: Any, onAdd: (Long) -> Unit) {
     val ctx = LocalContext.current
     val zone = java.time.ZoneId.systemDefault()
     var month by remember { mutableStateOf(java.time.YearMonth.now()) }
     var sel by remember { mutableIntStateOf(java.time.LocalDate.now().dayOfMonth) }
     var monthPlans by remember { mutableStateOf<List<Plan>>(emptyList()) }
+    var monthMeals by remember { mutableStateOf<List<app.homebase.family.Meal>>(emptyList()) }
     LaunchedEffect(month, refresh) {
         val from = month.atDay(1).atStartOfDay(zone).toEpochSecond()
         val to = month.plusMonths(1).atDay(1).atStartOfDay(zone).toEpochSecond()
         runCatching { ctx.hb.api.plansBetween(from, to) }.onSuccess { monthPlans = it }
+        runCatching { ctx.hb.api.meals(month.atDay(1).toString(), month.atEndOfMonth().toString()) }.onSuccess { monthMeals = it; ctx.hb.state.noteMeals(it) }
     }
     fun answerHere(id: Int, answer: String) {
         ctx.hb.scope.launch {
@@ -328,13 +338,16 @@ private fun CalendarCard(nameOf: (Int) -> String, members: List<Member>, refresh
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                         ) {
                             Text("$d", color = if (chosen) OnAccent else Ink, fontSize = 14.sp)
-                            Text((if (cake) "\uD83C\uDF82" else "") + "\u25CF".repeat(minOf(n, 3)), color = if (chosen) OnAccent else Accent, fontSize = 8.sp, maxLines = 1)
+                            Text((if (cake) "\uD83C\uDF82" else "") + (if (monthMeals.any { it.day == month.atDay(d).toString() }) "\uD83C\uDF7D" else "") + "\u25CF".repeat(minOf(n, 3)), color = if (chosen) OnAccent else Accent, fontSize = 8.sp, maxLines = 1)
                         }
                     }
                 }
             }
         }
         Text("$day $monthName", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.titleMedium)
+        monthMeals.filter { it.day == month.atDay(day).toString() }.sortedBy { MEAL_SLOTS.indexOf(it.slot) }.forEach { ml ->
+            Text("${slotIcon(ml.slot)} ${ml.title}", Modifier.padding(top = 8.dp).clickable { nav.go(Screen.Meal(ml.id)) }, style = MaterialTheme.typography.titleMedium)
+        }
         byDay[day].orEmpty().forEach { p ->
             Column(Modifier.padding(top = 8.dp)) {
                 Text("${p.emoji} ${p.title}", style = MaterialTheme.typography.titleMedium)
@@ -345,11 +358,12 @@ private fun CalendarCard(nameOf: (Int) -> String, members: List<Member>, refresh
                         val on = p.mine == answer
                         Pill(if (on) "\u2713 $label" else label, on) { answerHere(p.id, if (on) "" else answer) }
                     }
+                    if (p.lat != null && p.lng != null) Pill("📍 Directions", false) { openDirections(ctx, p.lat, p.lng, p.title) }
                 }
             }
         }
         birthdays.filter { it.second == day }.forEach { Text("\uD83C\uDF82 ${it.first.name}'s birthday", Modifier.padding(top = 8.dp)) }
-        if (byDay[day].isNullOrEmpty() && birthdays.none { it.second == day }) Text("Nothing on this day.", Modifier.padding(top = 4.dp), color = Muted)
+        if (byDay[day].isNullOrEmpty() && birthdays.none { it.second == day } && monthMeals.none { it.day == month.atDay(day).toString() }) Text("Nothing on this day.", Modifier.padding(top = 4.dp), color = Muted)
         SoftButton("\uFF0B Plan on this day", Modifier.padding(top = 8.dp)) { onAdd(month.atDay(day).atTime(18, 0).atZone(zone).toInstant().toEpochMilli()) }
     }
 }

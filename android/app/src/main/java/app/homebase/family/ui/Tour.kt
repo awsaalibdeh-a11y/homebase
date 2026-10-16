@@ -37,20 +37,20 @@ import kotlinx.coroutines.launch
 private data class Step(val emoji: String, val title: String, val body: String)
 
 private val PARENT_STEPS = listOf(
-    Step("🏠", "Welcome to Homebase", "Stay close, and stay honest. Here is how it works, in under a minute."),
+    Step("🏠", "Welcome to Mellow", "Stay close, and stay honest. Here is how it works, in under a minute."),
     Step("🗺️", "See everyone on the map", "People who are sharing appear on the map, you included. If a phone goes offline you still see where it was last, and how long ago."),
-    Step("👪", "Message, call, or ask", "In Family, tap Message or Call (calls really ring). \"Where?\" asks someone to share their location right now, and they can always say not now."),
-    Step("✅", "Quick check-ins", "In Me: \"I'm OK\", \"I'm home\", \"Running late\", and an SOS you hold for two seconds. They reach the whole family at once."),
+    Step("👪", "Message, call, or ask", "In Map, tap Message or Call on a person (calls really ring). \"Where?\" asks someone to share their location right now, and they can always say not now."),
+    Step("✅", "Quick check-ins", "In More: \"I'm OK\", \"I'm home\", \"Running late\", and an SOS you hold for two seconds. They reach the whole family at once."),
     Step("🏫", "Saved places", "Add places like school. Everyone gets a message when someone arrives or leaves, including the person who arrived."),
     Step("🔒", "Everyone is in control", "Anyone can pause sharing or set quiet hours, and children choose what parents can do. If something is switched off, you will see exactly what, so nobody is guessing."),
-    Step("💻", "On a laptop too", "Open homebase-family.onrender.com/app in a browser to use Homebase on a computer. It even works offline."),
+    Step("💻", "On a laptop too", "Open homebase-family.onrender.com/app in a browser to use the laptop version, which is called Homebase. It even works offline."),
 )
 private val CHILD_STEPS = listOf(
-    Step("🏠", "Welcome to Homebase", "A family app that is honest about everything it shares. Here is how it works."),
+    Step("🏠", "Welcome to Mellow", "A family app that is honest about everything it shares. Here is how it works."),
     Step("👀", "What your family sees", "Where you are while sharing is on, your battery, and the messages you send. Nothing else, and nothing in secret."),
     Step("⏸️", "You can pause", "Pause sharing any time, or set quiet hours. Your family sees that it is paused, so nobody worries."),
-    Step("🎛️", "You choose what parents can do", "In Me, open What parents can do. Switch off seeing your location, calls, messages and more. Your parents see what is off."),
-    Step("✅", "Let them know you are OK", "\"I'm OK\", \"I'm home\", \"Running late\", and a hold-for-two-seconds SOS are one tap away in Me."),
+    Step("🎛️", "You choose what parents can do", "In More, open What parents can do. Switch off seeing your location, calls, messages and more. Your parents see what is off."),
+    Step("✅", "Let them know you are OK", "\"I'm OK\", \"I'm home\", \"Running late\", and a hold-for-two-seconds SOS are one tap away in More."),
     Step("📞", "Messages and calls", "Chat with the family and call them any time. \"Where are you?\" is only a request: you can answer or say not now."),
 )
 

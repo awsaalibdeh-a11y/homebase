@@ -71,7 +71,11 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
     LaunchedEffect(open.value) {
         val o = open.value ?: return@LaunchedEffect
         if (o.startsWith("chat:") && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Thread(o.removePrefix("chat:").toIntOrNull() ?: 0)) }
-        else if (o == "plans" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Plans) }
+        else if (o.startsWith("group:") && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 3; nav.go(Screen.Group(o.removePrefix("group:").toIntOrNull() ?: 0)) }
+        else if (o == "map" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 1 }
+        else if (o == "plans" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 2 }
+        else if (o == "meals" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 2 }
+        else if (o == "groups" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 3 }
         else if (o == "rewards" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Rewards) }
         open.value = null
     }
@@ -93,8 +97,10 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
             is Screen.Board -> app.homebase.family.ui.BoardScreen(nav)
             is Screen.Controls -> app.homebase.family.ui.ControlsScreen(nav, s.memberId)
             Screen.Rules -> app.homebase.family.ui.RulesScreen(nav)
-            Screen.MapFull -> app.homebase.family.ui.WithBack(nav) { app.homebase.family.ui.MapTab(nav) }
-            Screen.ChatFull -> app.homebase.family.ui.WithBack(nav) { app.homebase.family.ui.ChatTab(nav) }
+            is Screen.Meal -> app.homebase.family.ui.MealScreen(nav, s.id)
+            is Screen.Group -> app.homebase.family.ui.GroupScreen(nav, s.id)
+            Screen.Feed -> app.homebase.family.ui.FeedScreen(nav)
+            is Screen.Camera -> app.homebase.family.ui.CameraScreen(nav, s.purpose)
             is Screen.ScreenTime -> app.homebase.family.ui.ScreenTimeScreen(nav, s.memberId)
             Screen.Places -> PlacesScreen(nav)
             Screen.AddPlace -> AddPlaceScreen(nav)

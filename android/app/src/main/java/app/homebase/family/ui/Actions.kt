@@ -46,6 +46,25 @@ fun askWhere(ctx: Context, m: Member) {
     }
 }
 
+/** Starts a video call: needs the microphone and the camera, asked for together. */
+@Composable
+fun rememberVideoCaller(): (Member) -> Unit {
+    val ctx = LocalContext.current
+    var waiting by remember { mutableStateOf<Member?>(null) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        val w = waiting
+        waiting = null
+        if (w != null && r[Manifest.permission.RECORD_AUDIO] == true) ctx.hb.calls.start(w, false, r[Manifest.permission.CAMERA] == true)
+        else toast(ctx, "Mellow needs the microphone to make calls.")
+    }
+    return { member ->
+        val mic = ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val cam = ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        if (mic && cam) ctx.hb.calls.start(member, false, true)
+        else { waiting = member; ask.launch(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)) }
+    }
+}
+
 /** Gives back a function that starts a call, asking for the microphone first if Android has not allowed it yet. */
 @Composable
 fun rememberCaller(): (Member, Boolean) -> Unit {
@@ -54,7 +73,7 @@ fun rememberCaller(): (Member, Boolean) -> Unit {
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         val w = waiting
         waiting = null
-        if (ok && w != null) ctx.hb.calls.start(w.first, w.second) else if (!ok) toast(ctx, "Homebase needs the microphone to make calls.")
+        if (ok && w != null) ctx.hb.calls.start(w.first, w.second) else if (!ok) toast(ctx, "Mellow needs the microphone to make calls.")
     }
     return { member, urgent ->
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) ctx.hb.calls.start(member, urgent)

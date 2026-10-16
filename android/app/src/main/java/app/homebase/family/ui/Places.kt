@@ -52,7 +52,7 @@ fun PlacesScreen(nav: Nav) {
             val hasHome = fam?.places.orEmpty().any { it.name == "Home" }
             BigButton(if (hasHome) "🏠 Move the Home area to where I am" else "🏠 Set the Home area where I am") {
                 val st = ctx.hb.store
-                if (st.lastSentAt == 0L) toast(ctx, "Turn on your location sharing first, so Homebase knows where you are.")
+                if (st.lastSentAt == 0L) toast(ctx, "Turn on your location sharing first, so Mellow knows where you are.")
                 else scope.launch { runCatching { ctx.hb.api.setHome(st.lastLat.toDouble(), st.lastLng.toDouble(), 200) }.onSuccess { ctx.hb.state.refreshFamily(); toast(ctx, "Home area saved") }.onFailure { toast(ctx, it.message ?: "Could not save it") } }
             }
             SoftButton("Add another place") { nav.go(Screen.AddPlace) }

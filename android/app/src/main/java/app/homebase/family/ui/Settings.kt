@@ -39,7 +39,7 @@ fun TransparencyScreen(nav: Nav) {
     val parents = fam?.members.orEmpty().filter { it.isParent && it.id != ctx.hb.store.myId }.joinToString { it.name }.ifBlank { "the other parents" }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { TextButton({ nav.back() }) { Text("Back") } }
-        Heading("What my family can see", "This is everything. If it is not on this page, Homebase does not share it.")
+        Heading("What my family can see", "This is everything. If it is not on this page, Mellow does not share it.")
         SoftCard(tint = if (me?.share == "on") MintSoft else SunSoft) {
             Text("Location: ${when (me?.share) { "on" -> "shared"; "paused" -> "paused"; else -> "not shared" }}", style = MaterialTheme.typography.titleMedium)
             Text(if (me?.share == "on") "Everyone in the family can see where you are on the map. Last update: ${timeAgo(ctx.hb.store.lastSentAt / 1000.0)}." else "Nobody can see your location right now.", color = Muted)
@@ -54,7 +54,7 @@ fun TransparencyScreen(nav: Nav) {
         }
         SoftCard {
             Text("Messages and calls", style = MaterialTheme.typography.titleMedium)
-            Text("Only inside Homebase. It never reads your other messages or apps, and a call only starts when someone answers.", color = Muted)
+            Text("Only inside Mellow. It never reads your other messages or apps, and a call only starts when someone answers.", color = Muted)
         }
         SoftCard {
             Text("How long it is kept", style = MaterialTheme.typography.titleMedium)
@@ -80,7 +80,7 @@ fun SettingsScreen(nav: Nav) {
         Heading("Settings")
         OutlinedTextField(name, { name = it }, label = { Text("Your name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         SoftButton("Save name") { ctx.hb.scope.launch { runCatching { ctx.hb.api.patchMe("name" to name) }.onSuccess { ctx.hb.store.myName = name; ctx.hb.state.refreshFamily(); toast(ctx, "Saved") } } }
-        SoftButton("Let Homebase ring when the device is idle") { askBatteryExemption(ctx) }
+        SoftButton("Let Mellow ring when the device is idle") { askBatteryExemption(ctx) }
         SoftButton("Check for a newer version") {
             ctx.hb.scope.launch {
                 runCatching { ctx.hb.api.config() }.onSuccess { c ->
@@ -89,14 +89,16 @@ fun SettingsScreen(nav: Nav) {
                 }.onFailure { toast(ctx, "Could not check") }
             }
         }
-        SoftButton("What Homebase will never do") { nav.go(Screen.About) }
+        SectionLabel("Look")
+        TwoUp({ SoftButton(if (!Look.dark) "✓ White" else "White") { Look.dark = false; ctx.hb.store.darkLook = false } }, { SoftButton(if (Look.dark) "✓ Dark" else "Dark") { Look.dark = true; ctx.hb.store.darkLook = true } })
+        SoftButton("What Mellow will never do") { nav.go(Screen.About) }
         Gap(6)
         SectionLabel("Advanced")
         OutlinedTextField(server, { server = it }, label = { Text("Server address") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         SoftButton("Save server address") { ctx.hb.store.server = server; toast(ctx, "Saved. Restart the app to use it.") }
         Gap(6)
         BigButton("Leave the family", color = Rose) { leave = true }
-        Text("Homebase ${BuildConfig.VERSION_NAME}", color = Muted, modifier = Modifier.padding(top = 8.dp))
+        Text("Mellow ${BuildConfig.VERSION_NAME}", color = Muted, modifier = Modifier.padding(top = 8.dp))
     }
     if (leave) AlertDialog(onDismissRequest = { leave = false }, title = { Text("Leave the family?") },
         text = { Text("Everything you shared is deleted and you stop seeing the family. This cannot be undone.") },

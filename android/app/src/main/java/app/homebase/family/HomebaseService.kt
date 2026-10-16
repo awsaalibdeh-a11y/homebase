@@ -14,6 +14,7 @@ import android.os.IBinder
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
+import app.homebase.family.ui.gameText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -141,6 +142,8 @@ class HomebaseService : Service() {
         app.state.refreshPolls()
         app.state.refreshRewards()
         app.state.refreshNotes()
+        app.state.refreshMeals()
+        app.state.refreshGroups()
         var cursor = app.store.cursor
         if (cursor < 0) { cursor = runCatching { app.api.events(-1, 0).cursor }.getOrDefault(0); app.store.cursor = cursor }
         var failures = 0
@@ -179,11 +182,14 @@ class HomebaseService : Service() {
                 if (m.from != app.store.myId && m.kind != "system" && !viewing) {
                     val name = p.str("name")
                     val (title, body) = when (m.kind) {
-                        "sos" -> "🚨 $name needs help" to m.body.ifBlank { "Open Homebase to see where they are." }
+                        "sos" -> "🚨 $name needs help" to m.body.ifBlank { "Open Mellow to see where they are." }
                         "checkin" -> "✓ $name checked in" to m.body
                         "late" -> "⏰ $name" to m.body
-                        "pickup" -> "🚗 $name needs a pickup" to m.body.ifBlank { "Open Homebase to see where they are." }
+                        "pickup" -> "🚗 $name needs a pickup" to m.body.ifBlank { "Open Mellow to see where they are." }
                         "heart" -> "❤️ $name" to "is thinking of you"
+                        "gif" -> name to "🎞️ sent a GIF"
+                        "image" -> name to "📷 sent a photo"
+                        "game" -> "🎮 ${p.str("name")}" to gameText(m.body)
                         else -> name to m.body
                     }
                     val alert = m.kind == "sos" || m.kind == "checkin" || m.kind == "late" || m.kind == "pickup"
@@ -248,6 +254,26 @@ class HomebaseService : Service() {
             "notice" -> {
                 app.state.refreshFamily()
                 if (p.str("text").isNotBlank()) Notifications.post(this, Notifications.CH_ALERTS, "\uD83D\uDCE2 ${p.str("name")}", p.str("text"))
+            }
+            "meals" -> app.state.refreshMeals()
+            "group" -> {
+                app.state.refreshGroups()
+                if (p.flag("approved")) Notifications.post(this, Notifications.CH_MESSAGES, "✅ A parent said yes", "You are in ${p.str("group")}.", "groups")
+                if (p.flag("declined")) Notifications.post(this, Notifications.CH_MESSAGES, "A parent said not now", p.str("group"), "groups")
+            }
+            "group_request" -> {
+                app.state.refreshGroups()
+                Notifications.post(this, Notifications.CH_ALERTS, "👥 ${p.str("name")} wants to join ${p.str("group")}", "Open Mellow to say yes or not now.", "groups")
+            }
+            "group_flag" -> {
+                app.state.refreshGroups()
+                Notifications.post(this, Notifications.CH_ALERTS, "⚠️ ${p.str("name")}'s message was censored", "In ${p.str("group")}. Open Mellow to read it.", "group:${p.int("gid")}")
+            }
+            "gmessage" -> {
+                app.state.refreshGroups()
+                if (!(appVisible && app.state.openGroup.value == p.int("gid"))) {
+                    Notifications.post(this, Notifications.CH_MESSAGES, "${p.str("name")} · ${p.str("group")}", if (p.str("kind") == "gif") "🎞️ sent a GIF" else p.str("body"), "group:${p.int("gid")}")
+                }
             }
             "rewards" -> app.state.refreshRewards()
             "board" -> app.state.refreshNotes()

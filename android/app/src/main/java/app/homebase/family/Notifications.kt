@@ -24,7 +24,7 @@ object Notifications {
     fun createChannels(c: Context) {
         val nm = c.getSystemService(NotificationManager::class.java)
         val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
-        nm.createNotificationChannel(NotificationChannel(CH_SERVICE, "Homebase is connected", NotificationManager.IMPORTANCE_LOW).apply { description = "Shows that Homebase is running, so you always know." ; setShowBadge(false) })
+        nm.createNotificationChannel(NotificationChannel(CH_SERVICE, "Mellow is connected", NotificationManager.IMPORTANCE_LOW).apply { description = "Shows that Mellow is running, so you always know." ; setShowBadge(false) })
         nm.createNotificationChannel(NotificationChannel(CH_MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH).apply { setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), attrs); enableVibration(true) })
         nm.createNotificationChannel(NotificationChannel(CH_QUIET, "Messages in quiet hours", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null) })
         nm.createNotificationChannel(NotificationChannel(CH_ALERTS, "Check-ins, places and SOS", NotificationManager.IMPORTANCE_HIGH).apply { setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), attrs); enableVibration(true) })
@@ -35,7 +35,7 @@ object Notifications {
         PendingIntent.getActivity(c, next++, Intent(c, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP; extra?.let { putExtra("open", it) } }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     fun service(c: Context, text: String): Notification =
-        NotificationCompat.Builder(c, CH_SERVICE).setSmallIcon(R.drawable.ic_stat_home).setContentTitle("Homebase").setContentText(text)
+        NotificationCompat.Builder(c, CH_SERVICE).setSmallIcon(R.drawable.ic_stat_home).setContentTitle("Mellow").setContentText(text)
             .setOngoing(true).setSilent(true).setCategory(NotificationCompat.CATEGORY_SERVICE).setContentIntent(open(c)).build()
 
     fun post(c: Context, channel: String, title: String, text: String, open: String? = null, urgent: Boolean = false) {
@@ -54,7 +54,7 @@ object Notifications {
         val decline = PendingIntent.getBroadcast(c, 3, Intent(c, ActionReceiver::class.java).setAction("decline_call"), flags)
         val who = androidx.core.app.Person.Builder().setName(name).setImportant(true).build()
         val n = NotificationCompat.Builder(c, CH_CALLS).setSmallIcon(R.drawable.ic_stat_home)
-            .setContentTitle(if (urgent) "Urgent call from $name" else name).setContentText("Homebase call")
+            .setContentTitle(if (urgent) "Urgent call from $name" else name).setContentText("Mellow call")
             .setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_MAX).setOngoing(true)
             .setFullScreenIntent(show, true).setContentIntent(show).setTimeoutAfter(46_000)
             .setStyle(NotificationCompat.CallStyle.forIncomingCall(who, decline, answer)).build()

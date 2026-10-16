@@ -69,7 +69,7 @@ fun InviteScreen(nav: Nav) {
     var busy by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { TextButton({ nav.back() }) { Text("Back") } }
-        Heading("Invite someone", "They install Homebase, choose Join with a code, and type this in. A child sees exactly what is shared before saying yes.")
+        Heading("Invite someone", "They install Mellow, choose Join with a code, and type this in. A child sees exactly what is shared before saying yes.")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton({ role = "child"; code = null }) { Text(if (role == "child") "● A child" else "A child") }
             TextButton({ role = "parent"; code = null }) { Text(if (role == "parent") "● A parent" else "A parent") }
@@ -88,7 +88,7 @@ fun InviteScreen(nav: Nav) {
                 Text("Works once, for 24 hours.", color = Muted)
             }
             BigButton("Share the code") {
-                val msg = "Join our family on Homebase. Your code is ${code}. Get the app here: ${ctx.hb.store.server}/"
+                val msg = "Join our family on Mellow (Homebase on the website). Your code is ${code}. Get the app here: ${ctx.hb.store.server}/"
                 ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, msg), "Share the code").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }

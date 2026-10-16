@@ -5,11 +5,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -60,14 +60,14 @@ val PERM_LABELS = listOf("location" to "location", "trail" to "trail", "battery"
 
 @Composable
 fun MainScreen(nav: Nav, initialTab: Int = 0) {
-    var tab by remember { mutableIntStateOf(initialTab) }
     val state = LocalContext.current.hb.state
+    val tab by state.tab.collectAsState()
     val owner = LocalLifecycleOwner.current
     val ctxU = LocalContext.current
     var newApk by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { runCatching { ctxU.hb.api.config() }.onSuccess { c -> if (c.versionCode > app.homebase.family.BuildConfig.VERSION_CODE) newApk = c.apkUrl } }
     newApk?.let { url ->
-        androidx.compose.material3.AlertDialog(onDismissRequest = { newApk = null }, title = { Text("A new Homebase is ready") },
+        androidx.compose.material3.AlertDialog(onDismissRequest = { newApk = null }, title = { Text("A new Mellow is ready") },
             text = { Text("Tap Update, then open the file when it finishes downloading. Your family, places and settings stay as they are.") },
             confirmButton = { TextButton({ ctxU.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); newApk = null }) { Text("Update") } },
             dismissButton = { TextButton({ newApk = null }) { Text("Later") } })
@@ -76,15 +76,17 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
     LaunchedEffect(owner) {
         owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             state.refreshItems()
+            state.refreshMeals()
+            state.refreshGroups()
             while (true) { state.refreshFamily(); delay(10_000) }
         }
     }
-    Scaffold(containerColor = Bg, bottomBar = {
-        NavigationBar(containerColor = Surface) {
-            val items = listOf("Family" to Icons.Filled.People, "Me" to Icons.Filled.Home)
+    Scaffold(containerColor = androidx.compose.ui.graphics.Color.Transparent, bottomBar = {
+        NavigationBar(containerColor = BarBg) {
+            val items = listOf("Home" to Icons.Filled.Home, "Map" to Icons.Filled.Map, "Plan" to Icons.Filled.CalendarMonth, "Chat" to Icons.Filled.Chat, "More" to Icons.Filled.MoreHoriz)
             items.forEachIndexed { i, (label, icon) ->
-                NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icon, label) }, label = { Text(label) },
-                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Accent, selectedTextColor = Accent, indicatorColor = AccentSoft))
+                NavigationBarItem(selected = tab == i, onClick = { state.tab.value = i }, icon = { Icon(icon, label) }, label = { Text(label, maxLines = 1) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = BarBg, selectedTextColor = BarOn, indicatorColor = BarOn, unselectedIconColor = BarOff, unselectedTextColor = BarOff))
             }
         }
     }) { pad ->
@@ -95,7 +97,7 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
         Box(Modifier.padding(pad).fillMaxSize()) {
             if (myLock != null && myLock.until * 1000 > nowMs) { LockedScreen(myLock); return@Box }
             val isParent = LocalContext.current.hb.store.isParent
-            if (tab == 0) FamilyTab(nav) else MeTab(nav)
+            when (tab) { 0 -> HomeTab(nav); 1 -> MapTab(nav); 2 -> PlanTab(nav); 3 -> ChatTab(nav); else -> MeTab(nav) }
             val online by state.online.collectAsState()
             if (!online) Text("📡 Offline · showing the last update", color = Color.White, style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp).background(Color(0xFF2B2B31), RoundedCornerShape(99.dp)).padding(horizontal = 16.dp, vertical = 8.dp))

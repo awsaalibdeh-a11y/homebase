@@ -99,6 +99,9 @@ data class Plan(
     @SerialName("in") val going: List<Int> = emptyList(),
     val out: List<Int> = emptyList(),
     val mine: String? = null,
+    val lat: Double? = null,                                       // a plan with a place gets a Directions button
+    val lng: Double? = null,
+    val via: String = "",                                          // "scout" when it came from a linked app
 )
 
 @Serializable
@@ -261,3 +264,102 @@ data class MeResp(val me: Member, val family: FamilyInfo, val quiet: QuietInfo =
 
 @Serializable
 data class FamilyConfig(@SerialName("version_code") val versionCode: Int = 1, @SerialName("apk_url") val apkUrl: String = "")
+
+
+/** A meal on the family meal plan. [via] is "homebase" or the app it came from ("platter"); [cook] is a member id, 0 for nobody yet. */
+@Serializable
+data class Meal(
+    val id: Int,
+    val day: String = "",
+    val slot: String = "dinner",
+    val title: String = "",
+    val photo: String = "",
+    val source: String = "",
+    val servings: Int = 0,
+    val ingredients: List<String> = emptyList(),
+    val steps: List<String> = emptyList(),
+    val via: String = "homebase",
+    val by: Int = 0,
+    val ext: String = "",
+    val cook: Int = 0,
+)
+
+@Serializable
+data class MealsResp(val meals: List<Meal> = emptyList())
+
+@Serializable
+data class AddedResp(val added: Int = 0)
+
+/** Friend groups are separate from the family. A child's parents can read them, and a mild-words filter hides rude messages. */
+@Serializable
+data class GroupPerson(val id: Int = 0, val name: String = "", val emoji: String = "🙂", val role: String = "child")
+
+@Serializable
+data class GroupLast(val body: String = "", val at: Double = 0.0, val name: String = "")
+
+@Serializable
+data class FriendGroup(
+    val id: Int,
+    val name: String = "",
+    val emoji: String = "👥",
+    val status: String? = null,                                     // "active", "pending", or null when a parent is only overseeing
+    val code: String? = null,
+    val overseeing: List<String> = emptyList(),
+    val members: List<GroupPerson> = emptyList(),
+    val last: GroupLast? = null,
+)
+
+@Serializable
+data class GroupAsk(val group: Int = 0, @SerialName("group_name") val groupName: String = "", val member: Int = 0, val name: String = "", val emoji: String = "🙂")
+
+@Serializable
+data class GroupsResp(val groups: List<FriendGroup> = emptyList(), val requests: List<GroupAsk> = emptyList())
+
+@Serializable
+data class GroupFlag(val word: String = "", val cat: String = "")
+
+@Serializable
+data class GroupMessage(
+    val id: Int,
+    val from: Int = 0,
+    val name: String = "",
+    val emoji: String = "",
+    val kind: String = "text",
+    val body: String = "",
+    val at: Double = 0.0,
+    val flagged: Boolean = false,
+    val cats: List<String> = emptyList(),
+    val flags: List<GroupFlag> = emptyList(),                       // only a child's own parents get the words and what was really typed
+    val original: String = "",
+)
+
+@Serializable
+data class GroupHead(val id: Int = 0, val name: String = "", val emoji: String = "👥", val members: List<GroupPerson> = emptyList())
+
+@Serializable
+data class GroupMessagesResp(val role: String = "", val group: GroupHead = GroupHead(), val messages: List<GroupMessage> = emptyList())
+
+@Serializable
+data class GroupSendResp(val id: Int = 0, val body: String = "", val flagged: Boolean = false, val note: String? = null)
+
+@Serializable
+data class MakeGroupResp(val id: Int = 0, val code: String = "", val status: String = "")
+
+@Serializable
+data class JoinGroupResp(val id: Int = 0, val status: String = "", val name: String = "")
+
+@Serializable
+data class Sticker(val name: String = "", val url: String = "")
+
+@Serializable
+data class StickersResp(val stickers: List<Sticker> = emptyList())
+
+/** One line of what has been happening in the family. */
+@Serializable
+data class FeedItem(val id: Int, val kind: String = "", val body: String = "", val at: Double = 0.0, val from: Int = 0, val name: String = "", val emoji: String = "")
+
+@Serializable
+data class FeedResp(val items: List<FeedItem> = emptyList())
+
+@Serializable
+data class GameStartResp(val url: String = "", val game: String = "")

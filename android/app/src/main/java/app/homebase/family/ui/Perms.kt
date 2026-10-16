@@ -46,7 +46,7 @@ fun PermsScreen(nav: Nav) {
     val scope = ctx.hb.scope
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { TextButton({ nav.back() }) { Text("Back") } }
-        Heading("What parents can do", "You decide. Switch something off and Homebase stops it straight away. Your parents see that it is off, so nobody is guessing.")
+        Heading("What parents can do", "You decide. Switch something off and Mellow stops it straight away. Your parents see that it is off, so nobody is guessing.")
         CONTROLS.forEach { (key, title, why) ->
             val on = me?.allows(key) ?: true
             SoftCard {

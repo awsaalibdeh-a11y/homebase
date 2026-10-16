@@ -62,7 +62,7 @@ fun WelcomeScreen(nav: Nav) {
     Page {
         Gap(40)
         Text("🏠", fontSize = 64.sp)
-        Text("Homebase", style = MaterialTheme.typography.headlineLarge)
+        Text("Mellow", style = MaterialTheme.typography.headlineLarge)
         Text("Stay close. Stay yourself.", style = MaterialTheme.typography.titleLarge, color = Accent, modifier = Modifier.padding(top = 4.dp))
         Gap(10)
         Text("Location, messages and calls for your family, and honest about every bit of it. Nothing is hidden, and you can always pause.", style = MaterialTheme.typography.bodyLarge, color = Muted)
@@ -71,7 +71,7 @@ fun WelcomeScreen(nav: Nav) {
         Gap(10)
         SoftButton("Join with a code") { nav.go(Screen.JoinCode) }
         Gap(14)
-        TextButton({ nav.go(Screen.About) }, Modifier.fillMaxWidth()) { Text("What Homebase will never do") }
+        TextButton({ nav.go(Screen.About) }, Modifier.fillMaxWidth()) { Text("What Mellow will never do") }
     }
 }
 

@@ -47,6 +47,7 @@ fun MeTab(nav: Nav) {
     var late by remember { mutableStateOf(false) }
     var statusOpen by remember { mutableStateOf(false) }
     var birthdayOpen by remember { mutableStateOf(false) }
+    var tutorial by remember { mutableStateOf(false) }
     var quietFrom by remember { mutableIntStateOf(-1) }
     var quietTo by remember { mutableIntStateOf(-1) }
     LaunchedEffect(Unit) {
@@ -57,22 +58,6 @@ fun MeTab(nav: Nav) {
         runCatching { app.api.sharing(state, minutes) }.onSuccess { app.state.refreshFamily() }.onFailure { toast(ctx, it.message ?: "Could not change it") }
     }
 
-        val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-            if (uri != null) scope.launch {
-                runCatching {
-                    val data = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
-                    }
-                    val src = BitmapFactory.decodeByteArray(data, 0, data.size) ?: error("That image could not be read.")
-                    val s0 = minOf(src.width, src.height)
-                    val sq = Bitmap.createBitmap(src, (src.width - s0) / 2, (src.height - s0) / 2, s0, s0)
-                    val small = Bitmap.createScaledBitmap(sq, 256, 256, true)
-                    val out = ByteArrayOutputStream(); small.compress(Bitmap.CompressFormat.JPEG, 82, out)
-                    val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-                    ctx.hb.api.setAvatar("data:image/jpeg;base64,$b64")
-                }.onSuccess { app.state.refreshFamily(); Avatars.cache.clear(); toast(ctx, "Photo saved") }.onFailure { toast(ctx, it.message ?: "Could not save the photo") }
-            }
-        }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SetupBanner()
         Heading("Hi, ${me?.name ?: app.store.myName} ${me?.emoji ?: ""}", app.store.familyName)
@@ -80,10 +65,10 @@ fun MeTab(nav: Nav) {
             SoftCard {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     MemberAvatar(meM, 64, if (meM.isParent) SunSoft else AccentSoft)
-                    Column(Modifier.weight(1f)) { Text("Your photo", style = MaterialTheme.typography.titleMedium); Text("Shown on the map and in the family.", color = Muted) }
+                    Column(Modifier.weight(1f)) { Text("Your profile picture", style = MaterialTheme.typography.titleMedium); Text("A photo of your face, taken here in the app.", color = Muted) }
                 }
                 Row {
-                    TextButton({ pickPhoto.launch("image/*") }) { Text(if (meM.avatar != null) "Change" else "Add a photo") }
+                    TextButton({ nav.go(Screen.Camera("pfp")) }) { Text(if (meM.avatar != null) "Take a new one" else "Take a selfie") }
                     if (meM.avatar != null) TextButton({ scope.launch { runCatching { ctx.hb.api.clearAvatar() }.onSuccess { app.state.refreshFamily(); toast(ctx, "Photo removed") } } }) { Text("Remove") }
                 }
             }
@@ -116,7 +101,7 @@ fun MeTab(nav: Nav) {
         TwoUp({ BigButton("I'm OK ✓", color = Mint) { sendQuick(ctx, "checkin", "I'm OK", 0, true, "Checked in") } },
             { BigButton("I'm home 🏠", color = Mint) { sendQuick(ctx, "checkin", "I'm home", 0, true, "Checked in") } })
         TwoUp({ SoftButton("Running late ⏰") { late = true } }, { SoftButton("Send love ❤️") { sendQuick(ctx, "heart", "", 0, false, "❤️ sent") } })
-        TwoUp({ SoftButton("Pick me up 🚗") { sendQuick(ctx, "pickup", "Can someone pick me up?", 0, true, "Sent to the family") } }, { SoftButton("Rewards 🎁") { nav.go(Screen.Rewards) } })
+        TwoUp({ SoftButton("Pick me up 🚗") { sendQuick(ctx, "pickup", "Can someone pick me up?", 0, true, "Sent to the family") } }, { SoftButton("🎮 Family game") { startFamilyGame(ctx) } })
         SosButton { sendQuick(ctx, "sos", "I need help", 0, true, "SOS sent to your family") }
 
         SectionLabel("Quiet hours")
@@ -139,15 +124,20 @@ fun MeTab(nav: Nav) {
 
         if (!ctx.hb.store.isParent) { SectionLabel("Screen time"); ScreenTimeCard(nav) }
 
+        SectionLabel("Family")
+        TwoUp({ SoftButton("✅ Jobs and points") { nav.go(Screen.Chores) } }, { SoftButton("🎁 Rewards") { nav.go(Screen.Rewards) } })
+        TwoUp({ SoftButton("📌 Family board") { nav.go(Screen.Board) } }, { SoftButton("🛒 Family list") { nav.go(Screen.Lists) } })
+        TwoUp({ SoftButton("📍 Saved places") { nav.go(Screen.Places) } }, { SoftButton("🕓 Activity") { nav.go(Screen.Feed) } })
+        if (ctx.hb.store.isParent) TwoUp({ SoftButton("📋 Rules") { nav.go(Screen.Rules) } }, { SoftButton("＋ Invite") { nav.go(Screen.Invite) } })
+
         SectionLabel("More")
         SoftButton("What my family can see") { nav.go(Screen.Transparency) }
         if (!ctx.hb.store.isParent) SoftButton("What parents can do") { nav.go(Screen.Perms) }
-        SoftButton("Family list") { nav.go(Screen.Lists) }
-        SoftButton("Saved places") { nav.go(Screen.Places) }
-        SoftButton("How Homebase works") { nav.go(Screen.Tour) }
+        SoftButton("🎓 Tutorial") { tutorial = true }
         SoftButton("Settings") { nav.go(Screen.Settings) }
         Gap(8)
     }
+    if (tutorial) TutorialDialog { tutorial = false }
     if (statusOpen) StatusDialog { statusOpen = false }
     if (birthdayOpen) BirthdayDialog(me?.birthday) { birthdayOpen = false }
     if (pause) PickDialog("Pause sharing for…", listOf("15 minutes" to 15, "1 hour" to 60, "3 hours" to 180, "Until tomorrow" to 720), { setSharing("paused", it) }, { pause = false })

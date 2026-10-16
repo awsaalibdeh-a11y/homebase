@@ -1,5 +1,6 @@
 package app.homebase.family.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,27 +50,29 @@ fun clockText(minutes: Int): String {
 
 @Composable
 fun Avatar(emoji: String, size: Int = 44, tint: Color = AccentSoft) {
-    Box(Modifier.size(size.dp).clip(CircleShape).background(tint), contentAlignment = Alignment.Center) { Text(emoji, fontSize = (size * 0.5).sp) }
+    Box(Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.3f).dp)).background(tint), contentAlignment = Alignment.Center) { Text(emoji, fontSize = (size * 0.5).sp) }
 }
 
 @Composable
 fun SoftCard(modifier: Modifier = Modifier, tint: Color = Surface, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
     val m = if (onClick != null) modifier.clickable { onClick() } else modifier
-    Card(m.fillMaxWidth(), shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = tint), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
+    Card(m.fillMaxWidth(), shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = tint.copy(alpha = 0.93f)), border = BorderStroke(1.dp, Hairline), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
         Column(Modifier.padding(16.dp)) { content() }
     }
 }
 
 @Composable
 fun BigButton(text: String, modifier: Modifier = Modifier, color: Color = Accent, enabled: Boolean = true, onClick: () -> Unit) {
-    Button(onClick, modifier.fillMaxWidth().height(54.dp), enabled = enabled, shape = RoundedCornerShape(27.dp), colors = ButtonDefaults.buttonColors(containerColor = color)) {
+    Button(onClick, modifier.fillMaxWidth().height(52.dp), enabled = enabled, shape = RoundedCornerShape(14.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = if (color == Rose) Color.White else OnAccent)) {
         Text(text, style = MaterialTheme.typography.labelLarge)
     }
 }
 
 @Composable
 fun SoftButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    OutlinedButton(onClick, modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(25.dp)) { Text(text, style = MaterialTheme.typography.labelLarge) }
+    OutlinedButton(onClick, modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Ink.copy(alpha = 0.28f)),
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = Surface.copy(alpha = 0.55f), contentColor = Ink)) { Text(text, style = MaterialTheme.typography.labelLarge) }
 }
 
 @Composable
@@ -82,7 +85,7 @@ fun Heading(title: String, sub: String? = null) {
 
 @Composable
 fun Chip(text: String, tint: Color = AccentSoft, ink: Color = AccentDark) {
-    Text(text, Modifier.clip(RoundedCornerShape(50)).background(tint).padding(horizontal = 10.dp, vertical = 4.dp), color = ink, fontSize = 12.sp)
+    Text(text, Modifier.clip(RoundedCornerShape(8.dp)).background(tint).padding(horizontal = 10.dp, vertical = 4.dp), color = ink, fontSize = 12.sp)
 }
 
 @Composable
