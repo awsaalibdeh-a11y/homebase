@@ -84,16 +84,16 @@
   const style = document.createElement("style");
   style.textContent = `
   .tr-btn{position:fixed;left:12px;bottom:56px;z-index:2147482000;width:34px;height:34px;border-radius:50%;border:1px solid #2a2a30;background:#121214;color:#b9b9c2;font:700 15px system-ui,sans-serif;cursor:pointer;opacity:.6;padding:0}
-  .tr-btn:hover,.tr-btn:focus-visible{opacity:1;outline:2px solid #5b93ff}
+  .tr-btn:hover,.tr-btn:focus-visible{opacity:1;outline:2px solid #ececec}
   .tr-scrim{position:fixed;inset:0;z-index:2147483200;background:rgba(0,0,0,.66);display:grid;place-items:center;padding:16px;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
   .tr-card{width:min(440px,100%);background:#121214;color:#ececf0;border:1px solid #2a2a30;border-radius:24px;padding:28px 26px 22px;box-shadow:0 24px 70px rgba(0,0,0,.65);animation:trIn .22s ease}
   .tr-emo{font-size:46px;line-height:1}.tr-card h2{margin:14px 0 8px;font-size:24px;letter-spacing:-.02em;font-weight:700}
   .tr-card p{margin:0;color:#a9a9b2;font-size:16px;line-height:1.55}
-  .tr-dots{display:flex;gap:6px;margin:22px 0 18px}.tr-dots i{height:6px;width:6px;border-radius:3px;background:#2a2a30;transition:width .2s,background .2s}.tr-dots i.on{width:22px;background:#5b93ff}
+  .tr-dots{display:flex;gap:6px;margin:22px 0 18px}.tr-dots i{height:6px;width:6px;border-radius:3px;background:#2a2a30;transition:width .2s,background .2s}.tr-dots i.on{width:22px;background:#ececec}
   .tr-row{display:flex;gap:10px;align-items:center}.tr-row .sp{flex:1}
   .tr-b{border:0;border-radius:14px;padding:12px 18px;font:600 15px system-ui,sans-serif;cursor:pointer;background:#1b1b1f;color:#ececf0}
-  .tr-b.go{background:#5b93ff;color:#08101f}.tr-b.ghost{background:none;color:#8d8d96;padding:12px 8px}
-  .tr-b:focus-visible{outline:2px solid #5b93ff;outline-offset:2px}
+  .tr-b.go{background:#ececec;color:#0a0a0a}.tr-b.ghost{background:none;color:#8d8d96;padding:12px 8px}
+  .tr-b:focus-visible{outline:2px solid #ececec;outline-offset:2px}
   @keyframes trIn{from{opacity:0;transform:translateY(8px) scale(.98)}}
   @media (prefers-reduced-motion:reduce){.tr-card{animation:none}.tr-dots i{transition:none}}`;
   document.head.append(style);
@@ -134,7 +134,7 @@
     const b = document.createElement("button");
     b.className = "tr-btn"; b.type = "button"; b.textContent = "?"; b.title = "How this works"; b.setAttribute("aria-label", "How this works");
     b.onclick = () => open(0); document.body.append(b);
-    if (get()) return;
+    if (get() || (me && me.dataset.auto === "0")) return;        // data-auto="0": only open from the ? button (the Showcase is a portfolio, a pop-up in front of it is rude)
     let tries = 0;
     const tick = () => { if (get() || scrim) return; if (!T.ready || T.ready()) { if (!document.querySelector(".hub-ov")) return setTimeout(() => open(0), 900); } if (++tries < 90) setTimeout(tick, 1000); };
     setTimeout(tick, 1200);

@@ -145,6 +145,13 @@ def denied(target, key):
     return err(f"{target['name']} has turned off: {PERMS[key]}.", 403, perm=key)
 
 
+def status_view(m):
+    """What someone says they are up to ("Studying", "Gaming"...). They set it themselves, the whole family sees it, and it ends by itself."""
+    if (m["status_until"] or 0) > time.time() and (m["status_emoji"] or m["status_text"]):
+        return {"emoji": m["status_emoji"] or "", "text": m["status_text"] or "", "until": m["status_until"]}
+    return None
+
+
 def member_view(m, viewer=None):
     state = sharing_state(m)
     perms = perms_of(m)
@@ -152,7 +159,7 @@ def member_view(m, viewer=None):
     out = {"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "battery": m["battery"], "share": state,
            "paused_until": m["paused_until"] if state == "paused" else 0, "last_seen": m["last_seen"], "quiet": m["quiet_from"] >= 0,
            "location": None, "perms": perms, "lock": lock_view(m), "home": at_home(m), "blocks": block_views(m),
-           "avatar": (f"/api/avatar/{m['id']}?v={int(m['avatar_at'] or 0)}" if m["avatar"] else None)}
+           "avatar": (f"/api/avatar/{m['id']}?v={int(m['avatar_at'] or 0)}" if m["avatar"] else None), "status": status_view(m)}
     if state == "on" and m["last_lat"] is not None and not (gated and not perms["location"]):
         out["location"] = {"lat": m["last_lat"], "lng": m["last_lng"], "acc": m["last_acc"], "at": m["last_at"]}
     if gated and not perms["location"]:
@@ -1275,8 +1282,21 @@ def delete_screentime():
 KINDS = ("text", "checkin", "late", "sos", "heart")
 
 
+REACTIONS = ("👍", "❤️", "😂", "😮", "🙏", "🎉")
+
+
+def reactions_of(r):
+    """{emoji: [member ids]} for a message row, ignoring anything that is not one of the offered reactions."""
+    try:
+        d = json.loads(r.get("reactions") or "{}")
+    except (ValueError, AttributeError):
+        d = {}
+    return {e: [int(i) for i in ids if isinstance(i, int)] for e, ids in (d.items() if isinstance(d, dict) else []) if e in REACTIONS and isinstance(ids, list) and ids}
+
+
 def msg_view(r):
-    return {"id": r["id"], "from": r["from_id"], "to": r["to_id"], "kind": r["kind"], "body": r["body"], "lat": r["lat"], "lng": r["lng"], "at": r["created"]}
+    return {"id": r["id"], "from": r["from_id"], "to": r["to_id"], "kind": r["kind"], "body": r["body"], "lat": r["lat"], "lng": r["lng"], "at": r["created"],
+            "reactions": reactions_of(r)}
 
 
 @app.post("/api/messages")
@@ -1321,6 +1341,61 @@ def get_messages():
         scope = t.c.to_id == 0
     rows = db.many(select(t).where(t.c.family_id == m["family_id"], t.c.id > after, scope).order_by(t.c.id.desc()).limit(80))
     return jsonify(messages=[msg_view(r) for r in reversed(rows)])
+
+
+@app.post("/api/messages/<int:mid>/react")
+@need
+def react(mid):
+    """Tap a reaction on a message; tap it again to take it back. Only people who can see the message can react to it."""
+    m, b = g.m, request.get_json(silent=True) or {}
+    emoji = b.get("emoji")
+    if emoji not in REACTIONS:
+        return err("Pick one of the reactions.")
+    if limited(f"react:{m['id']}", 240):
+        return err("Slow down a little.", 429)
+    row = db.one(select(db.messages).where(db.messages.c.id == mid, db.messages.c.family_id == m["family_id"]))
+    if not row or row["kind"] == "system" or (row["to_id"] and m["id"] not in (row["from_id"], row["to_id"])):
+        return err("Not found.", 404)
+    d = reactions_of(row)
+    ids = d.get(emoji, [])
+    ids = [i for i in ids if i != m["id"]] if m["id"] in ids else ids + [m["id"]]
+    if ids:
+        d[emoji] = ids
+    else:
+        d.pop(emoji, None)
+    db.run(update(db.messages).where(db.messages.c.id == mid).values(reactions=json.dumps(d, ensure_ascii=False)))
+    payload = {"id": mid, "from": row["from_id"], "to": row["to_id"], "reactions": d}
+    for x in family_members(m["family_id"]):
+        if not row["to_id"] or x["id"] in (row["from_id"], row["to_id"]):
+            push(x["id"], "reaction", payload)
+    return jsonify(reactions=d)
+
+
+# ---------------------------------------------------------------- "what I am up to": a few words the person chooses, for a few hours
+@app.post("/api/status")
+@need
+def set_status():
+    m, b = g.m, request.get_json(silent=True) or {}
+    emoji, text = clean(b.get("emoji"), 8), clean(b.get("text"), 40)
+    if not (emoji or text):
+        return err("Pick something, or write a few words.")
+    try:
+        hours = float(b["hours"]) if b.get("hours") not in (None, "") else 3.0
+    except (TypeError, ValueError):
+        return err("For how long?")
+    until = time.time() + max(0.25, min(24.0, hours)) * 3600
+    db.run(update(db.members).where(db.members.c.id == m["id"]).values(status_emoji=emoji, status_text=text, status_until=until))
+    push_family(m["family_id"], "member", {"id": m["id"], "status": True}, skip=m["id"])
+    return jsonify(status={"emoji": emoji, "text": text, "until": until})
+
+
+@app.delete("/api/status")
+@need
+def clear_status():
+    m = g.m
+    db.run(update(db.members).where(db.members.c.id == m["id"]).values(status_emoji="", status_text="", status_until=0))
+    push_family(m["family_id"], "member", {"id": m["id"], "status": False}, skip=m["id"])
+    return jsonify(ok=True)
 
 
 # ---------------------------------------------------------------- "where are you?": a request the other person can answer or decline

@@ -7,10 +7,10 @@
   <meta name="description" content="A family app for location sharing, messages, calls and screen time that is honest about what it shares and never spies.">
   <meta name="theme-color" content="#0a0a0b">
   <style>
-    :root { --bg: #0a0a0b; --surface: #121214; --surface2: #1b1b1f; --line: #26262b; --ink: #ececf0; --muted: #8d8d96; --accent: #5b93ff; --accent-ink: #08101f; --ok: #3dd49b; --warn: #f0b429; color-scheme: dark; }
+    :root { --bg: #0a0a0b; --surface: #17171a; --surface2: #222227; --line: #2e2e34; --ink: #f5f5f7; --muted: #b0b0ba; --accent: #e6b866; --accent-ink: #1b1306; --ok: #4ade94; --warn: #f2b640; color-scheme: dark; }
     * { box-sizing: border-box; }
     html { background: var(--bg); }
-    body { margin: 0; font: 17px/1.6 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: radial-gradient(800px 420px at 50% -8%, rgba(91,147,255,.10), transparent 65%), var(--bg); -webkit-font-smoothing: antialiased; }
+    body { margin: 0; font: 17px/1.6 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: radial-gradient(800px 420px at 50% -8%, rgba(230,184,102,.11), transparent 65%), var(--bg); -webkit-font-smoothing: antialiased; }
     main { max-width: 56rem; margin: 0 auto; padding: 2.4rem 1.2rem 4.5rem; }
     .logo { display: inline-flex; align-items: center; gap: .65rem; font-weight: 700; font-size: 1.25rem; letter-spacing: -.01em; }
     .logo i { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: .85rem; background: var(--surface2); border: 1px solid var(--line); font-style: normal; font-size: 1.3rem; }
@@ -18,7 +18,7 @@
     .lead { color: var(--muted); max-width: 40rem; font-size: 1.1rem; }
     .cta { display: flex; flex-wrap: wrap; gap: .7rem; margin: 1.6rem 0 .6rem; align-items: center; }
     .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .8rem 1.35rem; border-radius: .9rem; background: var(--surface2); border: 1px solid var(--line); color: var(--ink); font-weight: 650; text-decoration: none; font-size: .98rem; transition: background .15s, border-color .15s; }
-    .btn:hover { background: #26262d; border-color: #3a3a42; }
+    .btn:hover { background: #2a2a31; border-color: #46464e; }
     .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; } .btn.primary:hover { filter: brightness(1.1); background: var(--accent); }
     .btn.off { opacity: .55; }
     .muted { color: var(--muted); } .small { font-size: .9rem; }
@@ -34,6 +34,10 @@
     ol { padding-left: 1.2rem; } ol li { margin: .55rem 0; color: #cfcfd6; }
     code { padding: .12rem .42rem; border-radius: .45rem; background: var(--surface2); border: 1px solid var(--line); font-size: .9em; }
     a { color: var(--accent); }
+    .shots { display: grid; grid-template-columns: minmax(0, 1fr) 13.5rem; gap: 1rem; align-items: start; margin: 2rem 0 .4rem; }
+    .shots figure { margin: 0; } .shots img { display: block; width: 100%; height: auto; border-radius: 1.2rem; border: 1px solid var(--line); box-shadow: 0 30px 70px rgba(0,0,0,.6); background: var(--surface); }
+    .shots .phone img { border-radius: 1.6rem; }
+    @media (max-width: 640px) { .shots { grid-template-columns: 1fr; } .shots .phone { max-width: 14rem; margin: 0 auto; } }
     footer { margin-top: 3rem; color: var(--muted); font-size: .9rem; }
     :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: .6rem; }
   </style>
@@ -51,9 +55,16 @@
     {% if has_apk %}<span class="muted small">Version {{ version }} · Android 8 or newer</span>{% endif %}
   </div>
 
+  <div class="shots">
+    <figure><img src="/static/landing/app.jpg" width="1280" height="786" alt="The Homebase laptop app: a map with everyone's status, the family list and the family chat with reactions"></figure>
+    <figure class="phone"><img src="/static/landing/phone.jpg" width="390" height="844" alt="Homebase on a phone: the family card and the map" loading="lazy"></figure>
+  </div>
+  <p class="muted small">The pictures show a made-up family in a park.</p>
+
   <div class="grid">
     <div class="card"><span>📍</span><b>A shared map</b><p>Everyone who is sharing shows up, parents too. If someone goes offline you still see where they last were.</p></div>
-    <div class="card"><span>💬</span><b>Messages and calls</b><p>Texts, check-ins, an SOS, and calls that really ring on phone and computer.</p></div>
+    <div class="card"><span>💬</span><b>Messages and calls</b><p>Texts, one-tap quick replies, reactions, check-ins, an SOS, and calls that really ring on phone and computer.</p></div>
+    <div class="card"><span>🙂</span><b>What I'm up to</b><p>Tell the family in one tap: studying, gaming, on my way. You choose it, only you can change it, and it goes away by itself. (In the laptop app for now.)</p></div>
     <div class="card"><span>🎮</span><b>Honest screen time</b><p>Counts only time spent playing or watching, never homework, and shows the child exactly what the family sees.</p></div>
     <div class="card"><span>🚫</span><b>Grounding and locks</b><p>A parent can lock a device or ground certain apps for a while, with a minute's warning. Everyone sees it in the family chat.</p></div>
     <div class="card"><span>✅</span><b>Jobs and points</b><p>Parents set jobs, children tick them off, parents approve them for points.</p></div>

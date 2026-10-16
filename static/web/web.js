@@ -203,14 +203,18 @@ function tile(act, id, emoji, title, sub, off) {
 function kidTiles(m) {
   const lock = m.lock ? `Locked until ${clock(m.lock.until)}` : "Lock their devices", gr = (m.blocks || []).length ? `${m.blocks.length} grounded now` : "Block certain apps";
   const dv = m.devices || [], dtxt = dv.length ? dv.map(d => esc(d.name)).join(", ") : "None linked yet";
+  const more = !!(S.more && S.more[m.id]);
   return `<div class="tiles">
       ${tile("screen", m.id, "⏱️", "Screen time", screenSub(m), !may(m, "screentime"))}
       ${tile("lock", m.id, "🔒", "Lock device", lock)}
+    </div>
+    <button class="morebtn" data-act="more" data-id="${m.id}" aria-expanded="${more}">${more ? "Fewer controls ▴" : "More controls ▾  ground apps, rules, computers, this week"}</button>
+    ${more ? `<div class="tiles">
       ${tile("ground", m.id, "🚫", "Ground apps", gr)}
       ${tile("rules", m.id, "📋", "Rules and limit", "House rules, daily limit")}
       ${tile("devices", m.id, "💻", "Computers", dtxt)}
       ${tile("week", m.id, "📊", "This week", "Summary")}
-    </div>`;
+    </div>` : ""}`;
 }
 
 function peopleHtml() {
@@ -220,7 +224,7 @@ function peopleHtml() {
     const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
     const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>💬 Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>📞 Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>📍 Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>🧭 Trail</button></div>${m.role === "child" && isParent() ? `<div class="ctlwrap">${kidTiles(m)}</div>` : (m.role === "child" ? `<div class="ctlwrap"><p class="tabhelp">${esc(screenLine(m).replace(/<[^>]+>/g, "")) || ""}</p></div>` : "")}` : "";
     const chip = m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`;
-    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b><small>${esc(statusLine(m))}</small>${screenLine(m)}${deviceLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
+    return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b>${statusChip(m)}<small>${esc(statusLine(m))}</small>${screenLine(m)}${deviceLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
   }).join("");
   return rows || `<div class="empty">Nobody else is here yet. ${isParent() ? "Press <b>Invite</b> at the top to add someone." : ""}</div>`;
 }
@@ -237,10 +241,43 @@ function jobsHtml() {
     <form id="itemForm" style="display:flex;gap:8px"><input class="field" id="itemIn" placeholder="Add to the list" maxlength="120" autocomplete="off" value="${esc(keep)}"><button class="btn" type="submit">Add</button></form>`;
 }
 
+/* ---------- "what I'm up to", and the Today card ---------- */
+const STATUS = [["🏠", "At home"], ["📚", "Studying"], ["🎮", "Gaming"], ["🍽️", "Eating"], ["🚌", "On my way"], ["⚽", "Out playing"], ["😴", "Sleeping"], ["🧘", "Chilling"]];
+const statusChip = m => (m.status ? `<span class="stat">${esc(m.status.emoji || "💬")} ${esc(m.status.text || "")}</span>` : "");
+function todayHtml() {
+  const ms = S.members, live = ms.filter(isLive).length, home = ms.filter(m => m.home).length, st = me().status;
+  const bits = [`${ms.length} ${ms.length === 1 ? "person" : "people"}`, live ? `${live} live on the map` : "nobody live right now"]; if (home) bits.push(`${home} at home`);
+  return `<section class="today"><div><b>${esc(S.family ? S.family.name : "Your family")}</b><small>${bits.join(" · ")}</small></div>
+    <div class="tbtns"><button class="btn sm" data-act="status">${st ? esc(st.emoji || "💬") + " " + esc(st.text || "My status") : "🙂 What I'm up to"}</button><button class="btn sm" data-act="chatall">💬 Message the family</button><button class="btn sm" data-act="fit">📍 Show everyone</button></div></section>`;
+}
+function statusCardHtml() {
+  const st = me().status;
+  return `<section class="you"><div class="shareline"><div><b>What I'm up to</b><small>${st ? esc((st.emoji || "") + " " + (st.text || "")) + " · ends " + clock(st.until) : "Tell your family in one tap. It goes away by itself."}</small></div><button class="btn sm" data-act="status">${st ? "Change" : "Set"}</button></div></section>`;
+}
+async function setStatus(emoji, text, hours) {
+  try { await api("/api/status", "POST", { emoji, text, hours }); closeModal(); await refreshFamily(); toast("Your family can see it now"); } catch (e) { toast(e.message); }
+}
+function statusDialog() {
+  const cur = me().status; let hours = 3;
+  modal(`<h2>What are you up to?</h2><div class="sub">Your family sees this for a few hours, then it goes away by itself. Only you can change it.</div>
+    <div class="sts" style="margin-top:14px">${STATUS.map(([e, t]) => `<button type="button" data-e="${e}" data-t="${esc(t)}" class="${cur && cur.emoji === e && cur.text === t ? "on" : ""}"><i>${e}</i>${esc(t)}</button>`).join("")}</div>
+    <label class="l">Or write your own</label><div style="display:flex;gap:8px"><input class="field" id="stIn" maxlength="40" placeholder="For example: at football" autocomplete="off"><button class="btn solid" id="stSet" type="button">Set</button></div>
+    <label class="l">For how long</label><div class="seg" id="stHrs">${[[1, "1 hour"], [3, "3 hours"], [24, "All day"]].map(([h, l]) => `<button type="button" class="btn ${h === 3 ? "sel" : ""}" data-h="${h}">${l}</button>`).join("")}</div>
+    <div class="foot">${cur ? '<button class="btn bad" id="stClear" type="button">Clear it</button>' : ""}<button class="btn" id="stX" type="button">Close</button></div>`, root => {
+    root.querySelectorAll("[data-h]").forEach(b => b.onclick = () => { hours = +b.dataset.h; root.querySelectorAll("[data-h]").forEach(x => x.classList.toggle("sel", x === b)); });
+    root.querySelectorAll(".sts [data-e]").forEach(b => b.onclick = () => setStatus(b.dataset.e, b.dataset.t, hours));
+    const own = () => { const v = root.querySelector("#stIn").value.trim(); if (v) setStatus("💬", v, hours); };
+    root.querySelector("#stSet").onclick = own; root.querySelector("#stIn").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); own(); } };
+    root.querySelector("#stX").onclick = closeModal;
+    const cl = root.querySelector("#stClear"); if (cl) cl.onclick = async () => { try { await api("/api/status", "DELETE"); closeModal(); await refreshFamily(); } catch (e) { toast(e.message); } };
+  });
+}
+
 /* the Family tab: people first (their controls open right inside each card), then three small rows */
 function familyHtml() {
   const n = jobsAlert(), hasHome = S.places.some(p => p.name === "Home");
-  return peopleHtml()
+  return todayHtml() + peopleHtml()
+    + (isParent() ? `<button class="btn" data-act="invite">＋ Invite someone</button>` : "")
     + accordion("jobs", "✅", "Jobs and list", n ? (isParent() ? n + " to approve" : n + " to do") : "Points and the family list", jobsHtml(), n)
     + accordion("places", "📍", "Places and Home", hasHome ? S.places.length + " saved" : "Set the Home area", placesHtml())
     + accordion("rules", "📋", "Family rules", "What the family agreed", `<p class="tabhelp">${isParent() ? "Write the house rules and set each child's daily limit." : "Read what your family agreed."}</p><button class="btn solid" data-act="rules" data-id="0">${isParent() ? "Edit the rules" : "Read the rules"}</button>`);
@@ -263,7 +300,7 @@ function myControlsHtml() {
 
 function renderSide() {
   const t = curTab(), keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  const body = t === "me" ? youCard() + myControlsHtml() : familyHtml();
+  const body = t === "me" ? youCard() + statusCardHtml() + myControlsHtml() : familyHtml();
   const scroll = $("#side .tabbody") ? $("#side .tabbody").scrollTop : 0;
   $("#side").innerHTML = tabsBar() + `<div class="tabbody">${body}</div>`;
   const bd = $("#side .tabbody"); if (bd) bd.scrollTop = scroll;
@@ -283,7 +320,7 @@ function pad() { const w = window.innerWidth; return w < 820 ? { paddingTopLeft:
 function pinIcon(m) {
   const stale = !isLive(m) && Date.now() / 1000 - m.location.at > 900;
   const label = esc(m.name) + (stale ? ` · ${ago(m.location.at)}` : "");
-  return L.divIcon({ className: "", iconSize: [50, 50], iconAnchor: [25, 25], html: `<div class="pin ${stale ? "old" : ""} ${m.role === "parent" ? "parent" : ""}">${avaInner(m)}</div><div class="pinname">${label}</div>` });
+  return L.divIcon({ className: "", iconSize: [50, 50], iconAnchor: [25, 25], html: `<div class="pin ${stale ? "old" : ""} ${m.role === "parent" ? "parent" : ""}">${avaInner(m)}</div>${m.status && m.status.emoji ? `<span class="pst" title="${esc(m.status.text || "")}">${esc(m.status.emoji)}</span>` : ""}<div class="pinname">${label}</div>` });
 }
 function renderMap() {
   if (!S.map) return;
@@ -295,7 +332,7 @@ function renderMap() {
   });
   Object.keys(S.markers).forEach(id => { if (!seen.has(+id)) { S.map.removeLayer(S.markers[id]); delete S.markers[id]; } });
   S.circles.forEach(c => S.map.removeLayer(c)); S.circles = [];
-  S.places.forEach(p => { S.circles.push(L.circle([p.lat, p.lng], { radius: p.radius, color: p.name === "Home" ? "#1fa971" : "#2f6df6", weight: p.name === "Home" ? 3 : 2, opacity: .8, fillColor: p.name === "Home" ? "#1fa971" : "#2f6df6", fillOpacity: p.name === "Home" ? .14 : .1 }).addTo(S.map).bindTooltip(p.emoji + " " + p.name)); });
+  S.places.forEach(p => { S.circles.push(L.circle([p.lat, p.lng], { radius: p.radius, color: p.name === "Home" ? "#1fa971" : "#e6b866", weight: p.name === "Home" ? 3 : 2, opacity: .8, fillColor: p.name === "Home" ? "#1fa971" : "#e6b866", fillOpacity: p.name === "Home" ? .14 : .1 }).addTo(S.map).bindTooltip(p.emoji + " " + p.name)); });
   if (!S.focusedOnce && seen.size) { fitAll(); S.focusedOnce = true; }
 }
 function fitAll() {
@@ -309,7 +346,7 @@ async function showTrail(id) {
   try {
     const d = await api("/api/history?member=" + id + "&hours=24");
     if (!d.points.length) { toast("No trail in the last day."); return; }
-    S.trail = L.polyline(d.points.map(p => [p.lat, p.lng]), { color: "#2f6df6", weight: 4, opacity: .85, dashArray: "2 8" }).addTo(S.map);
+    S.trail = L.polyline(d.points.map(p => [p.lat, p.lng]), { color: "#e6b866", weight: 4, opacity: .85, dashArray: "2 8" }).addTo(S.map);
     S.map.fitBounds(S.trail.getBounds(), { ...pad(), maxZoom: 16 }); toast("Last 24 hours. Press Trail again to hide it.");
   } catch (e) { toast(e.message); }
 }
@@ -335,8 +372,10 @@ function renderThreads() {
   const total = Object.values(S.unread).reduce((a, b) => a + b, 0), n = $("#fabN"); n.textContent = total; n.classList.toggle("hidden", !total);
   document.title = (total ? `(${total}) ` : "") + "Homebase";
 }
+const QUICK = ["On my way 🚶", "Home soon 🏠", "OK 👍", "Call me 📞", "Thank you ❤️"];
 function renderComposer() {
-  const t = member(S.thread), blocked = t && !may(t, "messages");
+  const t = member(S.thread), blocked = t && !may(t, "messages"), q = $("#qr");
+  if (q) { q.classList.toggle("hidden", !!blocked); q.innerHTML = QUICK.map(x => `<button type="button" data-q="${esc(x)}">${esc(x)}</button>`).join(""); }
   $("#msgIn").disabled = !!blocked; $("#msgIn").placeholder = blocked ? `${t.name} turned messages off` : S.online ? "Write a message" : "Offline. It will send when you are back online";
   $("#composer button").disabled = !!blocked;
 }
@@ -353,12 +392,22 @@ function bubble(m) {
   if (m.kind === "checkin") { cls = "loc"; body = "✅ " + esc(m.body || "I'm OK") + (m.lat != null ? " · 📍 tap to see where" : ""); }
   if (m.kind === "late") body = "⏰ " + esc(m.body);
   if (m.kind === "sos") { cls = "sos loc"; body = "🆘 <b>" + esc(m.body || "I need help") + "</b>" + (m.lat != null ? " · 📍 tap to see where" : ""); }
-  return `<div class="b ${mine ? "me" : ""} ${cls} ${m.pending ? "pending" : ""}" ${m.lat != null ? `data-lat="${m.lat}" data-lng="${m.lng}"` : ""}>${S.thread === 0 && !mine ? `<div class="who">${esc(who)}</div>` : ""}${body}<small>${m.pending ? "⏳ waiting to send" : clock(m.at)}</small></div>`;
+  const rx = Object.entries(m.reactions || {}).map(([e, ids]) => `<button type="button" data-rx="${e}" class="${ids.includes(S.me) ? "mine" : ""}" aria-label="${e} ${ids.length}">${e} ${ids.length}</button>`).join("");
+  return `<div class="b ${mine ? "me" : ""} ${cls} ${m.pending ? "pending" : ""}" data-mid="${m.id}" ${m.lat != null ? `data-lat="${m.lat}" data-lng="${m.lng}"` : ""}>${S.thread === 0 && !mine ? `<div class="who">${esc(who)}</div>` : ""}${body}${rx ? `<div class="rx">${rx}</div>` : ""}<small>${m.pending ? "⏳ waiting to send" : clock(m.at)}</small>${m.pending || m.id < 0 ? "" : '<button type="button" class="rb" aria-label="React to this message">🙂</button>'}</div>`;
 }
-function renderMsgs() {
+function renderMsgs(keepScroll) {
   const list = S.msgs[S.thread] || [], box = $("#msgs"); if (!box) return;
+  const top = box.scrollTop;
   box.innerHTML = list.length ? list.map(bubble).join("") : `<div class="empty" style="margin:auto;text-align:center">No messages yet.<br>Say hello 👋</div>`;
-  box.scrollTop = box.scrollHeight;
+  box.scrollTop = keepScroll ? top : box.scrollHeight;
+}
+const REACTIONS = ["👍", "❤️", "😂", "😮", "🙏", "🎉"];
+async function react(mid, emoji) {
+  try { const d = await api(`/api/messages/${mid}/react`, "POST", { emoji }); setReactions(mid, d.reactions); } catch (e) { toast(e.message); }
+}
+function setReactions(mid, reactions) {
+  Object.values(S.msgs).forEach(list => list.forEach(m => { if (m.id === mid) m.reactions = reactions; }));
+  if (S.chatOpen) renderMsgs(true);
 }
 /* a message that cannot be sent right now waits in the outbox and goes the moment the connection is back */
 async function sendMsg(kind, body, extra = {}, thread = S.thread) {
@@ -527,6 +576,7 @@ function handleEvent(ev) {
       }
       saveSnap(); break; }
     case "member": case "places": refreshFamily(); break;
+    case "reaction": setReactions(p.id, p.reactions || {}); break;
     case "ground_warn": { const names = (p.apps || []).join(", "); toast("⏳ " + names + " will be grounded in 1 minute — finish up", 14000); notify("Finish up", names + " will be grounded in a minute.", { tag: "groundwarn", force: true }); break; }
     case "nudge": toast("💡 " + p.text, 12000); notify("Time for a break?", p.text, { tag: "nudge", force: false, thread: undefined }); break;
     case "list": refreshItems(); break;
@@ -549,9 +599,15 @@ function initChrome() {
   $("#bLayer").onclick = () => { store("hb_map", mapDark() ? "light" : "dark"); paintLayer(); };
   $("#bAddPlace").onclick = () => { S.adding = !S.adding; $("#bAddPlace").textContent = S.adding ? "Click the map…" : "＋ Place"; if (S.adding) toast("Click the map where the place is", 4000); };
   $("#chatFab").onclick = () => setChat(true); $("#chatX").onclick = () => setChat(false);
+  $("#qr").onclick = e => { const b = e.target.closest("[data-q]"); if (b) sendMsg("text", b.dataset.q).catch(err => toast(err.message)); };
   $("#thr").onclick = e => { const b = e.target.closest("[data-th]"); if (b) loadThread(+b.dataset.th); };
   $("#composer").onsubmit = async e => { e.preventDefault(); const v = $("#msgIn").value.trim(); if (!v) return; $("#msgIn").value = ""; try { await sendMsg("text", v); } catch (err) { toast(err.message); $("#msgIn").value = v; } };
-  $("#msgs").onclick = e => { const b = e.target.closest("[data-lat]"); if (b) { S.map.flyTo([+b.dataset.lat, +b.dataset.lng], 16); L.popup().setLatLng([+b.dataset.lat, +b.dataset.lng]).setContent("📍 Here").openOn(S.map); } };
+  $("#msgs").onclick = e => {
+    const pick = e.target.closest(".rpick button"); if (pick) { react(+pick.closest(".b").dataset.mid, pick.dataset.e); return; }
+    const chip = e.target.closest("[data-rx]"); if (chip) { react(+chip.closest(".b").dataset.mid, chip.dataset.rx); return; }
+    const rb = e.target.closest(".rb"); if (rb) { const bub = rb.closest(".b"), had = bub.querySelector(".rpick"); document.querySelectorAll(".rpick").forEach(x => x.remove()); if (!had) bub.insertAdjacentHTML("beforeend", `<div class="rpick">${REACTIONS.map(x => `<button type="button" data-e="${x}" aria-label="React ${x}">${x}</button>`).join("")}</div>`); return; }
+    document.querySelectorAll(".rpick").forEach(x => x.remove());
+    const b = e.target.closest("[data-lat]"); if (b) { S.map.flyTo([+b.dataset.lat, +b.dataset.lng], 16); L.popup().setLatLng([+b.dataset.lat, +b.dataset.lng]).setContent("📍 Here").openOn(S.map); } };
   $("#side").onclick = async e => {
     const tb = e.target.closest("[data-tab]"); if (tb) return setTab(tb.dataset.tab);
     const ac = e.target.closest("[data-acc]"); if (ac) return toggleAcc(ac.dataset.acc);
@@ -576,6 +632,11 @@ function initChrome() {
     else if (act === "myperms") meDialog();
     else if (act === "lock") lockDialog(id);
     else if (act === "ground") groundDialog(id);
+    else if (act === "status") statusDialog();
+    else if (act === "chatall") { setChat(true); loadThread(0); }
+    else if (act === "fit") fitAll();
+    else if (act === "invite") inviteDialog();
+    else if (act === "more") { S.more = S.more || {}; S.more[id] = !S.more[id]; renderSide(); }
     else if (act === "delplace") { if (confirm("Remove this place?")) { await api("/api/places/" + id, "DELETE").catch(err => toast(err.message)); refreshFamily(); } }
     else if (act === "delitem") { await api("/api/list/" + id, "DELETE").catch(err => toast(err.message)); refreshItems(); }
   };
@@ -609,7 +670,7 @@ window.addEventListener("load", () => {
 
 /* ---------- screen time: only active playing or watching, and which apps ---------- */
 const fmtDur = sec => { const m = Math.floor(sec / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min` : m >= 1 ? `${m} min` : sec > 0 ? "under a minute" : "0 min"; };
-const CAT = { play: ["🎮", "Playing", "var(--accent)"], watch: ["📺", "Watching", "#e5484d"], social: ["💬", "Scrolling", "#d99a00"] };
+const CAT = { play: ["🎮", "Playing", "var(--accent)"], watch: ["📺", "Watching", "#e5484d"], social: ["💬", "Scrolling", "#c9a8f0"] };
 async function screenDialog(id) {
   const mine = id === S.me, m = member(id) || me();
   let d; try { d = await api("/api/screentime?member=" + id + "&days=7"); } catch (e) { return toast(e.message); }

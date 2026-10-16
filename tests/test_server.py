@@ -754,5 +754,84 @@ class Avatars(Base):
         self.assertEqual(self.get(self.kid, f"/api/avatar/{self.mum_id}").status_code, 404)                              # none set
 
 
+class Status(Base):
+    """"What I am up to": set by the person, seen by the family, ends by itself."""
+
+    def members(self, who):
+        return {m["id"]: m for m in self.get(who, "/api/family").get_json()["members"]}
+
+    def test_a_child_sets_a_status_and_the_family_sees_it(self):
+        r = self.post(self.kid, "/api/status", emoji="📚", text="Studying", hours=2)
+        self.assertEqual(r.status_code, 200)
+        self.assertGreater(r.get_json()["status"]["until"], time.time() + 3600)
+        for who in (self.mum, self.kid):
+            st = self.members(who)[self.kid_id]["status"]
+            self.assertEqual((st["emoji"], st["text"]), ("📚", "Studying"))
+        self.assertIsNone(self.members(self.mum)[self.mum_id]["status"])
+        self.assertTrue(any(e["type"] == "member" and e["payload"].get("id") == self.kid_id for e in self.events(self.mum)), "the family is told so the screen refreshes")
+
+    def test_it_ends_by_itself_and_can_be_cleared(self):
+        self.post(self.kid, "/api/status", emoji="🎮", text="", hours=1)
+        db.run(db.update(db.members).where(db.members.c.id == self.kid_id).values(status_until=time.time() - 5))
+        self.assertIsNone(self.members(self.mum)[self.kid_id]["status"])
+        self.post(self.kid, "/api/status", emoji="🍽️", text="Dinner")
+        self.assertIsNotNone(self.members(self.mum)[self.kid_id]["status"])
+        self.assertEqual(self.c.delete("/api/status", headers=self.kid).status_code, 200)
+        self.assertIsNone(self.members(self.mum)[self.kid_id]["status"])
+
+    def test_it_needs_something_and_has_sane_limits(self):
+        self.assertEqual(self.post(self.kid, "/api/status", emoji="", text="  ").status_code, 400)
+        self.assertEqual(self.post(self.kid, "/api/status", emoji="🙂", hours="soon").status_code, 400)
+        r = self.post(self.kid, "/api/status", emoji="🙂", text="x" * 200, hours=999).get_json()["status"]
+        self.assertEqual(len(r["text"]), 40)
+        self.assertLessEqual(r["until"], time.time() + 24 * 3600 + 5)
+        self.assertEqual(self.c.post("/api/status", json={"emoji": "🙂"}).status_code, 401)
+
+    def test_only_you_can_set_your_own_status_and_other_families_never_see_it(self):
+        self.post(self.kid, "/api/status", emoji="😴", text="Sleeping")
+        self.assertIsNone(self.members(self.mum)[self.mum_id]["status"])                            # a parent cannot set it for the child, there is no such route
+        other = self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()
+        seen = self.c.get("/api/family", headers={"Authorization": "Bearer " + other["token"]}).get_json()["members"]
+        self.assertEqual([m["name"] for m in seen], ["Zed"])
+
+
+class Reactions(Base):
+    def make(self, who=None, **kw):
+        return self.post(who or self.kid, "/api/messages", body="Home by five", **kw).get_json()["message"]["id"]
+
+    def test_react_toggles_and_everyone_in_the_thread_is_told(self):
+        mid = self.make()
+        self.assertEqual(self.post(self.mum, f"/api/messages/{mid}/react", emoji="👍").get_json()["reactions"], {"👍": [self.mum_id]})
+        self.assertEqual(self.post(self.kid, f"/api/messages/{mid}/react", emoji="👍").get_json()["reactions"], {"👍": [self.mum_id, self.kid_id]})
+        shown = self.get(self.mum, "/api/messages").get_json()["messages"][-1]
+        self.assertEqual(shown["reactions"]["👍"], [self.mum_id, self.kid_id])
+        self.assertEqual(self.post(self.mum, f"/api/messages/{mid}/react", emoji="👍").get_json()["reactions"], {"👍": [self.kid_id]})
+        self.assertEqual(self.post(self.kid, f"/api/messages/{mid}/react", emoji="👍").get_json()["reactions"], {})
+        self.assertTrue(any(e["type"] == "reaction" and e["payload"]["id"] == mid for e in self.events(self.mum)))
+
+    def test_only_the_offered_reactions_work(self):
+        mid = self.make()
+        for bad in ("🤬", "", "thumbs", None):
+            self.assertEqual(self.post(self.mum, f"/api/messages/{mid}/react", emoji=bad).status_code, 400, bad)
+
+    def test_a_private_chat_can_only_be_reacted_to_by_its_two_people(self):
+        mid = self.make(to=self.mum_id)
+        dad = self.c.post("/api/invite", headers=self.mum, json={"role": "parent"}).get_json()["code"]
+        dad = {"Authorization": "Bearer " + self.c.post("/api/join", json={"code": dad, "name": "Dad"}).get_json()["token"]}
+        self.assertEqual(self.post(dad, f"/api/messages/{mid}/react", emoji="❤️").status_code, 404)
+        self.assertEqual(self.post(self.mum, f"/api/messages/{mid}/react", emoji="❤️").status_code, 200)
+        self.assertFalse(any(e["type"] == "reaction" for e in self.events(dad)), "a third person is not told about a private chat")
+
+    def test_system_messages_missing_messages_and_other_families_are_refused(self):
+        system = db.one(db.select(db.messages).where(db.messages.c.kind == "system"))
+        if system:
+            self.assertEqual(self.post(self.mum, f"/api/messages/{system['id']}/react", emoji="👍").status_code, 404)
+        self.assertEqual(self.post(self.mum, "/api/messages/99999/react", emoji="👍").status_code, 404)
+        mid = self.make()
+        other = self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()
+        self.assertEqual(self.post({"Authorization": "Bearer " + other["token"]}, f"/api/messages/{mid}/react", emoji="👍").status_code, 404)
+        self.assertEqual(self.c.post(f"/api/messages/{mid}/react", json={"emoji": "👍"}).status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()

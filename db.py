@@ -31,7 +31,8 @@ members = Table("members", meta,
     Column("rules", Text, default=""),                                # JSON {"limit": minutes} a parent set for this child
     Column("perms", Text, default=""),                               # JSON {key: false} of what parents may NOT do; the child edits it
     Column("last_lat", Float), Column("last_lng", Float), Column("last_acc", Float), Column("last_at", Float, default=0),
-    Column("avatar", Text, default=""), Column("avatar_at", Float, default=0))
+    Column("avatar", Text, default=""), Column("avatar_at", Float, default=0),
+    Column("status_emoji", String(8), default=""), Column("status_text", String(40), default=""), Column("status_until", Float, default=0))   # "what I am up to", set by the person, ends by itself
 invites = Table("invites", meta,
     Column("code", String(12), primary_key=True), Column("family_id", Integer), Column("role", String(8)), Column("created_by", Integer),
     Column("expires", Float), Column("used", Boolean, default=False))
@@ -46,7 +47,8 @@ place_state = Table("place_state", meta,
 messages = Table("messages", meta,
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("from_id", Integer), Column("to_id", Integer, default=0),   # 0 = the whole family
     Column("kind", String(10), default="text"),                    # text | checkin | late | sos | heart | system
-    Column("body", Text), Column("lat", Float), Column("lng", Float), Column("created", Float, index=True))
+    Column("body", Text), Column("lat", Float), Column("lng", Float), Column("created", Float, index=True),
+    Column("reactions", Text, default=""))                         # JSON {"emoji": [member ids]}
 events = Table("events", meta,
     Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("type", String(20)), Column("payload", Text), Column("created", Float))
 calls = Table("calls", meta,
@@ -90,7 +92,9 @@ try:                                                                  # older da
         _c.exec_driver_sql("ALTER TABLE members ADD COLUMN perms TEXT DEFAULT ''")
 except Exception:
     pass
-for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE families ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN apps TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN status VARCHAR(160) DEFAULT ''", "ALTER TABLE devices ADD COLUMN version VARCHAR(12) DEFAULT ''", "ALTER TABLE calls ADD COLUMN web_seen BOOLEAN DEFAULT FALSE", "ALTER TABLE members ADD COLUMN avatar TEXT DEFAULT ''", "ALTER TABLE members ADD COLUMN avatar_at FLOAT DEFAULT 0"):
+for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE families ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN apps TEXT DEFAULT ''", "ALTER TABLE devices ADD COLUMN status VARCHAR(160) DEFAULT ''", "ALTER TABLE devices ADD COLUMN version VARCHAR(12) DEFAULT ''", "ALTER TABLE calls ADD COLUMN web_seen BOOLEAN DEFAULT FALSE", "ALTER TABLE members ADD COLUMN avatar TEXT DEFAULT ''", "ALTER TABLE members ADD COLUMN avatar_at FLOAT DEFAULT 0",
+            "ALTER TABLE members ADD COLUMN status_emoji VARCHAR(8) DEFAULT ''", "ALTER TABLE members ADD COLUMN status_text VARCHAR(40) DEFAULT ''",
+            "ALTER TABLE members ADD COLUMN status_until FLOAT DEFAULT 0", "ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT ''"):
     try:
         with engine.begin() as _c:
             _c.exec_driver_sql(_sql)
