@@ -1,4 +1,4 @@
-/* Homebase 2: five sections (Home, Map, Plan, Chat, More), the meal plan, friend groups, stickers and GIFs, linked apps like Platter, the activity feed and search.
+/* Mellow 2: five sections (Home, Map, Plan, Chat, More), the meal plan, friend groups, stickers and GIFs, linked apps like Platter, the activity feed and search.
    It loads after web.js and builds on it: the same state (S), the same helpers (api, modal, toast, esc, ...). */
 Object.assign(S, { meals: [], groups: [], requests: [], links: [], feed: [], stickers: null, cal: null, gdlg: null, gtimer: 0 });
 const PLATTER_URL = localStorage.getItem("hb_platter") || "https://platter-87b0.onrender.com";
@@ -283,7 +283,7 @@ function moreHtml() {
     + `<div class="morebtns"><button class="btn" data-act="search">🔎 Search</button><button class="btn" data-act="menu">⚙️ Settings</button>${isParent() ? '<button class="btn" data-act="invite">＋ Invite someone</button>' : ""}</div>`;
 }
 function searchDialog() {
-  modal(`<h2>🔎 Search Homebase</h2><input class="field" id="sqIn" placeholder="People, plans, meals, notes, jobs, groups…" autocomplete="off"><div id="sqOut" class="sq-out"></div><div class="foot"><button class="btn" id="sqX" type="button">Close</button></div>`, root => {
+  modal(`<h2>🔎 Search Mellow</h2><input class="field" id="sqIn" placeholder="People, plans, meals, notes, jobs, groups…" autocomplete="off"><div id="sqOut" class="sq-out"></div><div class="foot"><button class="btn" id="sqX" type="button">Close</button></div>`, root => {
     const out = root.querySelector("#sqOut"), go = (tab, fn) => () => { closeModal(); setTab(tab); if (fn) fn(); };
     const run = () => {
       const q = root.querySelector("#sqIn").value.trim().toLowerCase(); if (q.length < 2) { out.innerHTML = '<div class="empty">Type at least two letters.</div>'; return; }
@@ -343,14 +343,25 @@ async function downloadIcs() {
 function hb2Event(type, p) {
   if (type === "meals") { refreshMeals(); loadCal(); return; }
   if (type === "group") { refreshGroups(); if (p.approved) toast(`✅ A parent said yes. You are in ${p.group}.`, 6000); if (p.declined) toast("A parent said not now.", 6000); return; }
-  if (type === "group_request") { refreshGroups(); toast(`👥 ${p.name} wants to join ${p.group}`, 8000); notify("👥 " + p.name + " wants to join " + p.group, "Open Homebase to say yes or not now.", { tag: "greq-" + p.gid, force: true }); return; }
-  if (type === "group_flag") { refreshGroups(); toast(`⚠️ ${p.name}'s message in ${p.group} was censored (${p.cat} language)`, 10000); notify("⚠️ " + p.name + "'s message was censored", "In " + p.group + ". Open Homebase to read it.", { tag: "gflag-" + p.id, force: true }); if (S.gdlg && S.gdlg.id === p.gid) groupFetch(false); return; }
+  if (type === "group_request") { refreshGroups(); toast(`👥 ${p.name} wants to join ${p.group}`, 8000); notify("👥 " + p.name + " wants to join " + p.group, "Open Mellow to say yes or not now.", { tag: "greq-" + p.gid, force: true }); return; }
+  if (type === "group_flag") { refreshGroups(); toast(`⚠️ ${p.name}'s message in ${p.group} was censored (${p.cat} language)`, 10000); notify("⚠️ " + p.name + "'s message was censored", "In " + p.group + ". Open Mellow to read it.", { tag: "gflag-" + p.id, force: true }); if (S.gdlg && S.gdlg.id === p.gid) groupFetch(false); return; }
   if (type === "gmessage") {
     if (S.gdlg && S.gdlg.id === p.gid) { groupFetch(false); return; }
     refreshGroups(); toast(`👥 ${p.name} in ${p.group}: ${p.kind === "gif" ? "🎞️ GIF" : String(p.body).slice(0, 80)}`, 5000); notify(p.name + " · " + p.group, p.kind === "gif" ? "Sent a GIF" : p.body, { tag: "grp-" + p.gid });
   }
 }
+/* a one-time welcome after the rename: shown once per browser */
+function mellowWelcome() {
+  try { if (localStorage.getItem("mellow_welcome_1")) return; } catch (e) { return; }
+  modal(`<h2>Welcome to Mellow</h2><div class="sub">Homebase has a new name and a calmer look. Your family, messages, plans and settings are all still here.</div>
+    <ul class="ing"><li>A black and white look on a contour-line background, with a Dark version in the menu</li><li>Five sections: Home, Map, Plan, Chat and More</li><li>Meals, friend groups, stickers and GIFs, family games</li></ul>
+    <p class="sub">If you open Mellow in a different browser, sign in again with an invite code: your sign-in is kept in the browser you used.</p>
+    <div class="foot"><button class="btn solid" id="mwOk" type="button">Got it</button></div>`, root => {
+    root.querySelector("#mwOk").onclick = () => { try { localStorage.setItem("mellow_welcome_1", "1"); } catch (e) { /* private window */ } closeModal(); };
+  });
+}
 function hb2Boot() {
+  setTimeout(mellowWelcome, 600);
   refreshMeals(); refreshGroups(); refreshLinks(); refreshFeed(); loadStickers();
   if (!hb2Boot.done) {
     hb2Boot.done = true;

@@ -1,5 +1,5 @@
 "use strict";
-/* Homebase on a laptop: the same family, map, chat and calls as the Android app. Works offline: it keeps the last
+/* Mellow on a laptop: the same family, map, chat and calls as the Android app. Works offline: it keeps the last
    thing it saw, shows people at their last known spot, and sends your messages when the connection comes back. */
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -86,12 +86,12 @@ function showAuth(view, ctx = {}) {
   $("#app").classList.add("hidden"); $("#auth").classList.remove("hidden");
   const box = $("#authbox");
   if (view === "welcome") {
-    box.innerHTML = `<div class="logo">🏠</div><h1>Homebase</h1><p class="tag">Stay close. Stay yourself.<br>Your family on a map, with messages and calls. Honest about every bit of it, and you can always pause.</p>
+    box.innerHTML = `<div class="logo">🏠</div><h1>Mellow</h1><p class="tag">Stay close. Stay yourself.<br>Your family on a map, with messages and calls. Honest about every bit of it, and you can always pause.</p>
       <div class="stack"><button class="btn solid" id="aCreate">Create a family</button><button class="btn" id="aJoin">I have an invite code</button><a class="link" href="/download" style="text-align:center">Get the Android app</a></div>`;
     $("#aCreate").onclick = () => showAuth("create"); $("#aJoin").onclick = () => showAuth("join");
   } else if (view === "create" || view === "join") {
     let emoji = ctx.emoji || (view === "create" ? "👩" : "🧒");
-    box.innerHTML = `<h1>${view === "create" ? "Create your family" : "Join your family"}</h1><p class="tag" style="font-size:15px">${view === "create" ? "You will be a parent. You can invite everyone else after." : "Ask a parent to open Homebase, press Invite, and read you the code."}</p>
+    box.innerHTML = `<h1>${view === "create" ? "Create your family" : "Join your family"}</h1><p class="tag" style="font-size:15px">${view === "create" ? "You will be a parent. You can invite everyone else after." : "Ask a parent to open Mellow, press Invite, and read you the code."}</p>
       ${view === "create" ? `<label class="l">Family name</label><input class="field" id="fFam" maxlength="40" placeholder="The Vales" value="${esc(ctx.family || "")}">` : `<label class="l">Invite code</label><input class="field" id="fCode" maxlength="12" placeholder="8 letters and numbers" style="letter-spacing:.2em;text-transform:uppercase" value="${esc(ctx.code || "")}">`}
       <label class="l">Your name</label><input class="field" id="fName" maxlength="40" value="${esc(ctx.name || "")}">
       <label class="l">Pick your picture</label>${emojiPicker(EMOJI, emoji)}
@@ -111,7 +111,7 @@ function showAuth(view, ctx = {}) {
     box.innerHTML = `<h1 style="font-size:28px">${esc(l.invited_by || "Someone")} invited you to ${esc(l.family)}</h1><p class="tag" style="font-size:15px">Read this first. You decide if you want to join.</p>
       <div style="display:grid;gap:10px;margin-top:16px">
       <div class="note yes"><h4>Your family will see</h4><ul><li>✓ Where you are, on a map, while sharing is on</li><li>✓ Your battery level</li><li>✓ Messages and check-ins you send them</li><li>✓ When you arrive at or leave a saved place. You get the same message.</li></ul></div>
-      <div class="note no"><h4>Homebase will never</h4><ul><li>✕ Hide itself, or share anything in secret</li><li>✕ Read your other apps, browsing or private messages</li><li>✕ Switch on your microphone or camera by itself</li><li>✕ Lock your device or limit your screen time</li></ul></div>
+      <div class="note no"><h4>Mellow will never</h4><ul><li>✕ Hide itself, or share anything in secret</li><li>✕ Read your other apps, browsing or private messages</li><li>✕ Switch on your microphone or camera by itself</li><li>✕ Lock your device or limit your screen time</li></ul></div>
       <div class="note"><h4>You are in control</h4><ul><li>• Pause sharing whenever you need. The family sees it is paused.</li><li>• "Where are you?" is a request: you can say not now.</li><li>• You choose what parents can do, from the menu.</li><li>• Leave any time and everything you shared is deleted.</li></ul></div></div>
       <div class="err" id="aErr"></div><div class="stack" style="margin-top:6px"><button class="btn solid" id="aYes">I understand, join</button><button class="link" id="aNo">Not now</button></div>`;
     $("#aNo").onclick = () => showAuth("welcome");
@@ -173,7 +173,7 @@ function youCard() {
   return `<section class="you"><div class="head"><div class="ava ${on ? "on" : paused ? "paused" : ""}">${avaInner(m)}</div><div><b>${esc(m.name)} (you)</b><br><small>${m.role === "parent" ? "Parent" : "Child"}</small></div></div>
     <div class="shareline"><div><b>Share my location</b><small>${hint}</small></div><button class="tg ${on ? "on" : ""}" id="tShare" aria-label="Share my location"></button></div>
     ${on && !S.geo ? `<button class="btn solid" id="bAllow">Allow this laptop to share</button>` : ""}
-    ${notifyState() === "default" ? `<button class="btn" id="bNotify">🔔 Turn on alerts for messages and calls (they work when Homebase is closed)</button>` : ""}
+    ${notifyState() === "default" ? `<button class="btn" id="bNotify">🔔 Turn on alerts for messages and calls (they work when Mellow is closed)</button>` : ""}
     ${on || paused ? `<div class="quick">Pause for <button class="btn sm" data-pause="15">15 min</button><button class="btn sm" data-pause="60">1 hour</button>${paused ? `<button class="btn sm" data-pause="0">Resume</button>` : ""}</div>` : ""}</section>`;
 }
 /* ---------- the left panel: five clearly labelled tabs instead of one long scroll ---------- */
@@ -340,7 +340,7 @@ const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.p
 const isStandalone = () => navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
 const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 const keyBytes = b64 => { const p = (b64 + "=".repeat((4 - b64.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/"), raw = atob(p); return Uint8Array.from(raw, c => c.charCodeAt(0)); };
-/* asks this browser for a push address and gives it to the server, so alerts arrive even when Homebase is closed (an iPhone needs Homebase on the Home Screen first) */
+/* asks this browser for a push address and gives it to the server, so alerts arrive even when Mellow is closed (an iPhone needs Mellow on the Home Screen first) */
 async function subscribePush() {
   if (!pushSupported() || Notification.permission !== "granted" || !S.token) return false;
   try {
@@ -352,8 +352,8 @@ async function subscribePush() {
 function setupItems() {
   const needHome = isIOS() && !isStandalone(), ns = notifyState();
   return [
-    { k: "home", done: !needHome, t: "On your Home Screen", d: needHome ? "Tap Share in Safari, then Add to Home Screen. That is what lets an iPhone show alerts." : "Homebase opens like an app." },
-    { k: "notify", done: ns === "granted", t: "Alerts, even when Homebase is closed", d: ns === "denied" ? "Blocked. Allow it in your browser or phone settings." : ns === "unsupported" ? (needHome ? "Available once it is on your Home Screen." : "This browser cannot show alerts.") : "Messages, calls, SOS and plans." },
+    { k: "home", done: !needHome, t: "On your Home Screen", d: needHome ? "Tap Share in Safari, then Add to Home Screen. That is what lets an iPhone show alerts." : "Mellow opens like an app." },
+    { k: "notify", done: ns === "granted", t: "Alerts, even when Mellow is closed", d: ns === "denied" ? "Blocked. Allow it in your browser or phone settings." : ns === "unsupported" ? (needHome ? "Available once it is on your Home Screen." : "This browser cannot show alerts.") : "Messages, calls, SOS and plans." },
     { k: "loc", done: me().share !== "on" || S.geo != null, t: "Sharing your location", d: "Only while you choose to share. You can pause or stop any time." },
   ];
 }
@@ -364,7 +364,7 @@ function setupCardHtml() {
 }
 function setupDialog() {
   const items = setupItems();
-  modal(`<h2>📲 Set up Homebase on this device</h2><div class="sub">One tap sets it all up, so Homebase works even when it is closed.</div>
+  modal(`<h2>📲 Set up Mellow on this device</h2><div class="sub">One tap sets it all up, so Mellow works even when it is closed.</div>
     <ul class="chk">${items.map(i => `<li class="${i.done ? "ok" : ""}"><i>${i.done ? "✓" : "○"}</i><span><b>${esc(i.t)}</b><small>${esc(i.d)}</small></span></li>`).join("")}</ul>
     <div class="foot"><button class="btn" id="suX" type="button">Not now</button><button class="btn solid" id="suGo" type="button">${setupDone() ? "All done" : "Set everything up"}</button></div>`, root => {
     root.querySelector("#suX").onclick = () => { store("hb_setup", "1"); closeModal(); };
@@ -377,12 +377,12 @@ async function setupEverything() {
   if (notifyState() === "default") await askNotify(); else if (notifyState() === "granted") await subscribePush();
   if (me().share === "on" && S.geo == null) startGeo();
   if (window.__installPrompt) { try { window.__installPrompt.prompt(); } catch (e) { /* already shown */ } }
-  renderSide(); toast("All set. Homebase will tell you about messages, calls and plans.", 5000);
+  renderSide(); toast("All set. Mellow will tell you about messages, calls and plans.", 5000);
 }
 function iphoneHowTo() {
-  modal(`<h2>🍎 Add Homebase to your iPhone</h2><div class="sub">It takes about twenty seconds. You need iOS 16.4 or newer, and Safari.</div>
-    <ol class="steps"><li>Open this page in <b>Safari</b> (not another browser).</li><li>Tap the <b>Share</b> button, the square with an arrow, at the bottom of the screen.</li><li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open <b>Homebase</b> from your Home Screen and tap <b>Set everything up</b>. Allow alerts and location when it asks.</li></ol>
-    <div class="sub">Alerts then arrive even when Homebase is closed. Location is shared while the app is open, because Apple does not let websites track in the background.</div>
+  modal(`<h2>🍎 Add Mellow to your iPhone</h2><div class="sub">It takes about twenty seconds. You need iOS 16.4 or newer, and Safari.</div>
+    <ol class="steps"><li>Open this page in <b>Safari</b> (not another browser).</li><li>Tap the <b>Share</b> button, the square with an arrow, at the bottom of the screen.</li><li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open <b>Mellow</b> from your Home Screen and tap <b>Set everything up</b>. Allow alerts and location when it asks.</li></ol>
+    <div class="sub">Alerts then arrive even when Mellow is closed. Location is shared while the app is open, because Apple does not let websites track in the background.</div>
     <div class="foot"><button class="btn solid" id="ihX" type="button">Got it</button></div>`, root => { root.querySelector("#ihX").onclick = closeModal; });
 }
 
@@ -507,7 +507,7 @@ async function openCalendar(y, m, sel) {
   });
 }
 
-/* ---------- "please update Homebase": one message with the link (a parent can send one every half hour, never a pile of pop-ups) ---------- */
+/* ---------- "please update Mellow": one message with the link (a parent can send one every half hour, never a pile of pop-ups) ---------- */
 async function askUpdate(id) { const m = member(id); try { await api(`/api/members/${id}/update-nudge`, "POST"); toast(`Asked ${m ? m.name : "them"} to update`); } catch (e) { toast(e.message); } }
 const oldAppLine = m => (isParent() && m.id !== S.me && m.app_version && S.latest && m.app_version < S.latest ? '<small class="oldapp">📲 Android app is out of date</small>' : "");
 
@@ -658,7 +658,7 @@ function renderThreads() {
   const ids = [0, ...S.members.filter(m => m.id !== S.me).map(m => m.id)];
   $("#thr").innerHTML = ids.map(id => `<button data-th="${id}" class="${S.thread === id ? "on" : ""}">${esc(threadName(id))}${S.unread[id] ? `<span class="n">${S.unread[id]}</span>` : ""}</button>`).join("");
   const total = Object.values(S.unread).reduce((a, b) => a + b, 0), n = $("#fabN"); n.textContent = total; n.classList.toggle("hidden", !total);
-  document.title = (total ? `(${total}) ` : "") + "Homebase";
+  document.title = (total ? `(${total}) ` : "") + "Mellow";
 }
 const QUICK = ["On my way 🚶", "Home soon 🏠", "OK 👍", "Call me 📞", "Thank you ❤️"];
 function renderComposer() {
@@ -770,7 +770,7 @@ async function meDialog() {
   let q = { from: -1, to: -1 }; try { q = (await api("/api/me")).quiet; } catch (e) { /* offline */ }
   const m = me(), hm = v => v < 0 ? "" : String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
   const theme = localStorage.getItem("hb_theme") || "light", layer = localStorage.getItem("hb_map") || "light";
-  const perms = m.role === "child" ? `<div class="msec">What parents can do</div><div class="sub">You decide. Switch something off and Homebase stops it straight away. Your parents see that it is off.</div>` +
+  const perms = m.role === "child" ? `<div class="msec">What parents can do</div><div class="sub">You decide. Switch something off and Mellow stops it straight away. Your parents see that it is off.</div>` +
     PERMS.map(([k, t, why]) => `<div class="sw"><div><b>${t}</b><span>${why}</span></div><button class="tg ${m.perms[k] !== false ? "on" : ""}" data-perm="${k}" aria-label="${t}"></button></div>`).join("") : "";
   modal(`<h2>${esc(m.emoji)} ${esc(m.name)}</h2><div class="sub">${m.role === "parent" ? "Parent" : "Child"} · ${esc(S.family?.name || "")}</div>
     <div class="msec">Photo</div>
@@ -795,7 +795,7 @@ async function meDialog() {
     root.querySelector("#qSave").onclick = async () => { const a = root.querySelector("#qFrom").value, b = root.querySelector("#qTo").value; if (!a || !b) { toast("Pick both times."); return; } try { await api("/api/me", "PATCH", { quiet_from: mins(a), quiet_to: mins(b), tz_offset: new Date().getTimezoneOffset() }); toast("Quiet hours saved"); } catch (e) { toast(e.message); } };
     root.querySelector("#qOff").onclick = async () => { try { await api("/api/me", "PATCH", { quiet_from: -1, quiet_to: -1 }); toast("Quiet hours off"); root.querySelector("#qFrom").value = root.querySelector("#qTo").value = ""; } catch (e) { toast(e.message); } };
     root.querySelector("#mTour").onclick = () => { closeModal(); if (window.Tour) window.Tour.open(); else toast("The tutorial did not load. Reload the page."); };
-    root.querySelector("#mHist").onclick = async () => { if (confirm("Delete everything Homebase saved about where you have been?")) { await api("/api/history", "DELETE").then(() => toast("Deleted")).catch(e => toast(e.message)); } };
+    root.querySelector("#mHist").onclick = async () => { if (confirm("Delete everything Mellow saved about where you have been?")) { await api("/api/history", "DELETE").then(() => toast("Deleted")).catch(e => toast(e.message)); } };
     root.querySelector("#mLeave").onclick = async () => { if (confirm("Leave the family? Everything you shared is deleted.")) { await api("/api/me", "DELETE").catch(e => toast(e.message)); signOut(); } };
     root.querySelector("#mOut").onclick = signOut; root.querySelector("#mDone").onclick = closeModal;
     const inst = root.querySelector("#mInstall"); if (inst) inst.onclick = async () => { window.__installPrompt.prompt(); window.__installPrompt = null; closeModal(); };
@@ -818,7 +818,7 @@ function inviteDialog() {
 /* ---------- where are you? ---------- */
 async function askWhere(m) { try { await api("/api/ping", "POST", { to: m.id }); toast(`Asked ${m.name}. They can answer or say not now.`); } catch (e) { toast(e.message); } }
 function pingDialog(p) {
-  notify(`${p.name} asked where you are`, "Open Homebase to answer", { tag: "ping", urgent: true });
+  notify(`${p.name} asked where you are`, "Open Mellow to answer", { tag: "ping", urgent: true });
   modal(`<h2>${esc(p.emoji)} ${esc(p.name)} asked where you are</h2><div class="sub">You can share your location this once, or say not now. Either way is fine.</div><div class="foot"><button class="btn" id="pNo">Not now</button><button class="btn solid" id="pYes">Share my location</button></div>`, root => {
     root.querySelector("#pNo").onclick = async () => { closeModal(); await api("/api/ping/" + p.id, "POST", { accept: false }).catch(() => {}); };
     root.querySelector("#pYes").onclick = async () => { closeModal();
@@ -832,7 +832,7 @@ function notifyState() { return "Notification" in window ? Notification.permissi
 async function askNotify() {
   if (notifyState() === "unsupported") return toast("This browser cannot show notifications.");
   const r = await Notification.requestPermission(); renderSide();
-  if (r === "granted") { const pushed = await subscribePush(); toast(pushed ? "Alerts are on, even when Homebase is closed" : "Notifications are on"); notify("Homebase", "You will see messages and calls like this.", { force: true }); } else toast("Notifications are blocked. You can allow them from the lock icon in the address bar.");
+  if (r === "granted") { const pushed = await subscribePush(); toast(pushed ? "Alerts are on, even when Mellow is closed" : "Notifications are on"); notify("Mellow", "You will see messages and calls like this.", { force: true }); } else toast("Notifications are blocked. You can allow them from the lock icon in the address bar.");
 }
 /** A desktop notification like any other app: it shows for new messages, calls and requests, and clicking it opens that conversation.
  *  It stays quiet only when you are already looking at that conversation. */
@@ -864,7 +864,7 @@ function handleEvent(ev) {
       if (th === S.thread) renderMsgs();
       if (th !== S.thread || document.hidden || !S.chatOpen) { S.unread[th] = (S.unread[th] || 0) + 1; renderThreads(); }
       if (p.kind !== "system" && !p.quiet) {
-        notify((p.kind === "sos" ? "🆘 " : p.kind === "pickup" ? "🚗 " : "") + (p.name || "Homebase"), p.body || "", { thread: th, tag: "msg-" + th, urgent: p.kind === "sos" || p.kind === "pickup" });
+        notify((p.kind === "sos" ? "🆘 " : p.kind === "pickup" ? "🚗 " : "") + (p.name || "Mellow"), p.body || "", { thread: th, tag: "msg-" + th, urgent: p.kind === "sos" || p.kind === "pickup" });
         if (p.kind === "sos") toast("🆘 " + (p.name || "Someone") + " needs help", 7000);
         else if (p.kind === "pickup") toast("🚗 " + (p.name || "Someone") + " needs a pickup", 9000);
         else if (th !== S.thread || !S.chatOpen) toast("💬 " + (p.name || "Someone") + ": " + String(p.body || "").slice(0, 80), 5000);
@@ -1021,7 +1021,7 @@ async function screenDialog(id) {
   let sm = null; try { sm = await api("/api/summary?member=" + id); } catch (e) { /* not available */ }
   const weekCard = sm ? `<div class="weekcard"><b>This week</b><div class="weekgrid">${sm.screen ? `<div><span>${fmtDur(sm.screen.total)}</span><small>playing and watching</small></div><div><span>${fmtDur(sm.screen.avg)}</span><small>a day on average</small></div>` : ""}<div><span>${sm.chores.done}</span><small>jobs done · ${sm.chores.points} points</small></div><div><span>${sm.locks.minutes ? fmtDur(sm.locks.minutes * 60) : "none"}</span><small>locked</small></div></div>${sm.screen && sm.screen.top.length ? `<small>Most time: ${sm.screen.top.map(t => esc(t.label) + " " + fmtDur(t.sec)).join(" · ")}</small>` : ""}</div>` : "";
   modal(`<h2>${mine ? "Your" : esc(m.name) + "'s"} screen time</h2><div class="sub">Only time spent actively playing or watching. Not when away, idle, or on homework and work.</div>${weekCard}<div id="stBody"></div>
-    ${mine ? `<div class="msec">Track this computer</div><div class="sub">Windows: a small program counts your playing and watching here. Android: turn it on in the Homebase app, in Me.</div><div class="seg"><button class="btn sm" id="stAgent">Get the Windows tracker</button><button class="btn sm" id="stDel">Delete my screen time</button></div>` : ""}
+    ${mine ? `<div class="msec">Track this computer</div><div class="sub">Windows: a small program counts your playing and watching here. Android: turn it on in the Mellow app, in Me.</div><div class="seg"><button class="btn sm" id="stAgent">Get the Windows tracker</button><button class="btn sm" id="stDel">Delete my screen time</button></div>` : ""}
     <div class="foot"><button class="btn solid" id="stDone">Done</button></div>`, root => {
     draw(root); root.querySelector("#stDone").onclick = closeModal;
     const a = root.querySelector("#stAgent"); if (a) a.onclick = agentDialog;
@@ -1214,7 +1214,7 @@ function screenLine(m) {
 function whyNothing(m, short) {
   const ds = (m.devices || []).filter(d => d.last_seen).sort((a, b) => b.last_seen - a.last_seen); if (!ds.length) return "";
   const d = ds[0], quiet = Date.now() / 1000 - d.last_seen > 20 * 60, gap = ago(d.last_seen).replace(" ago", "");
-  if (quiet) return short ? `${d.name} quiet for ${gap}` : `${d.name} has not reported for ${gap}. Homebase may not be running on it (a restart can stop it).`;
+  if (quiet) return short ? `${d.name} quiet for ${gap}` : `${d.name} has not reported for ${gap}. Mellow may not be running on it (a restart can stop it).`;
   return short ? `${d.name} is on` : `${d.name} is on${d.status ? " (" + d.status + ")" : ""}. It counts only while a game or video is playing.`;
 }
 function screenSub(m) { const s = m.screen; if (!s) return "Minutes and apps"; if (s.hidden) return "Switched off by " + esc(m.name); if (s.today) return `Today ${fmtDur(s.today)}${s.top ? " · " + esc(s.top) : ""}`; const w = whyNothing(m, true); return "Nothing counted today" + (w ? " · " + esc(w) : ""); }

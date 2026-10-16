@@ -1,8 +1,8 @@
-/* Homebase offline worker. It keeps the app itself, the map library and every map tile you have looked at,
+/* Mellow offline worker. It keeps the app itself, the map library and every map tile you have looked at,
    so the laptop app opens and shows the last thing it saw even with no connection. Live data (/api) is never cached here:
    the page keeps its own snapshot and message queue. */
-const VERSION = "hb-web-v18";
-const SHELL = ["/app", "/static/web/web.css", "/static/web/web.js", "/static/web/web2.js", "/static/web/calls.js", "/static/web/icon.svg", "/static/web/icon-192.png", "/manifest.webmanifest",
+const VERSION = "hb-web-v19";
+const SHELL = ["/app", "/static/web/web.css", "/static/web/web.js", "/static/web/web2.js", "/static/web/calls.js", "/static/web/icon.svg", "/static/web/icon-192.png", "/static/web/bg-light.webp", "/static/web/bg-dark.webp", "/manifest.webmanifest",
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css", "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"];
 const TILES = "hb-tiles-v1", TILE_LIMIT = 900;
 
@@ -41,14 +41,14 @@ self.addEventListener("fetch", e => {
 });
 
 
-/* an alert from the server while Homebase is closed (this is how an iPhone gets them) */
+/* an alert from the server while Mellow is closed (this is how an iPhone gets them) */
 self.addEventListener("push", e => {
   let d = {};
-  try { d = e.data ? e.data.json() : {}; } catch (err) { d = { title: "Homebase", body: e.data ? e.data.text() : "" }; }
-  e.waitUntil(self.registration.showNotification(d.title || "Homebase", { body: d.body || "", tag: d.tag || "homebase", icon: "/static/web/icon-192.png", badge: "/static/web/icon-192.png", requireInteraction: !!d.urgent, data: {} }));
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = { title: "Mellow", body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "Mellow", { body: d.body || "", tag: d.tag || "homebase", icon: "/static/web/icon-192.png", badge: "/static/web/icon-192.png", requireInteraction: !!d.urgent, data: {} }));
 });
 
-/* clicking a desktop notification opens Homebase on that conversation */
+/* clicking a desktop notification opens Mellow on that conversation */
 self.addEventListener("notificationclick", e => {
   e.notification.close();
   const thread = e.notification.data && e.notification.data.thread;

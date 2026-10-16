@@ -43,6 +43,9 @@ class Store(context: Context) {
     var darkLook: Boolean                                      // Mellow's Dark look; White is the main one
         get() = p.getBoolean("darkLook", false)
         set(v) = p.edit().putBoolean("darkLook", v).apply()
+    var mellowWelcome: Boolean                                 // the one-time welcome popup has been seen
+        get() = p.getBoolean("mellowWelcome", false)
+        set(v) = p.edit().putBoolean("mellowWelcome", v).apply()
     var tourDone: Boolean
         get() = p.getBoolean("tourDone", false)
         set(v) = p.edit().putBoolean("tourDone", v).apply()

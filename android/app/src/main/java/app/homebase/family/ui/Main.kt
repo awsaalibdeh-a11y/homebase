@@ -66,6 +66,10 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
     val ctxU = LocalContext.current
     var newApk by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { runCatching { ctxU.hb.api.config() }.onSuccess { c -> if (c.versionCode > app.homebase.family.BuildConfig.VERSION_CODE) newApk = c.apkUrl } }
+    var welcome by remember { mutableStateOf(!ctxU.hb.store.mellowWelcome) }
+    if (welcome) androidx.compose.material3.AlertDialog(onDismissRequest = {}, containerColor = Surface, title = { Text("Welcome to Mellow") },
+        text = { Text("Homebase has a new name and a calmer look. Your family, messages and settings are all still here.\n\nNew: five tabs (Home, Map, Plan, Chat, More), meals, friend groups, stickers and GIFs, photos in chat, video calls, and a Dark look in Settings.") },
+        confirmButton = { TextButton({ ctxU.hb.store.mellowWelcome = true; welcome = false }) { Text("Got it") } })
     newApk?.let { url ->
         androidx.compose.material3.AlertDialog(onDismissRequest = { newApk = null }, title = { Text("A new Mellow is ready") },
             text = { Text("Tap Update, then open the file when it finishes downloading. Your family, places and settings stay as they are.") },

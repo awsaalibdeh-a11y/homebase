@@ -380,3 +380,18 @@ textarea.field { resize: vertical; min-height: 96px; font-family: inherit; line-
 .b.gamemsg .gjoin { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
 .b.gamemsg .gjoin b { letter-spacing: .12em; font-size: 15px; }
 .b.gamemsg .gjoin .btn { text-decoration: none; }
+
+
+/* ---------- Mellow: black and white on a contour-line background (white is the main look, dark is the other) ---------- */
+:root { --bg: #fbfbf9; --surface: #ffffff; --surface2: #ecebe7; --glass: rgba(255,255,255,.96); --ink: #121212; --muted: #6a6863; --line: rgba(0,0,0,.12);
+  --accent: #141414; --accent-ink: #ffffff; --accent-soft: rgba(0,0,0,.06); --ok: #2b2b2a; --warn: #5b5954; --bad: #d4303a; --shadow: 0 12px 36px rgba(0,0,0,.12); --r: 16px;
+  background-image: url(/static/web/bg-light.webp); background-size: cover; background-position: center; background-attachment: fixed; background-repeat: no-repeat; }
+:root[data-theme="dark"] { --bg: #050505; --surface: #161616; --surface2: #272726; --glass: rgba(22,22,22,.97); --ink: #f2f2ef; --muted: #a3a19c; --line: rgba(255,255,255,.14);
+  --accent: #f2f2ef; --accent-ink: #0b0b0b; --accent-soft: rgba(255,255,255,.10); --ok: #ddddd9; --warn: #c9c7c1; --bad: #ff6168; --shadow: 0 16px 44px rgba(0,0,0,.6);
+  background-image: url(/static/web/bg-dark.webp); }
+@media (prefers-color-scheme: dark) { :root[data-theme="auto"] { --bg: #050505; --surface: #161616; --surface2: #272726; --glass: rgba(22,22,22,.97); --ink: #f2f2ef; --muted: #a3a19c; --line: rgba(255,255,255,.14);
+  --accent: #f2f2ef; --accent-ink: #0b0b0b; --accent-soft: rgba(255,255,255,.10); --ok: #ddddd9; --warn: #c9c7c1; --bad: #ff6168; --shadow: 0 16px 44px rgba(0,0,0,.6); background-image: url(/static/web/bg-dark.webp); } }
+body { background: transparent; }
+#auth { background: transparent; }
+h1, h2, .authbox h1, .modal h2 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; letter-spacing: -.01em; }
+.btn { border-radius: 12px; } .field { border-radius: 12px; }

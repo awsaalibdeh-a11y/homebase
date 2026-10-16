@@ -24,10 +24,10 @@ window.Calls = (() => {
   function render() {
     if (!C.status) { el.classList.remove("on"); el.innerHTML = ""; return; }
     const p = C.peer || {}, ringing = C.status === "ringing" || C.status === "calling" || C.status === "connecting", live = C.status === "active";
-    const label = { calling: "Calling…", ringing: "Incoming Homebase call", connecting: "Connecting…", active: mmss(Math.floor((Date.now() - (C.t0 || Date.now())) / 1000)) }[C.status] || "";
+    const label = { calling: "Calling…", ringing: "Incoming Mellow call", connecting: "Connecting…", active: mmss(Math.floor((Date.now() - (C.t0 || Date.now())) / 1000)) }[C.status] || "";
     const act = (id, cls, icon, text, aria) => `<div class="act"><button class="cb ${cls}" id="${id}" aria-label="${aria || text}">${ICON[icon]}</button><span>${text}</span></div>`;
-    el.innerHTML = `<div class="callwrap" role="dialog" aria-label="Homebase call">
-      <div class="who">${C.incoming ? "Homebase call" : "Calling from Homebase"}</div>
+    el.innerHTML = `<div class="callwrap" role="dialog" aria-label="Mellow call">
+      <div class="who">${C.incoming ? "Mellow call" : "Calling from Mellow"}</div>
       <div class="avawrap ${ringing ? "ring" : ""} ${live ? "live" : ""}"><i class="rg"></i><i class="rg b"></i><i class="rg live"></i><div class="av">${esc(p.emoji || "🙂")}</div></div>
       <h2>${esc(p.name || "")}</h2><div class="stt ${live ? "live" : ""}" id="cst">${label}</div>
       ${live ? '<div class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></div>' : ""}
@@ -93,7 +93,7 @@ window.Calls = (() => {
     try { if ((await api("/api/calls/" + p.id)).status !== "ringing") return; } catch (e) { return; }
     if (C.status) { api(`/api/calls/${p.id}/decline`, "POST").catch(() => {}); return; }
     C.id = p.id; C.peer = { id: p.from, name: p.name, emoji: p.emoji }; C.incoming = true; C.offer = p.offer;
-    setStatus("ringing"); ringStart(); api(`/api/calls/${p.id}/seen`, "POST").catch(() => {}); notify(`${p.name} is calling`, "Open Homebase to answer");
+    setStatus("ringing"); ringStart(); api(`/api/calls/${p.id}/seen`, "POST").catch(() => {}); notify(`${p.name} is calling`, "Open Mellow to answer");
     C.timeout = setTimeout(() => { if (C.status === "ringing") finish("Missed call from " + p.name); }, 46000);
   }
   async function accept() {

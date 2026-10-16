@@ -291,7 +291,7 @@ class Misc(Base):
         self.assertEqual(self.c.get("/health").get_json()["ok"], True)
         web = self.c.get("/app")                                              # the laptop version
         self.assertEqual(web.status_code, 200)
-        self.assertIn(b"Homebase", web.data)
+        self.assertIn(b"Mellow", web.data)
         web.close()
         sw = self.c.get("/sw.js")                                             # the offline worker, served from the root so it covers the site
         self.assertEqual((sw.status_code, sw.headers.get("Service-Worker-Allowed")), (200, "/"))
