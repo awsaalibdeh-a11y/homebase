@@ -134,6 +134,19 @@ class Api(private val store: Store) {
     suspend fun closePoll(id: Int) { raw("POST", "/api/polls/$id/close") }
     suspend fun dropPoll(id: Int) { raw("DELETE", "/api/polls/$id") }
 
+    // rewards (what chore points can buy) and the family board
+    suspend fun rewards(): RewardsResp = ask<RewardsResp>("GET", "/api/rewards")
+    suspend fun addReward(title: String, cost: Int) { raw("POST", "/api/rewards", obj { put("title", title); put("cost", cost) }) }
+    suspend fun dropReward(id: Int) { raw("DELETE", "/api/rewards/$id") }
+    suspend fun redeem(id: Int) { raw("POST", "/api/rewards/$id/redeem") }
+    suspend fun decide(id: Int, ok: Boolean) { raw("POST", "/api/redemptions/$id/decide", obj { put("ok", ok) }) }
+    suspend fun cancelRedemption(id: Int) { raw("DELETE", "/api/redemptions/$id") }
+    suspend fun board(): List<BoardItem> = ask<BoardResp>("GET", "/api/board").items
+    suspend fun saveNote(id: Int?, title: String, emoji: String, body: String) {
+        raw("POST", "/api/board", obj { if (id != null) put("id", id); put("title", title); put("emoji", emoji); put("body", body) })
+    }
+    suspend fun dropNote(id: Int) { raw("DELETE", "/api/board/$id") }
+
     // "where are you?"
     suspend fun ping(to: Int): Int = ask<IdResp>("POST", "/api/ping", obj { put("to", to) }).id
     suspend fun answerPing(id: Int, accept: Boolean, lat: Double? = null, lng: Double? = null) {

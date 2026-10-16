@@ -89,7 +89,7 @@ private fun CallAvatar(emoji: String, ringing: Boolean, live: Boolean) {
     Box(Modifier.size(260.dp), contentAlignment = Alignment.Center) {
         if (ringing) listOf(a, b).forEach { p -> Box(Modifier.size(140.dp).scale(1f + p * 0.8f).alpha((1f - p) * 0.35f).border(2.dp, Accent, CircleShape)) }
         if (live) Box(Modifier.size(168.dp).border(2.dp, Mint.copy(alpha = 0.55f), CircleShape))
-        Box(Modifier.size(140.dp).clip(CircleShape).background(Surface2).border(1.dp, Color(0x22FFFFFF), CircleShape), contentAlignment = Alignment.Center) { Text(emoji, fontSize = 70.sp) }
+        Box(Modifier.size(140.dp).clip(CircleShape).background(Surface2).border(1.dp, Color(0x1F000000), CircleShape), contentAlignment = Alignment.Center) { Text(emoji, fontSize = 70.sp) }
     }
 }
 
@@ -121,7 +121,7 @@ fun CallOverlay(c: CallUi) {
             if (c.incoming && c.status == "ringing") {
                 Row(Modifier.fillMaxWidth().padding(bottom = 36.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                     CallButton(Icons.Filled.CallEnd, "Decline", Rose, Color.White, 78) { calls.decline() }
-                    CallButton(Icons.Filled.Call, "Answer", Mint, Color(0xFF08101F), 78) { answer() }
+                    CallButton(Icons.Filled.Call, "Answer", Mint, Color.White, 78) { answer() }
                 }
             } else {
                 Row(Modifier.fillMaxWidth().padding(bottom = 36.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Top) {

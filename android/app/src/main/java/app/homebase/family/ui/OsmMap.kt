@@ -36,7 +36,7 @@ private fun bubble(ctx: Context, emoji: String, name: String, mine: Boolean, sta
     val c = Canvas(bmp)
     val p = Paint(Paint.ANTI_ALIAS_FLAG)
     val cx = w / 2f
-    p.color = if (mine) 0xFF1FB88A.toInt() else 0xFFE6B866.toInt()
+    p.color = if (mine) 0xFF18A46A.toInt() else 0xFFD9962B.toInt()
     p.alpha = if (stale) 150 else 255
     c.drawCircle(cx, 34 * d, 30 * d, p)
     p.color = 0xFFFFFFFF.toInt()
@@ -46,8 +46,11 @@ private fun bubble(ctx: Context, emoji: String, name: String, mine: Boolean, sta
     c.drawText(emoji, cx, 45 * d, p)
     p.textSize = 13 * d
     p.isFakeBoldText = true
-    p.color = 0xFF16213A.toInt()
-    c.drawText(if (name.length > 10) name.take(9) + "…" else name, cx, 82 * d, p)
+    val label = if (name.length > 10) name.take(9) + "…" else name
+    p.style = Paint.Style.STROKE; p.strokeWidth = 4 * d; p.color = 0xFFFFFFFF.toInt()          // a white halo keeps the name readable on any map colour
+    c.drawText(label, cx, 82 * d, p)
+    p.style = Paint.Style.FILL; p.color = 0xFF17171A.toInt()
+    c.drawText(label, cx, 82 * d, p)
     return BitmapDrawable(ctx.resources, bmp)
 }
 
@@ -70,12 +73,10 @@ fun OsmMap(
         Configuration.getInstance().load(ctx, ctx.getSharedPreferences("osm", Context.MODE_PRIVATE))
         MapView(ctx).apply {
             setTileSource(TileSourceFactory.MAPNIK)
-            // matte dark like the rest of the app: invert the light tiles, mute the colour and dim them a little
-            val dark = android.graphics.ColorMatrix(floatArrayOf(-0.8f, 0f, 0f, 0f, 205f, 0f, -0.8f, 0f, 0f, 205f, 0f, 0f, -0.8f, 0f, 205f, 0f, 0f, 0f, 1f, 0f))
-            dark.postConcat(android.graphics.ColorMatrix().apply { setSaturation(0.3f) })
-            overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(dark))
-            overlayManager.tilesOverlay.loadingBackgroundColor = android.graphics.Color.parseColor("#0A0A0B")
-            overlayManager.tilesOverlay.loadingLineColor = android.graphics.Color.parseColor("#1B1B1F")
+            // white like the rest of the app: the normal light tiles, with the colour muted a little so the family stands out
+            overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0.55f) }))
+            overlayManager.tilesOverlay.loadingBackgroundColor = android.graphics.Color.parseColor("#F1F1F3")
+            overlayManager.tilesOverlay.loadingLineColor = android.graphics.Color.parseColor("#E1E1E6")
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(14.0)
@@ -100,8 +101,8 @@ fun OsmMap(
         for (pl in places) {
             m.overlays.add(Polygon(m).apply {
                 points = Polygon.pointsAsCircle(GeoPoint(pl.lat, pl.lng), pl.radius.toDouble())
-                fillPaint.color = 0x33E6B866
-                outlinePaint.color = 0xFFE6B866.toInt()
+                fillPaint.color = 0x33B8741A
+                outlinePaint.color = 0xFFB8741A.toInt()
                 outlinePaint.strokeWidth = 3f
                 title = pl.name
             })
@@ -113,7 +114,7 @@ fun OsmMap(
         if (trail.size > 1) {
             m.overlays.add(Polyline(m).apply {
                 setPoints(trail.map { GeoPoint(it.lat, it.lng) })
-                outlinePaint.color = 0xAAE6B866.toInt(); outlinePaint.strokeWidth = 8f
+                outlinePaint.color = 0xAAB8741A.toInt(); outlinePaint.strokeWidth = 8f
             })
         }
         val pts = ArrayList<GeoPoint>()

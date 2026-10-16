@@ -97,7 +97,7 @@ fun PlansScreen(nav: Nav) {
 }
 
 @Composable
-private fun Pill(text: String, on: Boolean, onClick: () -> Unit) {
+fun Pill(text: String, on: Boolean, onClick: () -> Unit) {
     Text(
         text,
         Modifier.clip(RoundedCornerShape(50)).background(if (on) Accent else Surface2).clickable { onClick() }.padding(horizontal = 16.dp, vertical = 8.dp),

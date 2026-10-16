@@ -38,6 +38,8 @@ class AppState(val store: Store, val api: Api) {
     val items = MutableStateFlow<List<Item>>(emptyList())
     val plans = MutableStateFlow<List<Plan>>(emptyList())
     val polls = MutableStateFlow<List<Poll>>(emptyList())
+    val rewards = MutableStateFlow(RewardsResp())
+    val notes = MutableStateFlow<List<BoardItem>>(emptyList())
     val call = MutableStateFlow<CallUi?>(null)
     val pingAsk = MutableStateFlow<PingAsk?>(null)
     val openThread = MutableStateFlow<Int?>(null)
@@ -81,6 +83,14 @@ class AppState(val store: Store, val api: Api) {
 
     suspend fun refreshPlans() {
         runCatching { api.plans() }.onSuccess { plans.value = it }
+    }
+
+    suspend fun refreshRewards() {
+        runCatching { api.rewards() }.onSuccess { rewards.value = it }
+    }
+
+    suspend fun refreshNotes() {
+        runCatching { api.board() }.onSuccess { notes.value = it }
     }
 
     suspend fun refreshPolls() {

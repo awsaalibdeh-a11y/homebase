@@ -42,11 +42,11 @@ class Toast : Form
     {
         AutoScaleDimensions = new SizeF(96f, 96f); AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
-        BackColor = Color.FromArgb(24, 24, 28); ForeColor = Color.FromArgb(236, 236, 240); Width = 340;
+        BackColor = Color.White; ForeColor = Color.FromArgb(23, 23, 26); Width = 340;
         int extra = buttons == null ? 0 : (buttons.Length > 2 ? 34 * ((buttons.Length + 1) / 2) + 8 : 42);
         Height = 78 + extra;
-        Label t = new Label { Text = title, Left = 16, Top = 10, Width = 308, Height = 24, Font = new Font("Segoe UI Emoji", 10.5f, FontStyle.Bold), ForeColor = Color.White, UseCompatibleTextRendering = false };
-        Label b = new Label { Text = body, Left = 16, Top = 34, Width = 308, Height = 38, Font = new Font("Segoe UI Emoji", 9f), ForeColor = Color.FromArgb(170, 170, 180) };
+        Label t = new Label { Text = title, Left = 16, Top = 10, Width = 308, Height = 24, Font = new Font("Segoe UI Emoji", 10.5f, FontStyle.Bold), ForeColor = Color.FromArgb(23, 23, 26), UseCompatibleTextRendering = false };
+        Label b = new Label { Text = body, Left = 16, Top = 34, Width = 308, Height = 38, Font = new Font("Segoe UI Emoji", 9f), ForeColor = Color.FromArgb(98, 98, 107) };
         Controls.Add(t); Controls.Add(b);
         if (buttons != null)
         {
@@ -55,7 +55,7 @@ class Toast : Form
                 int idx = i; bool two = buttons.Length > 1;
                 int w = buttons.Length == 1 ? 200 : 148, col = buttons.Length == 1 ? 0 : i % 2, row = buttons.Length == 1 ? 0 : i / 2;
                 if (buttons.Length > 2 && buttons.Length % 2 == 1 && i == buttons.Length - 1) { w = 304; col = 0; }
-                Button go = new Button { Text = buttons[i], Left = 16 + col * 156, Top = 74 + row * 34, Width = w, Height = 28, AutoSize = false, FlatStyle = FlatStyle.Flat, BackColor = i == 0 ? Color.FromArgb(230, 184, 102) : Color.FromArgb(40, 40, 46), ForeColor = i == 0 ? Color.FromArgb(27, 19, 6) : Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+                Button go = new Button { Text = buttons[i], Left = 16 + col * 156, Top = 74 + row * 34, Width = w, Height = 28, AutoSize = false, FlatStyle = FlatStyle.Flat, BackColor = i == 0 ? Color.FromArgb(169, 106, 14) : Color.FromArgb(239, 239, 242), ForeColor = i == 0 ? Color.White : Color.FromArgb(23, 23, 26), Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
                 go.FlatAppearance.BorderSize = 0; go.Click += delegate { try { if (onPick != null) onPick(idx); } catch { } Close(); }; Controls.Add(go);
             }
         }
@@ -68,6 +68,19 @@ class Toast : Form
     }
 
     void Rounded() { try { Region = System.Drawing.Region.FromHrgn(CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 18, 18)); } catch { } }
+
+    // a thin grey outline, so a white pop-up still has an edge on a white window
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+        {
+            int r = 18; Rectangle rc = new Rectangle(0, 0, Width - 1, Height - 1);
+            path.AddArc(rc.X, rc.Y, r, r, 180, 90); path.AddArc(rc.Right - r, rc.Y, r, r, 270, 90); path.AddArc(rc.Right - r, rc.Bottom - r, r, r, 0, 90); path.AddArc(rc.X, rc.Bottom - r, r, r, 90, 90); path.CloseFigure();
+            using (Pen p = new Pen(Color.FromArgb(206, 206, 213))) e.Graphics.DrawPath(p, path);
+        }
+    }
 
     static void Stack()
     {
@@ -125,13 +138,13 @@ class RingWindow : Form
     {
         AutoScaleDimensions = new SizeF(96f, 96f); AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = true; TopMost = true; StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Color.FromArgb(14, 14, 16); ForeColor = Color.White; Width = 420; Height = 330; Text = "Homebase call";
-        Label top = new Label { Text = urgent ? "URGENT HOMEBASE CALL" : "HOMEBASE CALL", Left = 0, Top = 22, Width = 420, Height = 22, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.FromArgb(140, 140, 150), Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+        BackColor = Color.White; ForeColor = Color.FromArgb(23, 23, 26); Width = 420; Height = 330; Text = "Homebase call";
+        Label top = new Label { Text = urgent ? "URGENT HOMEBASE CALL" : "HOMEBASE CALL", Left = 0, Top = 22, Width = 420, Height = 22, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.FromArgb(110, 110, 120), Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
         Label who = new Label { Text = name, Left = 10, Top = 100, Width = 400, Height = 48, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI Emoji", 22f, FontStyle.Bold) };
-        Label sub = new Label { Text = "is calling you…", Left = 0, Top = 150, Width = 420, Height = 26, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.FromArgb(170, 170, 180), Font = new Font("Segoe UI", 11f) };
+        Label sub = new Label { Text = "is calling you…", Left = 0, Top = 150, Width = 420, Height = 26, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.FromArgb(98, 98, 107), Font = new Font("Segoe UI", 11f) };
         Controls.Add(top); Controls.Add(who); Controls.Add(sub);
-        Button no = new Button { Text = "Decline", Left = 40, Top = 230, Width = 150, Height = 54, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(255, 107, 116), ForeColor = Color.White, Font = new Font("Segoe UI", 13f, FontStyle.Bold) };
-        Button yes = new Button { Text = "Answer", Left = 230, Top = 230, Width = 150, Height = 54, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(61, 212, 155), ForeColor = Color.FromArgb(27, 19, 6), Font = new Font("Segoe UI", 13f, FontStyle.Bold) };
+        Button no = new Button { Text = "Decline", Left = 40, Top = 230, Width = 150, Height = 54, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(224, 65, 74), ForeColor = Color.White, Font = new Font("Segoe UI", 13f, FontStyle.Bold) };
+        Button yes = new Button { Text = "Answer", Left = 230, Top = 230, Width = 150, Height = 54, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(24, 164, 106), ForeColor = Color.White, Font = new Font("Segoe UI", 13f, FontStyle.Bold) };
         no.FlatAppearance.BorderSize = 0; yes.FlatAppearance.BorderSize = 0;
         no.Click += delegate { try { onDecline(); } catch { } Close(); };
         yes.Click += delegate { Answered = true; try { onAnswer(); } catch { } Close(); };
@@ -152,8 +165,8 @@ class RingWindow : Form
     {
         base.OnPaint(e);
         float r = 22 + (tick % 10) * 2.4f, a = Math.Max(0, 200 - (tick % 10) * 22);
-        using (Pen p = new Pen(Color.FromArgb((int)a, 61, 212, 155), 3f)) e.Graphics.DrawEllipse(p, 210 - r, 72 - r, r * 2, r * 2);
-        using (Brush b = new SolidBrush(Color.FromArgb(27, 27, 31))) e.Graphics.FillEllipse(b, 210 - 24, 72 - 24, 48, 48);
+        using (Pen p = new Pen(Color.FromArgb((int)a, 24, 164, 106), 3f)) e.Graphics.DrawEllipse(p, 210 - r, 72 - r, r * 2, r * 2);
+        using (Brush b = new SolidBrush(Color.FromArgb(24, 164, 106))) e.Graphics.FillEllipse(b, 210 - 24, 72 - 24, 48, 48);
         using (Font f = new Font("Segoe UI Emoji", 18f)) using (Brush t = new SolidBrush(Color.White)) { SizeF sz = e.Graphics.MeasureString("\U0001F4DE", f); e.Graphics.DrawString("\U0001F4DE", f, t, 210 - sz.Width / 2, 72 - sz.Height / 2); }
     }
 }
@@ -176,7 +189,7 @@ static class Native
 
 class App : ApplicationContext
 {
-    public const int Build = 19;                                              // bump with windows/BUILD on the server; computers update themselves when the server's is higher
+    public const int Build = 20;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -314,7 +327,7 @@ class App : ApplicationContext
 
     void Switch(Profile p)
     {
-        lock (apps) { if (dirty) { Send(); } SaveToday(); cur = p; apps.Clear(); dirty = false; cursor = -1; told.Clear(); LoadToday(); }
+        lock (apps) { if (dirty) { Send(); } SaveToday(); cur = p; apps.Clear(); dirty = false; cursor = -1; told.Clear(); pointsText = ""; nextText = ""; lastFamily = DateTime.MinValue; LoadToday(); }
         SaveConfig();
         Say("Homebase", p.Name + " is using this computer.", 4, null, null);
     }
@@ -433,6 +446,8 @@ class App : ApplicationContext
     {
         ContextMenuStrip m = new ContextMenuStrip();
         ToolStripMenuItem who = new ToolStripMenuItem("Homebase screen time is on"); who.Enabled = false; m.Items.Add(who);
+        ToolStripMenuItem pts = new ToolStripMenuItem(""); pts.Enabled = false; pts.Visible = false; m.Items.Add(pts);
+        ToolStripMenuItem nextp = new ToolStripMenuItem(""); nextp.Enabled = false; nextp.Visible = false; m.Items.Add(nextp);
         ToolStripMenuItem today = new ToolStripMenuItem("Today: counting...");
         ToolStripMenuItem grounded = new ToolStripMenuItem("Grounded apps: none");
         grounded.Enabled = false; m.Items.Add(grounded);
@@ -452,10 +467,37 @@ class App : ApplicationContext
         m.Items.Add("Open Homebase", null, delegate { try { Process.Start(server + "/app"); } catch { } });
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add("Remove from this computer", null, delegate { Remove(true); Quit(); });
-        m.Opening += delegate { quiet.Text = DateTime.Now < quietUntil ? "Turn pop-ups back on" : "Pause everyday pop-ups for 1 hour"; grounded.Text = groundedNow.Count == 0 ? "Grounded apps: none" : "Grounded: " + string.Join(", ", groundedNow.ToArray()); who.Text = cur == null ? "Homebase screen time is on" : "Counting for " + cur.Name; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
+        m.Opening += delegate { quiet.Text = DateTime.Now < quietUntil ? "Turn pop-ups back on" : "Pause everyday pop-ups for 1 hour"; grounded.Text = groundedNow.Count == 0 ? "Grounded apps: none" : "Grounded: " + string.Join(", ", groundedNow.ToArray()); who.Text = cur == null ? "Homebase screen time is on" : "Counting for " + cur.Name; pts.Text = pointsText; pts.Visible = pointsText != ""; nextp.Text = nextText; nextp.Visible = nextText != ""; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
         tray = new NotifyIcon { Icon = SystemIcons.Information, Text = "Homebase", Visible = true, ContextMenuStrip = m };
         tray.DoubleClick += delegate { Say("Homebase" + (cur == null ? "" : " - " + cur.Name), nowDoing + "\nToday: " + Duration(Total()) + " playing or watching", 9, "Open Homebase", delegate { Open("/app"); }); };
         tray.BalloonTipClicked += delegate { Open(pendingOpen ?? "/app"); pendingOpen = null; };
+    }
+    // what the tray menu shows besides screen time: my points to spend and the next family plan (refreshed every few minutes, never blocks the loop)
+    string pointsText = "", nextText = "";
+    DateTime lastFamily = DateTime.MinValue;
+    static string Str(Dictionary<string, object> d, string k) { return d != null && d.ContainsKey(k) && d[k] != null ? Convert.ToString(d[k]) : ""; }
+    static double Num(Dictionary<string, object> d, string k) { double v; return d != null && d.ContainsKey(k) && d[k] != null && double.TryParse(Convert.ToString(d[k], System.Globalization.CultureInfo.InvariantCulture), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v) ? v : 0; }
+    public static string WhenText(double start)
+    {
+        DateTime t = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(start).ToLocalTime();
+        if (t < DateTime.Now) return "happening now";
+        int days = (int)Math.Round((t.Date - DateTime.Now.Date).TotalDays); string clock = t.ToString("t");
+        if (days == 0) return "today " + clock;
+        if (days == 1) return "tomorrow " + clock;
+        return days < 7 ? t.ToString("dddd") + " " + clock : t.ToString("ddd d MMM") + " " + clock;
+    }
+    void RefreshFamily()
+    {
+        int st;
+        string r = Http("GET", "/api/rewards", null, out st);
+        if (st == 200) { var d = Json.Deserialize<Dictionary<string, object>>(r); pointsText = d.ContainsKey("mine") && d["mine"] != null ? "⭐ " + Convert.ToInt32(d["mine"]) + " points to spend" : ""; }
+        string p = Http("GET", "/api/plans", null, out st);
+        if (st == 200)
+        {
+            var d = Json.Deserialize<Dictionary<string, object>>(p); nextText = "";
+            var list = d.ContainsKey("plans") ? d["plans"] as System.Collections.ArrayList : null;
+            if (list != null && list.Count > 0) { var first = list[0] as Dictionary<string, object>; if (first != null) nextText = "\U0001F4C5 Next: " + Str(first, "title") + ", " + WhenText(Num(first, "start")); }
+        }
     }
     static bool hbDirIsNull() { return Environment.GetEnvironmentVariable("HB_DIR") == null; }       // tests never update themselves
     static string ShownFile { get { return Path.Combine(Dir, "shown.txt"); } }
@@ -566,7 +608,7 @@ class App : ApplicationContext
         if (cur == null) return;
         string gone = cur.Name; profiles.Remove(cur);
         if (profiles.Count == 0) { Say("Homebase", "This computer was removed from Homebase."); Remove(false); Quit(); return; }
-        cur = profiles[0]; apps.Clear(); dirty = false; cursor = -1; LoadToday(); SaveConfig();
+        cur = profiles[0]; apps.Clear(); dirty = false; cursor = -1; pointsText = ""; nextText = ""; lastFamily = DateTime.MinValue; LoadToday(); SaveConfig();
         Say("Homebase", gone + " was removed from this computer. Now counting for " + cur.Name + ".");
     }
 
@@ -622,9 +664,21 @@ class App : ApplicationContext
                             if (!quiet)
                             {
                                 if (kind == "sos") { Important("\U0001F6A8 " + from + " needs help", body, 20); try { SystemSounds.Hand.Play(); } catch { } }
+                                else if (kind == "pickup") { Important("\U0001F697 " + from + " needs a pickup", body, 20); try { SystemSounds.Exclamation.Play(); } catch { } }
                                 else if (from == "Homebase") Important("\U0001F4E2 Announcement", body, 12);
                                 else { Say(from, body); try { SystemSounds.Asterisk.Play(); } catch { } }
                             }
+                        }
+                        else if (type == "plan_soon" && pl != null) Say("\U0001F4C5 Starting soon", Str(pl, "title") + ", " + WhenText(Num(pl, "start")));
+                        else if (type == "plan" && pl != null && pl.ContainsKey("new")) { Say("\U0001F4C5 " + Str(pl, "name") + " planned something", Str(pl, "title") + ", " + WhenText(Num(pl, "start"))); lastFamily = DateTime.MinValue; }
+                        else if (type == "poll" && pl != null && pl.ContainsKey("new")) Say("\U0001F5F3 " + Str(pl, "name") + " asks the family", Str(pl, "question"));
+                        else if (type == "reward" && pl != null)
+                        {
+                            string rs = Str(pl, "status"), rn = Str(pl, "name"), rt = Str(pl, "title");
+                            if (rs == "approved") Important("\U0001F381 " + rn + " said yes", rt, 12);
+                            else if (rs == "declined") Say(rn + " said not now", rt);
+                            else Say("\U0001F381 " + rn + " asked for a reward", rt + " (" + Str(pl, "cost") + " points)");
+                            lastFamily = DateTime.MinValue;                                       // points changed: refresh the tray readout
                         }
                         else if (type == "call" && pl != null)
                         {
@@ -640,6 +694,7 @@ class App : ApplicationContext
         if ((hbDirIsNull() || Environment.GetEnvironmentVariable("HB_UPDATE") != null) && (now - lastUpdateCheck).TotalMinutes > 20) { lastUpdateCheck = now; Background("update", CheckUpdate); }
         if ((now - lastBeat).TotalSeconds > 30) { lastBeat = now; try { int hs; Http("POST", "/api/devices/status", new Dictionary<string, object> { { "status", nowDoing }, { "version", "b" + Build } }, out hs); } catch (Exception e) { Log("beat: " + e.Message); } }
         if ((now - lastApps).TotalMinutes > 60) { lastApps = now; Background("apps", ReportApps); }
+        if ((now - lastFamily).TotalMinutes > 5) { lastFamily = now; Background("family", RefreshFamily); }
         double idleNow = Native.Idle();
         if (idleNow > 1800) wasAway = true;                                           // away for 30+ minutes: someone else may sit down next
         if (wasAway && idleNow < 20 && profiles.Count > 1) { wasAway = false; sync.BeginInvoke(new Action(delegate { PickPerson(false); })); }

@@ -72,6 +72,7 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
         val o = open.value ?: return@LaunchedEffect
         if (o.startsWith("chat:") && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Thread(o.removePrefix("chat:").toIntOrNull() ?: 0)) }
         else if (o == "plans" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Plans) }
+        else if (o == "rewards" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Rewards) }
         open.value = null
     }
     Box(Modifier.fillMaxSize()) {
@@ -88,6 +89,8 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
             is Screen.Perms -> app.homebase.family.ui.PermsScreen(nav)
             is Screen.Chores -> app.homebase.family.ui.ChoresScreen(nav)
             is Screen.Plans -> app.homebase.family.ui.PlansScreen(nav)
+            is Screen.Rewards -> app.homebase.family.ui.RewardsScreen(nav)
+            is Screen.Board -> app.homebase.family.ui.BoardScreen(nav)
             is Screen.Controls -> app.homebase.family.ui.ControlsScreen(nav, s.memberId)
             Screen.Rules -> app.homebase.family.ui.RulesScreen(nav)
             Screen.MapFull -> app.homebase.family.ui.WithBack(nav) { app.homebase.family.ui.MapTab(nav) }

@@ -23,7 +23,7 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "3"))
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "4"))
 KEEP_LOCATIONS_DAYS = 7
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _hits = defaultdict(list)
@@ -1084,7 +1084,7 @@ def admin_activity():
         return bad
     names = {f["id"]: f["name"] for f in db.many(select(db.families))}
     who = {m["id"]: m["name"] for m in db.many(select(db.members))}
-    rows = db.many(select(db.messages).where(db.messages.c.kind.in_(["system", "sos", "late", "checkin"])).order_by(db.messages.c.id.desc()).limit(60))
+    rows = db.many(select(db.messages).where(db.messages.c.kind.in_(["system", "sos", "late", "checkin", "pickup"])).order_by(db.messages.c.id.desc()).limit(60))
     return jsonify(items=[{"at": r["created"], "family": names.get(r["family_id"], "?"), "kind": r["kind"], "who": who.get(r["from_id"], ""), "text": r["body"]} for r in rows])
 
 
@@ -1279,7 +1279,7 @@ def delete_screentime():
 
 
 # ---------------------------------------------------------------- messages: texts, check-ins, running late, SOS, hearts
-KINDS = ("text", "checkin", "late", "sos", "heart")
+KINDS = ("text", "checkin", "late", "sos", "heart", "pickup")
 
 
 REACTIONS = ("👍", "❤️", "😂", "😮", "🙏", "🎉")
@@ -1314,10 +1314,13 @@ def send_message():
         return denied(same_family(to_id), "messages")
     if limited(f"msg:{m['id']}", 120):
         return err("Slow down a little.", 429)
-    lat = float(b["lat"]) if kind in ("checkin", "sos") and b.get("lat") is not None else None
-    lng = float(b["lng"]) if kind in ("checkin", "sos") and b.get("lng") is not None else None
+    lat = float(b["lat"]) if kind in ("checkin", "sos", "pickup") and b.get("lat") is not None else None
+    lng = float(b["lng"]) if kind in ("checkin", "sos", "pickup") and b.get("lng") is not None else None
     if kind == "sos":
         body = body or "I need help"
+    if kind == "pickup":                                               # "come and get me": goes to the whole family, with where I am if I chose to send it
+        body = body or "Can someone pick me up?"
+        to_id = 0
     mid = say(m["family_id"], m["id"], body, kind=kind, lat=lat, lng=lng, to_id=to_id)
     row = db.one(select(db.messages).where(db.messages.c.id == mid))
     for x in family_members(m["family_id"]):
@@ -1325,7 +1328,7 @@ def send_message():
             continue
         if kind in ("text", "heart") and not parent_may(m, x, "messages"):
             continue
-        push(x["id"], "message", {**msg_view(row), "name": m["name"], "emoji": m["emoji"], "quiet": in_quiet(x) and kind != "sos", "urgent": kind == "sos"})
+        push(x["id"], "message", {**msg_view(row), "name": m["name"], "emoji": m["emoji"], "quiet": in_quiet(x) and kind not in ("sos", "pickup"), "urgent": kind == "sos"})
     return jsonify(message=msg_view(row))
 
 
@@ -1711,6 +1714,167 @@ def drop_poll(pid):
         return err("Not found.", 404)
     db.run(delete(db.polls).where(db.polls.c.id == pid))
     push_family(g.m["family_id"], "poll", {"id": pid, "removed": True}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- rewards: what chore points can buy
+def spent_points(fid):
+    """Points a child has spent or is holding for a request a parent has not answered yet."""
+    s = {}
+    for r in db.many(select(db.redemptions).where(db.redemptions.c.family_id == fid, db.redemptions.c.status.in_(["pending", "approved"]))):
+        s[r["member_id"]] = s.get(r["member_id"], 0) + r["cost"]
+    return s
+
+
+def balances(fid):
+    earned, spent = chore_points(fid), spent_points(fid)
+    return {i: earned.get(i, 0) - spent.get(i, 0) for i in set(earned) | set(spent)}
+
+
+def reward_view(r):
+    return {"id": r["id"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"]}
+
+
+def redemption_view(r):
+    return {"id": r["id"], "member": r["member_id"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"], "status": r["status"], "at": r["created"], "decided_at": r["decided_at"]}
+
+
+@app.get("/api/rewards")
+@need
+def get_rewards():
+    fid, m = g.m["family_id"], g.m
+    rewards = db.many(select(db.rewards).where(db.rewards.c.family_id == fid).order_by(db.rewards.c.cost, db.rewards.c.id))
+    asks = db.many(select(db.redemptions).where(db.redemptions.c.family_id == fid).order_by(db.redemptions.c.id.desc()).limit(40))
+    if m["role"] != "parent":                                          # a child sees their own requests, a parent sees everyone's
+        asks = [r for r in asks if r["member_id"] == m["id"]]
+    bal = balances(fid)
+    return jsonify(rewards=[reward_view(r) for r in rewards], requests=[redemption_view(r) for r in asks[:25]], balance=bal, mine=bal.get(m["id"], 0) if m["role"] == "child" else None)
+
+
+@app.post("/api/rewards")
+@parent_only
+def add_reward():
+    b = request.get_json(silent=True) or {}
+    title = clean(b.get("title"), 60)
+    if not title:
+        return err("What is the reward?")
+    try:
+        cost = int(b.get("cost"))
+    except (TypeError, ValueError):
+        return err("Say how many points it costs.")
+    if not 1 <= cost <= 1000:
+        return err("A reward costs between 1 and 1000 points.")
+    fid = g.m["family_id"]
+    if len(db.many(select(db.rewards.c.id).where(db.rewards.c.family_id == fid))) >= 30:
+        return err("That is plenty of rewards (30). Delete some first.")
+    rid = db.run(insert(db.rewards).values(family_id=fid, title=title, emoji=clean(b.get("emoji"), 8) or "🎁", cost=cost, created_by=g.m["id"], created=time.time()))
+    push_family(fid, "rewards", {"id": rid})
+    return jsonify(id=rid)
+
+
+@app.delete("/api/rewards/<int:rid>")
+@parent_only
+def drop_reward(rid):
+    if not db.one(select(db.rewards).where(db.rewards.c.id == rid, db.rewards.c.family_id == g.m["family_id"])):
+        return err("Not found.", 404)
+    db.run(delete(db.rewards).where(db.rewards.c.id == rid))
+    push_family(g.m["family_id"], "rewards", {"id": rid})
+    return jsonify(ok=True)
+
+
+@app.post("/api/rewards/<int:rid>/redeem")
+@need
+def redeem_reward(rid):
+    m = g.m
+    if m["role"] != "child":
+        return err("Points belong to children.", 403)
+    r = db.one(select(db.rewards).where(db.rewards.c.id == rid, db.rewards.c.family_id == m["family_id"]))
+    if not r:
+        return err("Not found.", 404)
+    have = balances(m["family_id"]).get(m["id"], 0)
+    if have < r["cost"]:
+        return err(f"You need {r['cost'] - have} more points for that.")
+    if len(db.many(select(db.redemptions.c.id).where(db.redemptions.c.member_id == m["id"], db.redemptions.c.status == "pending"))) >= 3:
+        return err("You already have three waiting. Ask a parent to answer them first.")
+    qid = db.run(insert(db.redemptions).values(family_id=m["family_id"], member_id=m["id"], title=r["title"], emoji=r["emoji"], cost=r["cost"], status="pending", created=time.time()))
+    say(m["family_id"], m["id"], f"{m['name']} asked for a reward: {r['title']} ({r['cost']} points)")
+    for x in family_members(m["family_id"]):
+        if x["role"] == "parent":
+            push(x["id"], "reward", {"id": qid, "status": "pending", "name": m["name"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"]})
+    push_family(m["family_id"], "rewards", {"id": qid}, skip=m["id"])
+    return jsonify(id=qid, balance=have - r["cost"])
+
+
+@app.post("/api/redemptions/<int:qid>/decide")
+@parent_only
+def decide_redemption(qid):
+    r = db.one(select(db.redemptions).where(db.redemptions.c.id == qid, db.redemptions.c.family_id == g.m["family_id"]))
+    if not r or r["status"] != "pending":
+        return err("Nothing to answer.", 404)
+    ok = bool((request.get_json(silent=True) or {}).get("ok", True))
+    status = "approved" if ok else "declined"
+    db.run(update(db.redemptions).where(db.redemptions.c.id == qid).values(status=status, decided_by=g.m["id"], decided_at=time.time()))
+    kid = same_family(r["member_id"])
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} {'said yes to' if ok else 'said not now to'} {kid['name'] if kid else 'a'} reward: {r['title']}" + (f" ({r['cost']} points spent)" if ok else ""))
+    push(r["member_id"], "reward", {"id": qid, "status": status, "name": g.m["name"], "title": r["title"], "emoji": r["emoji"], "cost": r["cost"]})
+    push_family(g.m["family_id"], "rewards", {"id": qid}, skip=g.m["id"])
+    return jsonify(ok=True, status=status)
+
+
+@app.delete("/api/redemptions/<int:qid>")
+@need
+def cancel_redemption(qid):
+    r = db.one(select(db.redemptions).where(db.redemptions.c.id == qid, db.redemptions.c.family_id == g.m["family_id"]))
+    if not r or r["member_id"] != g.m["id"] or r["status"] != "pending":
+        return err("Not found.", 404)
+    db.run(delete(db.redemptions).where(db.redemptions.c.id == qid))
+    push_family(g.m["family_id"], "rewards", {"id": qid}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- the family board: things everyone should be able to find
+def board_view(r):
+    return {"id": r["id"], "title": r["title"], "emoji": r["emoji"], "body": r["body"], "at": r["updated"]}
+
+
+@app.get("/api/board")
+@need
+def get_board():
+    rows = db.many(select(db.board).where(db.board.c.family_id == g.m["family_id"]).order_by(db.board.c.id))
+    return jsonify(items=[board_view(r) for r in rows])
+
+
+@app.post("/api/board")
+@parent_only
+def save_board():
+    """A parent adds a note, or changes one (send its id)."""
+    b = request.get_json(silent=True) or {}
+    title = clean(b.get("title"), 40)
+    body = str(b.get("body") or "").replace("\r", "").strip()[:600]
+    if not title:
+        return err("Give the note a title.")
+    fid, emoji, now = g.m["family_id"], clean(b.get("emoji"), 8) or "📌", time.time()
+    if str(b.get("id", "")).isdigit():
+        r = db.one(select(db.board).where(db.board.c.id == int(b["id"]), db.board.c.family_id == fid))
+        if not r:
+            return err("Not found.", 404)
+        db.run(update(db.board).where(db.board.c.id == r["id"]).values(title=title, emoji=emoji, body=body, updated_by=g.m["id"], updated=now))
+        bid = r["id"]
+    else:
+        if len(db.many(select(db.board.c.id).where(db.board.c.family_id == fid))) >= 20:
+            return err("That is plenty of notes (20). Delete some first.")
+        bid = db.run(insert(db.board).values(family_id=fid, title=title, emoji=emoji, body=body, updated_by=g.m["id"], updated=now))
+    push_family(fid, "board", {"id": bid}, skip=g.m["id"])
+    return jsonify(id=bid)
+
+
+@app.delete("/api/board/<int:bid>")
+@parent_only
+def drop_board(bid):
+    if not db.one(select(db.board).where(db.board.c.id == bid, db.board.c.family_id == g.m["family_id"])):
+        return err("Not found.", 404)
+    db.run(delete(db.board).where(db.board.c.id == bid))
+    push_family(g.m["family_id"], "board", {"id": bid}, skip=g.m["id"])
     return jsonify(ok=True)
 
 

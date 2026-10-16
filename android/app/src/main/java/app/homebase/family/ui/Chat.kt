@@ -93,6 +93,7 @@ private fun Bubble(m: Message, mine: Boolean, who: String, me: Int, picking: Boo
         "sos" -> Rose to OnAccent
         "checkin" -> MintSoft to Ink
         "late" -> SunSoft to Ink
+        "pickup" -> AccentSoft to Ink
         else -> if (mine) Accent to OnAccent else Surface2 to Ink
     }
     Column(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
@@ -103,9 +104,19 @@ private fun Bubble(m: Message, mine: Boolean, who: String, me: Int, picking: Boo
                 "checkin" -> Text("✓ ${m.body.ifBlank { "I'm OK" }}", color = ink)
                 "late" -> Text("⏰ ${m.body}", color = ink)
                 "sos" -> Text("🚨 ${m.body}", color = ink, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                "pickup" -> Text("🚗 ${m.body}", color = ink, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                 else -> Text(m.body, color = ink)
             }
             if (m.lat != null && m.lng != null) TextButton({ onSpot(Spot(m.lat, m.lng)) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("Show on map", color = if (m.kind == "sos") Color.White else Accent) }
+            if (m.kind == "pickup" && !mine) {
+                val ctx = LocalContext.current
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(5, 10, 20, 30).forEach { n ->
+                        Text("On my way · $n min", Modifier.clip(RoundedCornerShape(50)).background(Accent).clickable { sendQuick(ctx, "text", "On my way, about $n minutes 🚗", 0, false, "Sent") }.padding(horizontal = 12.dp, vertical = 6.dp),
+                            color = OnAccent, fontSize = 13.sp)
+                    }
+                }
+            }
             if (m.reactions.isNotEmpty()) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 m.reactions.forEach { (e, ids) ->
                     val mineR = me in ids

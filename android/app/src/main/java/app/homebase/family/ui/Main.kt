@@ -98,7 +98,7 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
             if (tab == 0) FamilyTab(nav) else MeTab(nav)
             val online by state.online.collectAsState()
             if (!online) Text("📡 Offline · showing the last update", color = Color.White, style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp).background(Color(0xFF1C2230), RoundedCornerShape(99.dp)).padding(horizontal = 16.dp, vertical = 8.dp))
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp).background(Color(0xFF2B2B31), RoundedCornerShape(99.dp)).padding(horizontal = 16.dp, vertical = 8.dp))
         }
     }
 }

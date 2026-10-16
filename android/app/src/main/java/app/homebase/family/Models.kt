@@ -120,6 +120,37 @@ data class PollsResp(val polls: List<Poll> = emptyList())
 @Serializable
 data class PollResp(val poll: Poll)
 
+/** Something chore points can buy. A [Redemption] is a child asking for one, and a parent's answer. */
+@Serializable
+data class Reward(val id: Int, val title: String, val emoji: String = "🎁", val cost: Int = 0)
+
+@Serializable
+data class Redemption(
+    val id: Int,
+    val member: Int = 0,
+    val title: String,
+    val emoji: String = "🎁",
+    val cost: Int = 0,
+    val status: String = "pending",
+    val at: Double = 0.0,
+    @SerialName("decided_at") val decidedAt: Double = 0.0,
+)
+
+/** [balance] is points earned minus points spent or held, by member id. */
+@Serializable
+data class RewardsResp(
+    val rewards: List<Reward> = emptyList(),
+    val requests: List<Redemption> = emptyList(),
+    val balance: Map<String, Int> = emptyMap(),
+)
+
+/** A note on the family board (Wi-Fi, the doctor, allergies). */
+@Serializable
+data class BoardItem(val id: Int, val title: String, val emoji: String = "📌", val body: String = "", val at: Double = 0.0)
+
+@Serializable
+data class BoardResp(val items: List<BoardItem> = emptyList())
+
 @Serializable
 data class MessagesResp(val messages: List<Message> = emptyList())
 

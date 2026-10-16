@@ -964,5 +964,152 @@ class Polls(Base):
         self.assertEqual(self.c.get("/api/polls").status_code, 401)
 
 
+class Rewards(Base):
+    def earn(self, kid_headers, points):
+        cid = self.post(self.mum, "/api/chores", title="Tidy up", points=points).get_json()["id"]
+        self.assertEqual(self.post(kid_headers, f"/api/chores/{cid}/done").status_code, 200)
+        self.assertEqual(self.post(self.mum, f"/api/chores/{cid}/approve", ok=True).status_code, 200)
+
+    def reward(self, title="Pick the film", cost=20, **kw):
+        return self.post(self.mum, "/api/rewards", title=title, cost=cost, **kw)
+
+    def info(self, who):
+        return self.get(who, "/api/rewards").get_json()
+
+    def test_points_are_spent_held_and_given_back(self):
+        rid = self.reward().get_json()["id"]
+        self.assertEqual(self.post(self.kid, f"/api/rewards/{rid}/redeem").status_code, 400, "no points yet")
+        self.earn(self.kid, 30)
+        self.assertEqual(self.info(self.kid)["balance"], {str(self.kid_id): 30})
+        self.assertEqual((self.info(self.kid)["mine"], self.info(self.mum)["mine"]), (30, None), "a child is told their own balance, a parent has none")
+        d = self.post(self.kid, f"/api/rewards/{rid}/redeem").get_json()
+        self.assertEqual(d["balance"], 10)
+        self.assertEqual(self.info(self.kid)["balance"][str(self.kid_id)], 10, "the points are held while a parent decides")
+        asked = [e for e in self.events(self.mum) if e["type"] == "reward"]
+        self.assertEqual((asked[0]["payload"]["status"], asked[0]["payload"]["name"], asked[0]["payload"]["cost"]), ("pending", "Sam", 20))
+        self.assertEqual(self.post(self.mum, f"/api/redemptions/{d['id']}/decide", ok=False).get_json()["status"], "declined")
+        self.assertEqual(self.info(self.kid)["balance"][str(self.kid_id)], 30, "a no gives the points back")
+        again = self.post(self.kid, f"/api/rewards/{rid}/redeem").get_json()["id"]
+        self.assertEqual(self.post(self.mum, f"/api/redemptions/{again}/decide", ok=True).get_json()["status"], "approved")
+        self.assertEqual(self.info(self.kid)["balance"][str(self.kid_id)], 10, "a yes spends them")
+        told = [e["payload"] for e in self.events(self.kid) if e["type"] == "reward"]
+        self.assertEqual([(t["status"], t["title"]) for t in told], [("declined", "Pick the film"), ("approved", "Pick the film")])
+        self.assertEqual(self.post(self.mum, f"/api/redemptions/{again}/decide", ok=True).status_code, 404, "already answered")
+
+    def test_asking_twice_cannot_spend_the_same_points_twice(self):
+        rid = self.reward().get_json()["id"]
+        self.earn(self.kid, 30)
+        self.assertEqual(self.post(self.kid, f"/api/rewards/{rid}/redeem").status_code, 200)
+        r = self.post(self.kid, f"/api/rewards/{rid}/redeem")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("10 more", r.get_json()["error"])
+
+    def test_at_most_three_waiting_and_a_child_can_take_a_request_back(self):
+        rid = self.reward(cost=1).get_json()["id"]
+        self.earn(self.kid, 50)
+        ids = [self.post(self.kid, f"/api/rewards/{rid}/redeem").get_json()["id"] for _ in range(3)]
+        self.assertEqual(self.post(self.kid, f"/api/rewards/{rid}/redeem").status_code, 400)
+        self.assertEqual(self.c.delete(f"/api/redemptions/{ids[0]}", headers=self.kid).status_code, 200)
+        self.assertEqual(self.info(self.kid)["balance"][str(self.kid_id)], 48)
+        self.assertEqual(self.c.delete(f"/api/redemptions/{ids[0]}", headers=self.kid).status_code, 404)
+        self.post(self.mum, f"/api/redemptions/{ids[1]}/decide", ok=True)
+        self.assertEqual(self.c.delete(f"/api/redemptions/{ids[1]}", headers=self.kid).status_code, 404, "an answered request stays")
+
+    def test_who_may_do_what(self):
+        self.assertEqual(self.post(self.kid, "/api/rewards", title="Free money", cost=1).status_code, 403)
+        rid = self.reward().get_json()["id"]
+        self.assertEqual(self.post(self.mum, f"/api/rewards/{rid}/redeem").status_code, 403, "points belong to children")
+        self.earn(self.kid, 30)
+        qid = self.post(self.kid, f"/api/rewards/{rid}/redeem").get_json()["id"]
+        self.assertEqual(self.post(self.kid, f"/api/redemptions/{qid}/decide", ok=True).status_code, 403, "a child cannot approve their own")
+        self.assertEqual(self.c.delete(f"/api/rewards/{rid}", headers=self.kid).status_code, 403)
+        self.assertEqual(self.c.delete(f"/api/rewards/{rid}", headers=self.mum).status_code, 200)
+        self.assertEqual(self.info(self.mum)["rewards"], [])
+        self.assertEqual(self.post(self.mum, f"/api/rewards/{rid}/redeem").status_code, 403)
+
+    def test_a_reward_needs_a_name_and_a_sensible_cost(self):
+        self.assertEqual(self.reward(title=" ").status_code, 400)
+        for bad in (0, -5, 1001, "lots", None):
+            self.assertEqual(self.reward(cost=bad).status_code, 400, bad)
+        self.assertEqual(self.reward(cost=1000).status_code, 200)
+
+    def test_a_sibling_does_not_see_the_other_childs_requests_but_a_parent_sees_all(self):
+        code = self.post(self.mum, "/api/invite", role="child").get_json()["code"]
+        lily = {"Authorization": "Bearer " + self.c.post("/api/join", json={"code": code, "name": "Lily"}).get_json()["token"]}
+        rid = self.reward(cost=5).get_json()["id"]
+        self.earn(self.kid, 10)
+        self.post(self.kid, f"/api/rewards/{rid}/redeem")
+        self.assertEqual(len(self.info(self.mum)["requests"]), 1)
+        self.assertEqual(len(self.info(self.kid)["requests"]), 1)
+        self.assertEqual(self.info(lily)["requests"], [])
+        self.assertEqual(self.info(lily)["rewards"][0]["title"], "Pick the film")
+
+    def test_another_family_cannot_touch_anything(self):
+        rid = self.reward().get_json()["id"]
+        self.earn(self.kid, 30)
+        qid = self.post(self.kid, f"/api/rewards/{rid}/redeem").get_json()["id"]
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertEqual(self.info(zed), {"rewards": [], "requests": [], "balance": {}, "mine": None})
+        self.assertEqual(self.post(zed, f"/api/redemptions/{qid}/decide", ok=True).status_code, 404)
+        self.assertEqual(self.c.delete(f"/api/rewards/{rid}", headers=zed).status_code, 404)
+        self.assertEqual(self.c.get("/api/rewards").status_code, 401)
+
+
+class Board(Base):
+    def test_parents_write_everyone_reads(self):
+        nid = self.post(self.mum, "/api/board", title="Wi-Fi", emoji="📶", body="Name: Vales\nPassword: tulips").get_json()["id"]
+        for who in (self.mum, self.kid):
+            item = self.get(who, "/api/board").get_json()["items"][0]
+            self.assertEqual((item["id"], item["title"], item["emoji"], item["body"]), (nid, "Wi-Fi", "📶", "Name: Vales\nPassword: tulips"))
+        self.assertEqual(self.post(self.kid, "/api/board", title="Mine").status_code, 403)
+        self.assertEqual(self.c.delete(f"/api/board/{nid}", headers=self.kid).status_code, 403)
+        self.assertTrue(any(e["type"] == "board" for e in self.events(self.kid)))
+
+    def test_a_note_can_be_changed_and_removed(self):
+        nid = self.post(self.mum, "/api/board", title="Doctor", body="Dr Hale 555-0101").get_json()["id"]
+        self.assertEqual(self.post(self.mum, "/api/board", id=nid, title="Doctor", body="Dr Hale 555-0199").get_json()["id"], nid)
+        items = self.get(self.kid, "/api/board").get_json()["items"]
+        self.assertEqual((len(items), items[0]["body"]), (1, "Dr Hale 555-0199"))
+        self.assertEqual(self.post(self.mum, "/api/board", id=999, title="Ghost").status_code, 404)
+        self.assertEqual(self.c.delete(f"/api/board/{nid}", headers=self.mum).status_code, 200)
+        self.assertEqual(self.get(self.kid, "/api/board").get_json()["items"], [])
+
+    def test_a_note_needs_a_title_and_there_is_a_limit(self):
+        self.assertEqual(self.post(self.mum, "/api/board", title="  ", body="x").status_code, 400)
+        for i in range(20):
+            self.assertEqual(self.post(self.mum, "/api/board", title=f"Note {i}").status_code, 200)
+        self.assertEqual(self.post(self.mum, "/api/board", title="One too many").status_code, 400)
+
+    def test_another_family_sees_nothing(self):
+        nid = self.post(self.mum, "/api/board", title="Wi-Fi", body="secret").get_json()["id"]
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertEqual(self.get(zed, "/api/board").get_json()["items"], [])
+        self.assertEqual(self.post(zed, "/api/board", id=nid, title="Mine").status_code, 404)
+        self.assertEqual(self.c.delete(f"/api/board/{nid}", headers=zed).status_code, 404)
+        self.assertEqual(self.c.get("/api/board").status_code, 401)
+
+
+class Pickup(Base):
+    def test_a_pickup_request_goes_to_the_whole_family_with_where_they_are(self):
+        r = self.post(self.kid, "/api/messages", kind="pickup", lat=51.5, lng=-0.12, to=self.mum_id).get_json()["message"]
+        self.assertEqual((r["kind"], r["body"], r["to"], r["lat"], r["lng"]), ("pickup", "Can someone pick me up?", 0, 51.5, -0.12))
+        seen = [e["payload"] for e in self.events(self.mum) if e["type"] == "message" and e["payload"]["kind"] == "pickup"]
+        self.assertEqual((len(seen), seen[0]["name"], seen[0]["quiet"]), (1, "Sam", False))
+        self.assertEqual(self.get(self.mum, "/api/messages").get_json()["messages"][-1]["kind"], "pickup")
+
+    def test_a_pickup_gets_through_quiet_hours(self):
+        minute = int(time.time() // 60) % 1440                          # a quiet window around "now" (tz_offset 0 means UTC minutes)
+        db.run(db.update(db.members).where(db.members.c.id == self.mum_id).values(quiet_from=(minute - 30) % 1440, quiet_to=(minute + 30) % 1440, tz_offset=0))
+        self.post(self.kid, "/api/messages", kind="text", body="hello")
+        self.post(self.kid, "/api/messages", kind="pickup")
+        flags = {e["payload"]["kind"]: e["payload"]["quiet"] for e in self.events(self.mum) if e["type"] == "message" and e["payload"]["kind"] in ("text", "pickup")}
+        self.assertEqual(flags, {"text": True, "pickup": False})
+
+    def test_a_reply_is_just_a_message(self):
+        self.post(self.kid, "/api/messages", kind="pickup")
+        self.assertEqual(self.post(self.mum, "/api/messages", body="On my way, about 10 minutes").status_code, 200)
+        self.assertEqual([m["kind"] for m in self.get(self.kid, "/api/messages").get_json()["messages"]][-2:], ["pickup", "text"])
+
+
 if __name__ == "__main__":
     unittest.main()

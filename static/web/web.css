@@ -1,10 +1,10 @@
-/* Homebase on a laptop. Map first, with floating panels. Matte dark by default (like the rest of the family of apps); light if you choose it. */
-:root { --bg: #0c0c0d; --surface: #18181b; --surface2: #222227; --glass: rgba(21,21,24,.985); --ink: #f5f5f7; --muted: #aeaeb8; --line: rgba(255,255,255,.12);
-  --accent: #e6b866; --accent-ink: #1b1306; --accent-soft: rgba(230,184,102,.15); --ok: #4ade94; --warn: #f2b640; --bad: #ff7b80; --shadow: 0 18px 50px rgba(0,0,0,.6); --r: 22px; color-scheme: dark; }
-:root[data-theme="light"] { --bg: #f4f3f1; --surface: #ffffff; --surface2: #f1f0ee; --glass: rgba(255,255,255,.96); --ink: #18181b; --muted: #6b6a72; --line: rgba(24,24,27,.09);
-  --accent: #a96a0e; --accent-ink: #fff; --accent-soft: rgba(169,106,14,.12); --ok: #18a46a; --warn: #d99a0b; --bad: #e0414a; --shadow: 0 14px 44px rgba(24,24,27,.18); color-scheme: light; }
-@media (prefers-color-scheme: light) { :root[data-theme="auto"] { --bg: #f4f3f1; --surface: #ffffff; --surface2: #f1f0ee; --glass: rgba(255,255,255,.96); --ink: #18181b; --muted: #6b6a72; --line: rgba(24,24,27,.09);
-  --accent: #a96a0e; --accent-ink: #fff; --accent-soft: rgba(169,106,14,.12); --ok: #18a46a; --warn: #d99a0b; --bad: #e0414a; --shadow: 0 14px 44px rgba(24,24,27,.18); color-scheme: light; } }
+/* Homebase on a laptop. Map first, with floating panels. White by default (neutral greys, one warm amber accent); dark if you choose it. */
+:root { --bg: #f6f6f7; --surface: #ffffff; --surface2: #efeff2; --glass: rgba(255,255,255,.97); --ink: #17171a; --muted: #62626b; --line: rgba(20,20,26,.10);
+  --accent: #a96a0e; --accent-ink: #fff; --accent-soft: rgba(169,106,14,.11); --ok: #18a46a; --warn: #c98a09; --bad: #e0414a; --shadow: 0 14px 44px rgba(20,20,26,.16); --r: 22px; color-scheme: light; }
+:root[data-theme="dark"] { --bg: #0c0c0d; --surface: #18181b; --surface2: #222227; --glass: rgba(21,21,24,.985); --ink: #f5f5f7; --muted: #aeaeb8; --line: rgba(255,255,255,.12);
+  --accent: #e6b866; --accent-ink: #1b1306; --accent-soft: rgba(230,184,102,.15); --ok: #4ade94; --warn: #f2b640; --bad: #ff7b80; --shadow: 0 18px 50px rgba(0,0,0,.6); color-scheme: dark; }
+@media (prefers-color-scheme: dark) { :root[data-theme="auto"] { --bg: #0c0c0d; --surface: #18181b; --surface2: #222227; --glass: rgba(21,21,24,.985); --ink: #f5f5f7; --muted: #aeaeb8; --line: rgba(255,255,255,.12);
+  --accent: #e6b866; --accent-ink: #1b1306; --accent-soft: rgba(230,184,102,.15); --ok: #4ade94; --warn: #f2b640; --bad: #ff7b80; --shadow: 0 18px 50px rgba(0,0,0,.6); color-scheme: dark; } }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; background: var(--bg); color: var(--ink); font-family: Inter, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; -webkit-font-smoothing: antialiased; font-size: 16px; line-height: 1.45; }
 button, input, select { font: inherit; color: inherit; }
@@ -306,3 +306,17 @@ body { line-height: 1.45; }
 .opt i { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--accent) 24%, transparent); transition: width .3s; }
 .opt .ot, .opt .on2 { position: relative; } .opt .on2 { color: var(--muted); font-size: 12.5px; text-align: right; overflow-wrap: anywhere; }
 .opt.mine { border-color: var(--accent); } .opt.win { border-color: var(--ok); } .poll.closed { opacity: .88; } .opt:disabled { cursor: default; }
+
+/* v4b: rewards, the family board, pick me up */
+.note { border-radius: 16px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 8px; }
+.notebody { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14.5px; color: var(--ink); line-height: 1.5; }
+.note .link { padding: 2px 6px; font-size: 13px; }
+textarea.field { resize: vertical; min-height: 96px; font-family: inherit; line-height: 1.45; }
+.pk { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pk button { padding: 5px 11px; border-radius: 99px; font-size: 13px; font-weight: 600; background: color-mix(in srgb, currentColor 12%, transparent); border: 1px solid color-mix(in srgb, currentColor 26%, transparent); color: inherit; }
+.pk button:hover { background: var(--accent-soft); }
+
+/* v5: white polish. Neutral cards (no cream tints), a calmer light map, softer vote bars */
+.today { background: var(--surface); border: 1px solid var(--line); box-shadow: 0 1px 0 rgba(20,20,26,.03); }
+.opt i { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+#map:not(.dark) .leaflet-tile { filter: saturate(.55) brightness(1.04) contrast(.97); }

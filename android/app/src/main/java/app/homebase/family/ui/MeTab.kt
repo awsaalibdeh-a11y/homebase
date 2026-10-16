@@ -113,6 +113,7 @@ fun MeTab(nav: Nav) {
         TwoUp({ BigButton("I'm OK ✓", color = Mint) { sendQuick(ctx, "checkin", "I'm OK", 0, true, "Checked in") } },
             { BigButton("I'm home 🏠", color = Mint) { sendQuick(ctx, "checkin", "I'm home", 0, true, "Checked in") } })
         TwoUp({ SoftButton("Running late ⏰") { late = true } }, { SoftButton("Send love ❤️") { sendQuick(ctx, "heart", "", 0, false, "❤️ sent") } })
+        TwoUp({ SoftButton("Pick me up 🚗") { sendQuick(ctx, "pickup", "Can someone pick me up?", 0, true, "Sent to the family") } }, { SoftButton("Rewards 🎁") { nav.go(Screen.Rewards) } })
         SosButton { sendQuick(ctx, "sos", "I need help", 0, true, "SOS sent to your family") }
 
         SectionLabel("Quiet hours")

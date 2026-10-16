@@ -29,7 +29,7 @@ const PERM_NAMES = { location: "location", trail: "trail", battery: "battery", m
 
 const S = { av: {}, token: localStorage.getItem("hb_token") || "", me: 0, family: null, members: [], places: [], ice: [], thread: 0, msgs: {}, unread: {}, items: [],
   map: null, markers: {}, circles: [], trail: null, adding: false, cursor: -1, running: false, geo: null, lastPos: null, lastSent: 0, focusedOnce: false,
-  online: navigator.onLine, open: 0, chatOpen: false, outbox: load("hb_out", []), savedAt: 0, tmp: -1, plans: [], polls: [] };
+  online: navigator.onLine, open: 0, chatOpen: false, outbox: load("hb_out", []), savedAt: 0, tmp: -1, plans: [], polls: [], rewards: [], asks: [], bal: {}, board: [] };
 
 /* ---------- helpers ---------- */
 async function api(path, method = "GET", body) {
@@ -58,7 +58,7 @@ function pickEmoji(root, set) { root.querySelectorAll("#emo button").forEach(b =
 /* ---------- online / offline ---------- */
 function setOnline(v) {
   if (S.online === v) return; S.online = v; paintOffline();
-  if (v && S.token) { flushOutbox(); refreshFamily().catch(() => {}); refreshItems(); refreshPlans(); refreshPolls(); if (S.thread !== undefined) loadThread(S.thread, true); }
+  if (v && S.token) { flushOutbox(); refreshFamily().catch(() => {}); refreshItems(); refreshPlans(); refreshPolls(); refreshRewards(); refreshBoard(); if (S.thread !== undefined) loadThread(S.thread, true); }
 }
 function paintOffline() {
   const el = $("#offline"); if (!el) return;
@@ -75,8 +75,10 @@ function loadSnap() {
 }
 
 /* ---------- theme ---------- */
-function applyTheme() { document.documentElement.dataset.theme = localStorage.getItem("hb_theme") || "dark"; }
-const mapDark = () => (localStorage.getItem("hb_map") || "dark") === "dark";
+/* the UI is white by default; anyone who had saved "dark" before is moved to white once, and can pick dark again from the menu */
+try { if (!localStorage.getItem("hb_white")) { localStorage.setItem("hb_theme", "light"); localStorage.setItem("hb_map", "light"); localStorage.setItem("hb_white", "1"); } } catch (e) { /* private mode */ }
+function applyTheme() { document.documentElement.dataset.theme = localStorage.getItem("hb_theme") || "light"; }
+const mapDark = () => (localStorage.getItem("hb_map") || "light") === "dark";
 applyTheme();
 
 /* ---------- sign in ---------- */
@@ -126,7 +128,7 @@ async function startApp(fresh) {
   initMap(); initChrome(); paintOffline();
   if (!loadSnap() && !fresh) { /* first run: nothing to show yet */ }
   try { await refreshFamily(); } catch (e) { if (!e.offline) return; }
-  loadThread(0); refreshItems(); refreshChores(); refreshPlans(); refreshPolls(); flushOutbox();
+  loadThread(0); refreshItems(); refreshChores(); refreshPlans(); refreshPolls(); refreshRewards(); refreshBoard(); flushOutbox();
   const ans = location.hash.match(/answer=(\d+)/); if (ans) { history.replaceState(null, "", location.pathname); setTimeout(() => window.Calls && window.Calls.answerNow(+ans[1]), 600); }
   if (!S.running) { S.running = true; eventLoop(); }
   setInterval(() => { if (!document.hidden && S.token && S.online) refreshFamily().catch(() => {}); }, 12000);
@@ -187,7 +189,7 @@ function accordion(id, icon, title, sub, body, alert) {
 
 function jobsAlert() { return S.chores.filter(c => isParent() ? c.status === "done" : (c.status === "open" && (!c.to || c.to === S.me))).length; }
 function tabBadge(t) {
-  if (t === "family") { const kids = S.members.filter(m => m.role === "child"); const on = isParent() && kids.some(m => m.lock || (m.blocks || []).length); const n = jobsAlert() + pollAlert(); return n ? `<i class="tb">${n}</i>` : on ? '<i class="tb dot"></i>' : ""; }
+  if (t === "family") { const kids = S.members.filter(m => m.role === "child"); const on = isParent() && kids.some(m => m.lock || (m.blocks || []).length); const n = jobsAlert() + pollAlert() + rewardsAlert(); return n ? `<i class="tb">${n}</i>` : on ? '<i class="tb dot"></i>' : ""; }
   if (t === "me") { const m = me(); return m && m.role === "child" && (m.lock || (m.blocks || []).length) ? '<i class="tb dot"></i>' : ""; }
   return "";
 }
@@ -275,6 +277,68 @@ function statusDialog() {
 }
 
 /* the Family tab: people first (their controls open right inside each card), then three small rows */
+/* ---------- rewards: what chore points can buy ---------- */
+async function refreshRewards() { try { const d = await api("/api/rewards"); S.rewards = d.rewards; S.asks = d.requests; S.bal = d.balance; renderSide(); } catch (e) { /* keep what we have */ } }
+const myBal = () => (S.bal || {})[S.me] || 0;
+const rewardsAlert = () => (isParent() ? (S.asks || []).filter(a => a.status === "pending").length : 0);
+function rewardsHtml() {
+  const parent = isParent(), kids = S.members.filter(m => m.role === "child"), item = (a, mid, side) => `<div class="item"><span class="stemo">${esc(a.emoji)}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(a.title)}</b><small>${mid}</small></span>${side}</div>`;
+  const bal = `<div class="board">${parent ? kids.map(k => `<span class="chip">${esc(k.emoji)} ${esc(k.name)} · ${(S.bal || {})[k.id] || 0} points</span>`).join("") : `<span class="chip">⭐ You have ${myBal()} points</span>`}</div>`;
+  const pend = (S.asks || []).filter(a => a.status === "pending").map(a => parent
+    ? item(a, `${esc((member(a.member) || {}).name || "Someone")} · ${a.cost} points`, `<button class="btn sm" data-rw="no" data-id="${a.id}">Not now</button><button class="btn sm solid" data-rw="yes" data-id="${a.id}">Yes</button>`)
+    : item(a, `Waiting for a parent · ${a.cost} points held`, `<button class="btn sm" data-rw="cancel" data-id="${a.id}">Take back</button>`)).join("");
+  const rows = (S.rewards || []).map(r => item(r, `${r.cost} points`, parent ? `<button class="link" data-rw="del" data-id="${r.id}" title="Delete" aria-label="Delete reward">✕</button>`
+    : `<button class="btn sm ${myBal() >= r.cost ? "solid" : ""}" data-rw="ask" data-id="${r.id}" ${myBal() >= r.cost ? "" : "disabled"}>${myBal() >= r.cost ? "Ask for it" : "Need " + (r.cost - myBal())}</button>`)).join("");
+  const past = (S.asks || []).filter(a => a.status !== "pending").slice(0, 4).map(a => `<div class="item done"><span class="stemo">${esc(a.emoji)}</span><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(a.title)}</b><small>${a.status === "approved" ? "✓ Yes" : "Not now"} · ${esc((member(a.member) || {}).name || "")}</small></span></div>`).join("");
+  const form = parent ? `<form id="rewardForm" class="choreform"><input class="field" name="title" placeholder="Add a reward, e.g. Pick the film" maxlength="60" autocomplete="off"><div class="choreopts"><input class="field" name="cost" type="number" min="1" max="1000" value="20" aria-label="Points it costs"><button class="btn" type="submit">Add</button></div></form>` : "";
+  return bal + (pend ? `<div class="sechead"><h3>${parent ? "Waiting for you" : "Your requests"}</h3></div>${pend}` : "") + `<div class="sechead"><h3>Rewards</h3></div>`
+    + (rows || `<div class="empty">${parent ? "Add something points can buy: a film pick, extra game time, an ice cream." : "No rewards yet. Ask a parent to add some."}</div>`) + (past ? `<div class="sechead"><h3>Recently</h3></div>${past}` : "") + form;
+}
+async function rewardAct(act, id) {
+  try {
+    if (act === "ask") { await api(`/api/rewards/${id}/redeem`, "POST"); toast("Asked. A parent will answer."); }
+    else if (act === "yes" || act === "no") await api(`/api/redemptions/${id}/decide`, "POST", { ok: act === "yes" });
+    else if (act === "cancel") await api(`/api/redemptions/${id}`, "DELETE");
+    else if (act === "del") { if (!confirm("Delete this reward?")) return; await api(`/api/rewards/${id}`, "DELETE"); }
+    refreshRewards();
+  } catch (e) { toast(e.message); refreshRewards(); }
+}
+
+/* ---------- the family board: Wi-Fi, the doctor, allergies, who to call ---------- */
+const BOARD_EMOJI = ["📌", "📶", "🩺", "💊", "☎️", "🏠", "🔑", "🚗"];
+async function refreshBoard() { try { S.board = (await api("/api/board")).items; renderSide(); } catch (e) { /* keep what we have */ } }
+function boardHtml() {
+  const parent = isParent();
+  const rows = (S.board || []).map(n => `<div class="note"><div class="pl-top"><span class="pl-e">${esc(n.emoji)}</span><div class="pl-m"><b>${esc(n.title)}</b></div>${parent ? `<button class="link" data-bd="edit" data-id="${n.id}">Edit</button>` : ""}</div><div class="notebody">${esc(n.body)}</div></div>`).join("");
+  return (rows || `<div class="empty">${parent ? "Keep what everyone needs in one place: the Wi-Fi, the doctor, allergies, who to call." : "Nothing here yet."}</div>`)
+    + (parent ? `<button class="btn solid" data-bd="add" style="width:100%">＋ Add a note</button><p class="tabhelp">Everyone in the family can read these. Keep bank details and PINs out.</p>` : "");
+}
+function boardDialog(n) {
+  let emoji = n ? n.emoji : "📌";
+  modal(`<h2>${n ? "Edit the note" : "Add a note"}</h2><div class="sub">Everyone in the family can read it.</div>
+    <label class="l">Title</label><input class="field" id="bdT" maxlength="40" placeholder="For example: Wi-Fi" autocomplete="off" value="${esc(n ? n.title : "")}">
+    <label class="l">Picture</label>${emojiPicker(BOARD_EMOJI, emoji)}
+    <label class="l">What it says</label><textarea class="field" id="bdB" maxlength="600" rows="5" placeholder="Name: ...&#10;Password: ...">${esc(n ? n.body : "")}</textarea>
+    <div class="foot">${n ? '<button class="btn bad" id="bdDel" type="button">Delete</button>' : ""}<button class="btn" id="bdX" type="button">Cancel</button><button class="btn solid" id="bdOk" type="button">Save</button></div>`, root => {
+    pickEmoji(root, e => { emoji = e; });
+    root.querySelector("#bdX").onclick = closeModal; root.querySelector("#bdT").focus();
+    root.querySelector("#bdOk").onclick = async () => {
+      const title = root.querySelector("#bdT").value.trim(); if (!title) return toast("Give the note a title");
+      try { await api("/api/board", "POST", { id: n ? n.id : undefined, title, emoji, body: root.querySelector("#bdB").value }); closeModal(); toast("Saved"); refreshBoard(); } catch (e) { toast(e.message); }
+    };
+    const del = root.querySelector("#bdDel"); if (del) del.onclick = async () => { if (!confirm("Delete this note?")) return; try { await api("/api/board/" + n.id, "DELETE"); closeModal(); refreshBoard(); } catch (e) { toast(e.message); } };
+  });
+}
+
+/* ---------- "can someone pick me up?" ---------- */
+async function pickupNow() {
+  if (!S.lastPos && navigator.geolocation) { try { const p = await new Promise((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, { timeout: 4000 })); S.lastPos = { lat: p.coords.latitude, lng: p.coords.longitude }; } catch (e) { /* send without a place */ } }
+  try { await sendMsg("pickup", "Can someone pick me up?", where(), 0); if (S.online) toast("Sent to the family 🚗"); } catch (e) { toast(e.message); }
+}
+function pickupCardHtml() {
+  return `<section class="you"><div class="shareline"><div><b>🚗 Need a pickup?</b><small>Tell the family. If you are sharing your location they see where you are.</small></div><button class="btn sm" data-act="pickup">Ask</button></div></section>`;
+}
+
 /* ---------- plans: the family calendar ---------- */
 const PLAN_EMOJI = ["📅", "🎂", "⚽", "🍽️", "🎬", "🏥", "✈️", "📚", "🛒", "🎉"];
 function whenTxt(t) {
@@ -351,9 +415,11 @@ function pollDialog() {
 }
 
 function familyHtml() {
-  const n = jobsAlert(), hasHome = S.places.some(p => p.name === "Home"), pa = pollAlert();
+  const n = jobsAlert(), hasHome = S.places.some(p => p.name === "Home"), pa = pollAlert(), ra = rewardsAlert();
   return todayHtml() + plansHtml() + peopleHtml()
     + (isParent() ? `<button class="btn" data-act="invite">＋ Invite someone</button>` : "")
+    + accordion("rewards", "🎁", "Rewards", isParent() ? (ra ? ra + " to answer" : "What points can buy") : myBal() + " points to spend", rewardsHtml(), ra)
+    + accordion("board", "📌", "Family board", (S.board || []).length ? S.board.length + (S.board.length === 1 ? " note" : " notes") : "Wi-Fi, the doctor, who to call", boardHtml())
     + accordion("polls", "🗳️", "Family votes", pa ? pa + " waiting for your vote" : (S.polls.length ? S.polls.length + " asked" : "Ask the family anything"), pollsHtml(), pa)
     + accordion("jobs", "✅", "Jobs and list", n ? (isParent() ? n + " to approve" : n + " to do") : "Points and the family list", jobsHtml(), n)
     + accordion("places", "📍", "Places and Home", hasHome ? S.places.length + " saved" : "Set the Home area", placesHtml())
@@ -377,7 +443,7 @@ function myControlsHtml() {
 
 function renderSide() {
   const t = curTab(), keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  const body = t === "me" ? youCard() + statusCardHtml() + myControlsHtml() : familyHtml();
+  const body = t === "me" ? youCard() + statusCardHtml() + pickupCardHtml() + myControlsHtml() : familyHtml();
   const scroll = $("#side .tabbody") ? $("#side .tabbody").scrollTop : 0;
   $("#side").innerHTML = tabsBar() + `<div class="tabbody">${body}</div>`;
   const bd = $("#side .tabbody"); if (bd) bd.scrollTop = scroll;
@@ -469,6 +535,7 @@ function bubble(m) {
   if (m.kind === "checkin") { cls = "loc"; body = "✅ " + esc(m.body || "I'm OK") + (m.lat != null ? " · 📍 tap to see where" : ""); }
   if (m.kind === "late") body = "⏰ " + esc(m.body);
   if (m.kind === "sos") { cls = "sos loc"; body = "🆘 <b>" + esc(m.body || "I need help") + "</b>" + (m.lat != null ? " · 📍 tap to see where" : ""); }
+  if (m.kind === "pickup") { cls = "loc"; body = "🚗 <b>" + esc(m.body || "Can someone pick me up?") + "</b>" + (m.lat != null ? " · 📍 tap to see where" : "") + (mine || m.pending ? "" : `<div class="pk">${[5, 10, 20, 30].map(n => `<button type="button" data-pk="${n}">On my way · ${n} min</button>`).join("")}</div>`); }
   const rx = Object.entries(m.reactions || {}).map(([e, ids]) => `<button type="button" data-rx="${e}" class="${ids.includes(S.me) ? "mine" : ""}" aria-label="${e} ${ids.length}">${e} ${ids.length}</button>`).join("");
   return `<div class="b ${mine ? "me" : ""} ${cls} ${m.pending ? "pending" : ""}" data-mid="${m.id}" ${m.lat != null ? `data-lat="${m.lat}" data-lng="${m.lng}"` : ""}>${S.thread === 0 && !mine ? `<div class="who">${esc(who)}</div>` : ""}${body}${rx ? `<div class="rx">${rx}</div>` : ""}<small>${m.pending ? "⏳ waiting to send" : clock(m.at)}</small>${m.pending || m.id < 0 ? "" : '<button type="button" class="rb" aria-label="React to this message">🙂</button>'}</div>`;
 }
@@ -554,7 +621,7 @@ async function setSharing(state, minutes) {
 async function meDialog() {
   let q = { from: -1, to: -1 }; try { q = (await api("/api/me")).quiet; } catch (e) { /* offline */ }
   const m = me(), hm = v => v < 0 ? "" : String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
-  const theme = localStorage.getItem("hb_theme") || "dark", layer = localStorage.getItem("hb_map") || "dark";
+  const theme = localStorage.getItem("hb_theme") || "light", layer = localStorage.getItem("hb_map") || "light";
   const perms = m.role === "child" ? `<div class="msec">What parents can do</div><div class="sub">You decide. Switch something off and Homebase stops it straight away. Your parents see that it is off.</div>` +
     PERMS.map(([k, t, why]) => `<div class="sw"><div><b>${t}</b><span>${why}</span></div><button class="tg ${m.perms[k] !== false ? "on" : ""}" data-perm="${k}" aria-label="${t}"></button></div>`).join("") : "";
   modal(`<h2>${esc(m.emoji)} ${esc(m.name)}</h2><div class="sub">${m.role === "parent" ? "Parent" : "Child"} · ${esc(S.family?.name || "")}</div>
@@ -647,8 +714,9 @@ function handleEvent(ev) {
       if (th === S.thread) renderMsgs();
       if (th !== S.thread || document.hidden || !S.chatOpen) { S.unread[th] = (S.unread[th] || 0) + 1; renderThreads(); }
       if (p.kind !== "system" && !p.quiet) {
-        notify((p.kind === "sos" ? "🆘 " : "") + (p.name || "Homebase"), p.body || "", { thread: th, tag: "msg-" + th, urgent: p.kind === "sos" });
+        notify((p.kind === "sos" ? "🆘 " : p.kind === "pickup" ? "🚗 " : "") + (p.name || "Homebase"), p.body || "", { thread: th, tag: "msg-" + th, urgent: p.kind === "sos" || p.kind === "pickup" });
         if (p.kind === "sos") toast("🆘 " + (p.name || "Someone") + " needs help", 7000);
+        else if (p.kind === "pickup") toast("🚗 " + (p.name || "Someone") + " needs a pickup", 9000);
         else if (th !== S.thread || !S.chatOpen) toast("💬 " + (p.name || "Someone") + ": " + String(p.body || "").slice(0, 80), 5000);
       }
       saveSnap(); break; }
@@ -657,6 +725,12 @@ function handleEvent(ev) {
     case "ground_warn": { const names = (p.apps || []).join(", "); toast("⏳ " + names + " will be grounded in 1 minute — finish up", 14000); notify("Finish up", names + " will be grounded in a minute.", { tag: "groundwarn", force: true }); break; }
     case "nudge": toast("💡 " + p.text, 12000); notify("Time for a break?", p.text, { tag: "nudge", force: false, thread: undefined }); break;
     case "list": refreshItems(); break;
+    case "rewards": refreshRewards(); break;
+    case "reward": {
+      refreshRewards();
+      const t = p.status === "pending" ? [`🎁 ${p.name} asked for: ${p.title} (${p.cost} points)`, p.name + " asked for a reward"] : p.status === "approved" ? [`🎁 ${p.name} said yes: ${p.title}`, "Reward approved"] : [`${p.name} said not now to: ${p.title}`, "Reward not now"];
+      toast(t[0], 7000); notify(t[1], `${p.title} · ${p.cost} points`, { tag: "reward-" + p.id + p.status, force: false }); break; }
+    case "board": refreshBoard(); break;
     case "plan": refreshPlans(); if (p.new) { toast(`${p.emoji || "📅"} ${p.name} planned: ${p.title}`, 5000); notify(p.name + " added a plan", `${p.title} · ${whenTxt(p.start)}`, { tag: "plan-" + p.id, force: false }); } break;
     case "plan_soon": toast(`${p.emoji || "📅"} ${p.title} starts soon · ${clock(p.start)}`, 9000); notify("Starting soon", `${p.title} · ${clock(p.start)}`, { tag: "plan-soon-" + p.id, force: true }); break;
     case "poll": refreshPolls(); if (p.new) { toast(`🗳️ ${p.name} asks: ${p.question}`, 6000); notify(p.name + " asks the family", p.question, { tag: "poll-" + p.id, force: false }); } break;
@@ -685,6 +759,7 @@ function initChrome() {
   $("#msgs").onclick = e => {
     const pick = e.target.closest(".rpick button"); if (pick) { react(+pick.closest(".b").dataset.mid, pick.dataset.e); return; }
     const chip = e.target.closest("[data-rx]"); if (chip) { react(+chip.closest(".b").dataset.mid, chip.dataset.rx); return; }
+    const pk = e.target.closest("[data-pk]"); if (pk) { sendMsg("text", `On my way, about ${pk.dataset.pk} minutes 🚗`, {}, 0).then(() => toast("Sent")).catch(err => toast(err.message)); return; }
     const rb = e.target.closest(".rb"); if (rb) { const bub = rb.closest(".b"), had = bub.querySelector(".rpick"); document.querySelectorAll(".rpick").forEach(x => x.remove()); if (!had) bub.insertAdjacentHTML("beforeend", `<div class="rpick">${REACTIONS.map(x => `<button type="button" data-e="${x}" aria-label="React ${x}">${x}</button>`).join("")}</div>`); return; }
     document.querySelectorAll(".rpick").forEach(x => x.remove());
     const b = e.target.closest("[data-lat]"); if (b) { S.map.flyTo([+b.dataset.lat, +b.dataset.lng], 16); L.popup().setLatLng([+b.dataset.lat, +b.dataset.lng]).setContent("📍 Here").openOn(S.map); } };
@@ -719,6 +794,7 @@ function initChrome() {
     else if (act === "more") { S.more = S.more || {}; S.more[id] = !S.more[id]; renderSide(); }
     else if (act === "delplace") { if (confirm("Remove this place?")) { await api("/api/places/" + id, "DELETE").catch(err => toast(err.message)); refreshFamily(); } }
     else if (act === "delitem") { await api("/api/list/" + id, "DELETE").catch(err => toast(err.message)); refreshItems(); }
+    else if (act === "pickup") pickupNow();
     else if (act === "addplan") planDialog();
     else if (act === "rsvp") rsvp(id, el.dataset.a);
     else if (act === "delplan") { if (confirm("Delete this plan?")) { await api("/api/plans/" + id, "DELETE").catch(err => toast(err.message)); refreshPlans(); } }
@@ -736,6 +812,15 @@ function initChrome() {
       else if (act === "del") { if (!confirm("Delete this job?")) return; await api(`/api/chores/${id}`, "DELETE"); }
       refreshChores();
     } catch (err) { toast(err.message); }
+  });
+  $("#side").addEventListener("click", e => {
+    const rw = e.target.closest("[data-rw]"); if (rw) return rewardAct(rw.dataset.rw, +rw.dataset.id);
+    const bd = e.target.closest("[data-bd]"); if (bd) return boardDialog(bd.dataset.bd === "edit" ? (S.board || []).find(n => n.id === +bd.dataset.id) : null);
+  });
+  $("#side").addEventListener("submit", async e => {
+    if (e.target.id !== "rewardForm") return; e.preventDefault();
+    const f = e.target, title = f.title.value.trim(); if (!title) return;
+    try { await api("/api/rewards", "POST", { title, cost: +f.cost.value || 0 }); f.title.value = ""; toast("Reward added"); refreshRewards(); } catch (err) { toast(err.message); }
   });
   $("#side").addEventListener("submit", async e => {
     if (e.target.id !== "choreForm") return; e.preventDefault();

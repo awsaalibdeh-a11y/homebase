@@ -95,6 +95,17 @@ polls = Table("polls", meta,                                              # a qu
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("question", String(100)),
     Column("options", Text), Column("votes", Text, default=""),         # options: JSON list of strings; votes: JSON {member id: option number}
     Column("created_by", Integer), Column("created", Float), Column("closed", Boolean, default=False))
+rewards = Table("rewards", meta,                                          # what chore points can buy, set by a parent
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("title", String(60)), Column("emoji", String(8), default="🎁"),
+    Column("cost", Integer, default=20), Column("created_by", Integer), Column("created", Float))
+redemptions = Table("redemptions", meta,                                  # a child asks to spend points; a parent says yes or no
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True),
+    Column("title", String(60)), Column("emoji", String(8), default="🎁"), Column("cost", Integer),                  # a copy, so a later change to the reward does not rewrite history
+    Column("status", String(10), default="pending"),                    # pending | approved | declined
+    Column("created", Float), Column("decided_by", Integer, default=0), Column("decided_at", Float, default=0))
+board = Table("board", meta,                                              # the family board: what everyone should be able to find (Wi-Fi, the doctor, allergies)
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("title", String(40)), Column("emoji", String(8), default="📌"),
+    Column("body", Text, default=""), Column("updated_by", Integer), Column("updated", Float))
 meta.create_all(engine)
 try:                                                                  # older databases get the new column
     with engine.begin() as _c:

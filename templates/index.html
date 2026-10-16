@@ -7,10 +7,10 @@
   <meta name="description" content="A family app for location sharing, messages, calls and screen time that is honest about what it shares and never spies.">
   <meta name="theme-color" content="#0a0a0b">
   <style>
-    :root { --bg: #0a0a0b; --surface: #17171a; --surface2: #222227; --line: #2e2e34; --ink: #f5f5f7; --muted: #b0b0ba; --accent: #e6b866; --accent-ink: #1b1306; --ok: #4ade94; --warn: #f2b640; color-scheme: dark; }
+    :root { --bg: #f6f6f7; --surface: #ffffff; --surface2: #efeff2; --line: #e1e1e6; --ink: #17171a; --muted: #62626b; --accent: #a96a0e; --accent-ink: #ffffff; --ok: #18a46a; --warn: #c98a09; color-scheme: light; }
     * { box-sizing: border-box; }
     html { background: var(--bg); }
-    body { margin: 0; font: 17px/1.6 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: radial-gradient(800px 420px at 50% -8%, rgba(230,184,102,.11), transparent 65%), var(--bg); -webkit-font-smoothing: antialiased; }
+    body { margin: 0; font: 17px/1.6 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: radial-gradient(800px 420px at 50% -8%, rgba(169,106,14,.05), transparent 65%), var(--bg); -webkit-font-smoothing: antialiased; }
     main { max-width: 56rem; margin: 0 auto; padding: 2.4rem 1.2rem 4.5rem; }
     .logo { display: inline-flex; align-items: center; gap: .65rem; font-weight: 700; font-size: 1.25rem; letter-spacing: -.01em; }
     .logo i { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: .85rem; background: var(--surface2); border: 1px solid var(--line); font-style: normal; font-size: 1.3rem; }
@@ -18,7 +18,7 @@
     .lead { color: var(--muted); max-width: 40rem; font-size: 1.1rem; }
     .cta { display: flex; flex-wrap: wrap; gap: .7rem; margin: 1.6rem 0 .6rem; align-items: center; }
     .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .8rem 1.35rem; border-radius: .9rem; background: var(--surface2); border: 1px solid var(--line); color: var(--ink); font-weight: 650; text-decoration: none; font-size: .98rem; transition: background .15s, border-color .15s; }
-    .btn:hover { background: #2a2a31; border-color: #46464e; }
+    .btn:hover { background: #e7e7eb; border-color: #c9c9d0; }
     .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; } .btn.primary:hover { filter: brightness(1.1); background: var(--accent); }
     .btn.off { opacity: .55; }
     .muted { color: var(--muted); } .small { font-size: .9rem; }
@@ -35,7 +35,7 @@
     code { padding: .12rem .42rem; border-radius: .45rem; background: var(--surface2); border: 1px solid var(--line); font-size: .9em; }
     a { color: var(--accent); }
     .shots { display: grid; grid-template-columns: minmax(0, 1fr) 13.5rem; gap: 1rem; align-items: start; margin: 2rem 0 .4rem; }
-    .shots figure { margin: 0; } .shots img { display: block; width: 100%; height: auto; border-radius: 1.2rem; border: 1px solid var(--line); box-shadow: 0 30px 70px rgba(0,0,0,.6); background: var(--surface); }
+    .shots figure { margin: 0; } .shots img { display: block; width: 100%; height: auto; border-radius: 1.2rem; border: 1px solid var(--line); box-shadow: 0 30px 70px rgba(20,20,30,.16); background: var(--surface); }
     .shots .phone img { border-radius: 1.6rem; }
     @media (max-width: 640px) { .shots { grid-template-columns: 1fr; } .shots .phone { max-width: 14rem; margin: 0 auto; } }
     footer { margin-top: 3rem; color: var(--muted); font-size: .9rem; }
@@ -70,6 +70,9 @@
     <div class="card"><span>🎮</span><b>Honest screen time</b><p>Counts only time spent playing or watching, never homework, and shows the child exactly what the family sees.</p></div>
     <div class="card"><span>🚫</span><b>Grounding and locks</b><p>A parent can lock a device or ground certain apps for a while, with a minute's warning. Everyone sees it in the family chat.</p></div>
     <div class="card"><span>✅</span><b>Jobs and points</b><p>Parents set jobs, children tick them off, parents approve them for points.</p></div>
+    <div class="card"><span>🎁</span><b>Rewards</b><p>Points buy things a parent sets: a film pick, extra game time, an ice cream. A child asks, the points are held, and a parent says yes or not now.</p></div>
+    <div class="card"><span>🚗</span><b>Pick me up</b><p>One tap tells the family you need a lift, and where you are if you are sharing. They answer with how many minutes away they are.</p></div>
+    <div class="card"><span>📌</span><b>Family board</b><p>The Wi-Fi, the doctor, allergies, who to call: one place everyone can find. Parents write it, everyone reads it.</p></div>
     <div class="card"><span>🙋</span><b>Ask, don't track</b><p>"Where are you?" is a request you can answer or say not now to.</p></div>
   </div>
 

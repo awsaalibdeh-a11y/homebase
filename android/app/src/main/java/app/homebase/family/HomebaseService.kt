@@ -139,6 +139,8 @@ class HomebaseService : Service() {
         app.state.refreshItems()
         app.state.refreshPlans()
         app.state.refreshPolls()
+        app.state.refreshRewards()
+        app.state.refreshNotes()
         var cursor = app.store.cursor
         if (cursor < 0) { cursor = runCatching { app.api.events(-1, 0).cursor }.getOrDefault(0); app.store.cursor = cursor }
         var failures = 0
@@ -180,10 +182,11 @@ class HomebaseService : Service() {
                         "sos" -> "🚨 $name needs help" to m.body.ifBlank { "Open Homebase to see where they are." }
                         "checkin" -> "✓ $name checked in" to m.body
                         "late" -> "⏰ $name" to m.body
+                        "pickup" -> "🚗 $name needs a pickup" to m.body.ifBlank { "Open Homebase to see where they are." }
                         "heart" -> "❤️ $name" to "is thinking of you"
                         else -> name to m.body
                     }
-                    val alert = m.kind == "sos" || m.kind == "checkin" || m.kind == "late"
+                    val alert = m.kind == "sos" || m.kind == "checkin" || m.kind == "late" || m.kind == "pickup"
                     val channel = if (alert) Notifications.CH_ALERTS else if (p.flag("quiet")) Notifications.CH_QUIET else Notifications.CH_MESSAGES
                     Notifications.post(this, channel, title, body, "chat:${app.state.threadOf(m)}", m.kind == "sos")
                 }
@@ -237,6 +240,17 @@ class HomebaseService : Service() {
                 if (p.flag("new")) Notifications.post(this, Notifications.CH_MESSAGES, "📅 ${p.str("name")} planned something", "${p.str("title")} · ${planWhen(p.dbl("start"))}", "plans")
             }
             "plan_soon" -> Notifications.post(this, Notifications.CH_ALERTS, "${p.str("emoji")} Starting soon", "${p.str("title")} · ${planWhen(p.dbl("start"))}", "plans")
+            "rewards" -> app.state.refreshRewards()
+            "board" -> app.state.refreshNotes()
+            "reward" -> {
+                app.state.refreshRewards()
+                val (title, body) = when (p.str("status")) {
+                    "pending" -> "🎁 ${p.str("name")} asked for a reward" to "${p.str("title")} · ${p.int("cost")} points"
+                    "approved" -> "🎁 ${p.str("name")} said yes" to p.str("title")
+                    else -> "${p.str("name")} said not now" to p.str("title")
+                }
+                Notifications.post(this, Notifications.CH_MESSAGES, title, body, "rewards")
+            }
             "poll" -> {
                 app.state.refreshPolls()
                 if (p.flag("new")) Notifications.post(this, Notifications.CH_MESSAGES, "🗳️ ${p.str("name")} asks the family", p.str("question"), "plans")

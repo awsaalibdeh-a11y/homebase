@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -14,28 +14,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-val Accent = Color(0xFFE6B866)
-val AccentDark = Color(0xFFF3DDAA)
-val AccentSoft = Color(0xFF2B2412)
-val Mint = Color(0xFF4ADE94)
-val MintSoft = Color(0xFF12261F)
-val Sun = Color(0xFFF2B640)
-val SunSoft = Color(0xFF2A2210)
-val Rose = Color(0xFFFF7B80)
-val RoseSoft = Color(0xFF2A1519)
-val Ink = Color(0xFFF5F5F7)
-val Muted = Color(0xFFAEAEB8)
-val Bg = Color(0xFF0C0C0D)
-val Surface = Color(0xFF18181B)
-val Surface2 = Color(0xFF222227)
-val OnAccent = Color(0xFF1B1306)
+// White: neutral greys with one warm amber accent (no blue, no cream backgrounds)
+val Accent = Color(0xFFA96A0E)
+val AccentDark = Color(0xFF7A4A06)
+val AccentSoft = Color(0xFFF5EDE2)
+val Mint = Color(0xFF18A46A)
+val MintSoft = Color(0xFFE2F4EB)
+val Sun = Color(0xFFC98A09)
+val SunSoft = Color(0xFFF8EFDC)
+val Rose = Color(0xFFE0414A)
+val RoseSoft = Color(0xFFFCE7E8)
+val Ink = Color(0xFF17171A)
+val Muted = Color(0xFF62626B)
+val Bg = Color(0xFFF6F6F7)
+val Surface = Color(0xFFFFFFFF)
+val Surface2 = Color(0xFFEFEFF2)
+val OnAccent = Color(0xFFFFFFFF)
 
-private val colors = darkColorScheme(
+private val colors = lightColorScheme(
     primary = Accent, onPrimary = OnAccent, primaryContainer = AccentSoft, onPrimaryContainer = AccentDark,
     secondary = Mint, onSecondary = OnAccent, secondaryContainer = MintSoft, onSecondaryContainer = Mint,
     tertiary = Sun, onTertiary = OnAccent, error = Rose, onError = OnAccent, errorContainer = RoseSoft, onErrorContainer = Rose,
     background = Bg, onBackground = Ink, surface = Surface, onSurface = Ink, surfaceVariant = Surface2, onSurfaceVariant = Muted,
-    outline = Color(0xFF47474E), outlineVariant = Color(0xFF2E2E34), surfaceContainer = Surface, surfaceContainerHigh = Surface2, surfaceContainerHighest = Surface2,
+    outline = Color(0xFFC9C9D0), outlineVariant = Color(0xFFE1E1E6), surfaceContainer = Surface, surfaceContainerHigh = Surface2, surfaceContainerHighest = Surface2,
 )
 
 private val type = Typography(
@@ -51,7 +52,7 @@ private val type = Typography(
 @Composable
 fun HomebaseTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = colors, typography = type, shapes = Shapes(small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(18.dp), large = RoundedCornerShape(26.dp))) {
-        // everything sits on the matte background with silver text by default, so plain Text() is readable on every screen
+        // everything sits on the white background with near-black text by default, so plain Text() is readable on every screen
         androidx.compose.material3.Surface(Modifier.fillMaxSize(), color = Bg, contentColor = Ink, content = content)
     }
 }

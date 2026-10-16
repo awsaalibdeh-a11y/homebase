@@ -42,6 +42,7 @@ fun FamilyTab(nav: Nav) {
     val me = ctx.hb.store
     val plans by ctx.hb.state.plans.collectAsState()
     val polls by ctx.hb.state.polls.collectAsState()
+    val rewardInfo by ctx.hb.state.rewards.collectAsState()
     val call = rememberCaller()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Heading(fam?.family?.name ?: me.familyName.ifBlank { "Family" }, "${fam?.members?.size ?: 1} people")
@@ -117,6 +118,9 @@ fun FamilyTab(nav: Nav) {
             BigButton("Invite someone to the family") { nav.go(Screen.Invite) }
         }
         SoftButton("Jobs and points") { nav.go(Screen.Chores) }
+        val toAnswer = if (me.isParent) rewardInfo.requests.count { it.status == "pending" } else 0
+        SoftButton("🎁 Rewards" + (if (toAnswer > 0) " · $toAnswer to answer" else "")) { nav.go(Screen.Rewards) }
+        SoftButton("📌 Family board") { nav.go(Screen.Board) }
         SoftButton("Saved places") { nav.go(Screen.Places) }
         SoftButton("Family list") { nav.go(Screen.Lists) }
         Gap(8)
