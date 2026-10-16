@@ -115,6 +115,25 @@ class Api(private val store: Store) {
             if (lat != null && lng != null) { put("lat", lat); put("lng", lng) }
         }).message
 
+    suspend fun react(id: Int, emoji: String): Map<String, List<Int>> = ask<ReactResp>("POST", "/api/messages/$id/react", obj { put("emoji", emoji) }).reactions
+
+    // "what I am up to"
+    suspend fun setStatus(emoji: String, text: String, hours: Int) { raw("POST", "/api/status", obj { put("emoji", emoji); put("text", text); put("hours", hours) }) }
+    suspend fun clearStatus() { raw("DELETE", "/api/status") }
+
+    // the family calendar and family votes
+    suspend fun plans(): List<Plan> = ask<PlansResp>("GET", "/api/plans").plans
+    suspend fun addPlan(title: String, emoji: String, start: Double, note: String) { raw("POST", "/api/plans", obj { put("title", title); put("emoji", emoji); put("start", start); put("note", note) }) }
+    suspend fun rsvp(id: Int, answer: String): Plan = ask<PlanResp>("POST", "/api/plans/$id/rsvp", obj { put("answer", answer) }).plan
+    suspend fun dropPlan(id: Int) { raw("DELETE", "/api/plans/$id") }
+    suspend fun polls(): List<Poll> = ask<PollsResp>("GET", "/api/polls").polls
+    suspend fun askPoll(question: String, options: List<String>) {
+        raw("POST", "/api/polls", obj { put("question", question); put("options", kotlinx.serialization.json.JsonArray(options.map { JsonPrimitive(it) })) })
+    }
+    suspend fun vote(id: Int, option: Int): Poll = ask<PollResp>("POST", "/api/polls/$id/vote", obj { put("option", option) }).poll
+    suspend fun closePoll(id: Int) { raw("POST", "/api/polls/$id/close") }
+    suspend fun dropPoll(id: Int) { raw("DELETE", "/api/polls/$id") }
+
     // "where are you?"
     suspend fun ping(to: Int): Int = ask<IdResp>("POST", "/api/ping", obj { put("to", to) }).id
     suspend fun answerPing(id: Int, accept: Boolean, lat: Double? = null, lng: Double? = null) {

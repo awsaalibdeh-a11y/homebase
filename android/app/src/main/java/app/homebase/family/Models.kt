@@ -26,6 +26,7 @@ data class Member(
     val avatar: String? = null,
     val screen: ScreenToday? = null,
     val devices: List<DeviceInfo> = emptyList(),
+    val status: StatusInfo? = null,
 ) {
     val isParent get() = role == "parent"
     /** Whether a parent may do [key] with this person. Everything is allowed until they turn it off. */
@@ -70,7 +71,54 @@ data class Message(
     val lat: Double? = null,
     val lng: Double? = null,
     val at: Double = 0.0,
+    val reactions: Map<String, List<Int>> = emptyMap(),
 )
+
+/** What someone says they are up to ("Studying"). They set it themselves, the family sees it, and it ends by itself. */
+@Serializable
+data class StatusInfo(val emoji: String = "", val text: String = "", val until: Double = 0.0)
+
+@Serializable
+data class ReactResp(val reactions: Map<String, List<Int>> = emptyMap())
+
+/** Something on the family calendar. [going] and [out] are member ids; [mine] is my own answer ("in", "out" or none). */
+@Serializable
+data class Plan(
+    val id: Int,
+    val title: String,
+    val emoji: String = "📅",
+    val start: Double = 0.0,
+    val note: String = "",
+    @SerialName("by") val maker: Int = 0,
+    @SerialName("in") val going: List<Int> = emptyList(),
+    val out: List<Int> = emptyList(),
+    val mine: String? = null,
+)
+
+@Serializable
+data class PlansResp(val plans: List<Plan> = emptyList())
+
+@Serializable
+data class PlanResp(val plan: Plan)
+
+/** A question for the family. [votes] holds, for each answer, the ids of the people who chose it. */
+@Serializable
+data class Poll(
+    val id: Int,
+    val question: String,
+    val options: List<String> = emptyList(),
+    val votes: List<List<Int>> = emptyList(),
+    val mine: Int? = null,
+    @SerialName("by") val maker: Int = 0,
+    val closed: Boolean = false,
+    val at: Double = 0.0,
+)
+
+@Serializable
+data class PollsResp(val polls: List<Poll> = emptyList())
+
+@Serializable
+data class PollResp(val poll: Poll)
 
 @Serializable
 data class MessagesResp(val messages: List<Message> = emptyList())

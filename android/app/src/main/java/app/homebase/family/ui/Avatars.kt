@@ -33,7 +33,7 @@ object Avatars {
 
 /** A member's photo if they have one, otherwise their emoji. Same round shape either way. */
 @Composable
-fun MemberAvatar(m: Member, size: Int = 52, tint: Color = BlueSoft) {
+fun MemberAvatar(m: Member, size: Int = 52, tint: Color = AccentSoft) {
     val ctx = LocalContext.current
     val url = m.avatar
     val bmp = if (url != null) Avatars.cache[url] else null

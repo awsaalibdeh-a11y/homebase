@@ -36,7 +36,7 @@ private fun bubble(ctx: Context, emoji: String, name: String, mine: Boolean, sta
     val c = Canvas(bmp)
     val p = Paint(Paint.ANTI_ALIAS_FLAG)
     val cx = w / 2f
-    p.color = if (mine) 0xFF1FB88A.toInt() else 0xFF2F7DF6.toInt()
+    p.color = if (mine) 0xFF1FB88A.toInt() else 0xFFE6B866.toInt()
     p.alpha = if (stale) 150 else 255
     c.drawCircle(cx, 34 * d, 30 * d, p)
     p.color = 0xFFFFFFFF.toInt()
@@ -100,8 +100,8 @@ fun OsmMap(
         for (pl in places) {
             m.overlays.add(Polygon(m).apply {
                 points = Polygon.pointsAsCircle(GeoPoint(pl.lat, pl.lng), pl.radius.toDouble())
-                fillPaint.color = 0x332F7DF6
-                outlinePaint.color = 0xFF2F7DF6.toInt()
+                fillPaint.color = 0x33E6B866
+                outlinePaint.color = 0xFFE6B866.toInt()
                 outlinePaint.strokeWidth = 3f
                 title = pl.name
             })
@@ -113,7 +113,7 @@ fun OsmMap(
         if (trail.size > 1) {
             m.overlays.add(Polyline(m).apply {
                 setPoints(trail.map { GeoPoint(it.lat, it.lng) })
-                outlinePaint.color = 0xAA2F7DF6.toInt(); outlinePaint.strokeWidth = 8f
+                outlinePaint.color = 0xAAE6B866.toInt(); outlinePaint.strokeWidth = 8f
             })
         }
         val pts = ArrayList<GeoPoint>()

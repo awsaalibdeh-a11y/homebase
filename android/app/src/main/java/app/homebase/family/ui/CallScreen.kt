@@ -87,7 +87,7 @@ private fun CallAvatar(emoji: String, ringing: Boolean, live: Boolean) {
     val a by t.animateFloat(0f, 1f, infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart), label = "a")
     val b by t.animateFloat(0f, 1f, infiniteRepeatable(tween(2200, delayMillis = 1100, easing = LinearEasing), RepeatMode.Restart), label = "b")
     Box(Modifier.size(260.dp), contentAlignment = Alignment.Center) {
-        if (ringing) listOf(a, b).forEach { p -> Box(Modifier.size(140.dp).scale(1f + p * 0.8f).alpha((1f - p) * 0.35f).border(2.dp, Blue, CircleShape)) }
+        if (ringing) listOf(a, b).forEach { p -> Box(Modifier.size(140.dp).scale(1f + p * 0.8f).alpha((1f - p) * 0.35f).border(2.dp, Accent, CircleShape)) }
         if (live) Box(Modifier.size(168.dp).border(2.dp, Mint.copy(alpha = 0.55f), CircleShape))
         Box(Modifier.size(140.dp).clip(CircleShape).background(Surface2).border(1.dp, Color(0x22FFFFFF), CircleShape), contentAlignment = Alignment.Center) { Text(emoji, fontSize = 70.sp) }
     }

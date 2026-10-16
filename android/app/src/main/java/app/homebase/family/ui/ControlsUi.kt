@@ -70,7 +70,7 @@ fun ControlsScreen(nav: Nav, memberId: Int) {
         Row(verticalAlignment = Alignment.CenterVertically) { TextButton({ nav.back() }) { Text("Back") } }
         if (m == null) { CenterNote("This person is not in the family any more."); return@Column }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            MemberAvatar(m, 56, BlueSoft)
+            MemberAvatar(m, 56, AccentSoft)
             Column(Modifier.weight(1f)) { Text(m.name, style = MaterialTheme.typography.headlineSmall); Text(memberLine(m), color = Muted) }
         }
         screenLine(m)?.let { SoftCard { Text(it, style = MaterialTheme.typography.titleMedium) } }

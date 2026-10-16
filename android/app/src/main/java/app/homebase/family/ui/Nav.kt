@@ -24,6 +24,7 @@ sealed interface Screen {
     data object MapFull : Screen
     data object ChatFull : Screen
     data object Chores : Screen
+    data object Plans : Screen
     data class ScreenTime(val memberId: Int) : Screen
     data object Tour : Screen
     data object Invite : Screen

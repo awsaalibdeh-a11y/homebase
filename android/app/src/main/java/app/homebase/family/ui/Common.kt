@@ -48,7 +48,7 @@ fun clockText(minutes: Int): String {
 }
 
 @Composable
-fun Avatar(emoji: String, size: Int = 44, tint: Color = BlueSoft) {
+fun Avatar(emoji: String, size: Int = 44, tint: Color = AccentSoft) {
     Box(Modifier.size(size.dp).clip(CircleShape).background(tint), contentAlignment = Alignment.Center) { Text(emoji, fontSize = (size * 0.5).sp) }
 }
 
@@ -61,7 +61,7 @@ fun SoftCard(modifier: Modifier = Modifier, tint: Color = Surface, onClick: (() 
 }
 
 @Composable
-fun BigButton(text: String, modifier: Modifier = Modifier, color: Color = Blue, enabled: Boolean = true, onClick: () -> Unit) {
+fun BigButton(text: String, modifier: Modifier = Modifier, color: Color = Accent, enabled: Boolean = true, onClick: () -> Unit) {
     Button(onClick, modifier.fillMaxWidth().height(54.dp), enabled = enabled, shape = RoundedCornerShape(27.dp), colors = ButtonDefaults.buttonColors(containerColor = color)) {
         Text(text, style = MaterialTheme.typography.labelLarge)
     }
@@ -81,7 +81,7 @@ fun Heading(title: String, sub: String? = null) {
 }
 
 @Composable
-fun Chip(text: String, tint: Color = BlueSoft, ink: Color = BlueDark) {
+fun Chip(text: String, tint: Color = AccentSoft, ink: Color = AccentDark) {
     Text(text, Modifier.clip(RoundedCornerShape(50)).background(tint).padding(horizontal = 10.dp, vertical = 4.dp), color = ink, fontSize = 12.sp)
 }
 

@@ -36,6 +36,8 @@ class AppState(val store: Store, val api: Api) {
     val online = MutableStateFlow(true)
     val threads = MutableStateFlow<Map<Int, List<Message>>>(emptyMap())
     val items = MutableStateFlow<List<Item>>(emptyList())
+    val plans = MutableStateFlow<List<Plan>>(emptyList())
+    val polls = MutableStateFlow<List<Poll>>(emptyList())
     val call = MutableStateFlow<CallUi?>(null)
     val pingAsk = MutableStateFlow<PingAsk?>(null)
     val openThread = MutableStateFlow<Int?>(null)
@@ -70,6 +72,19 @@ class AppState(val store: Store, val api: Api) {
             val have = all[key].orEmpty()
             if (have.any { it.id == m.id }) all else all + (key to (have + m).sortedBy { it.id })
         }
+    }
+
+    /** Someone reacted to a message: update it wherever it is shown. */
+    fun setReactions(id: Int, reactions: Map<String, List<Int>>) {
+        threads.update { all -> all.mapValues { (_, list) -> list.map { if (it.id == id) it.copy(reactions = reactions) else it } } }
+    }
+
+    suspend fun refreshPlans() {
+        runCatching { api.plans() }.onSuccess { plans.value = it }
+    }
+
+    suspend fun refreshPolls() {
+        runCatching { api.polls() }.onSuccess { polls.value = it }
     }
 
     suspend fun refreshItems() {

@@ -48,7 +48,7 @@ import java.util.Locale
 
 private fun catEmoji(c: String) = when (c) { "watch" -> "📺"; "social" -> "💬"; else -> "🎮" }
 private fun catWord(c: String) = when (c) { "watch" -> "Watching"; "social" -> "Scrolling"; else -> "Playing" }
-private fun catColor(c: String) = when (c) { "watch" -> Rose; "social" -> Sun; else -> Blue }
+private fun catColor(c: String) = when (c) { "watch" -> Rose; "social" -> Sun; else -> Accent }
 
 /** A child's screen time: only time spent actively playing or watching, with the apps it was spent in. A parent sees it if the child allows. */
 @Composable
@@ -97,7 +97,7 @@ fun ScreenTimeScreen(nav: Nav, memberId: Int) {
                     (6 downTo 0).forEach { i ->
                         val d = dayData(i)
                         Column(Modifier.weight(1f).clickable { pick = i }, horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(Modifier.fillMaxWidth().height((8 + 70 * d.total / maxTotal).dp).clip(RoundedCornerShape(6.dp)).background(if (i == pick) Blue else Surface2))
+                            Box(Modifier.fillMaxWidth().height((8 + 70 * d.total / maxTotal).dp).clip(RoundedCornerShape(6.dp)).background(if (i == pick) Accent else Surface2))
                             Text(week[i].dayOfWeek.getDisplayName(TextStyle.NARROW, Locale.getDefault()), Modifier.padding(top = 4.dp), color = if (i == pick) Ink else Muted, style = MaterialTheme.typography.labelMedium)
                         }
                     }

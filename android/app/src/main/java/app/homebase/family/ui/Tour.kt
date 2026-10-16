@@ -69,7 +69,7 @@ fun TourScreen(nav: Nav) {
         HorizontalPager(pager, Modifier.weight(1f)) { i ->
             val s = steps[i]
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(128.dp).clip(CircleShape).background(BlueSoft), contentAlignment = Alignment.Center) { Text(s.emoji, fontSize = 60.sp) }
+                Box(Modifier.size(128.dp).clip(CircleShape).background(AccentSoft), contentAlignment = Alignment.Center) { Text(s.emoji, fontSize = 60.sp) }
                 Spacer(Modifier.height(32.dp))
                 Text(s.title, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(14.dp))
@@ -79,7 +79,7 @@ fun TourScreen(nav: Nav) {
         Row(Modifier.fillMaxWidth().padding(vertical = 18.dp), horizontalArrangement = Arrangement.Center) {
             repeat(steps.size) { i ->
                 val on = pager.currentPage == i
-                Box(Modifier.padding(horizontal = 4.dp).height(8.dp).width(if (on) 24.dp else 8.dp).clip(CircleShape).background(if (on) Blue else Surface2))
+                Box(Modifier.padding(horizontal = 4.dp).height(8.dp).width(if (on) 24.dp else 8.dp).clip(CircleShape).background(if (on) Accent else Surface2))
             }
         }
         Button({ if (pager.currentPage == steps.lastIndex) done() else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } }, Modifier.fillMaxWidth().height(54.dp)) {

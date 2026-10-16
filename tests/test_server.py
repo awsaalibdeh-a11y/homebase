@@ -833,5 +833,136 @@ class Reactions(Base):
         self.assertEqual(self.c.post(f"/api/messages/{mid}/react", json={"emoji": "👍"}).status_code, 401)
 
 
+class Plans(Base):
+    def add(self, who=None, hours=2, **kw):
+        body = {"title": "Dinner at Gran's", "emoji": "🍽️", "start": time.time() + hours * 3600, **kw}
+        return self.post(who or self.kid, "/api/plans", **body)
+
+    def listing(self, who):
+        return self.get(who, "/api/plans").get_json()["plans"]
+
+    def test_a_plan_is_shared_with_the_family_and_the_maker_is_already_in(self):
+        pid = self.add().get_json()["id"]
+        seen = self.listing(self.mum)
+        self.assertEqual([(p["id"], p["title"], p["emoji"], p["in"], p["out"], p["mine"]) for p in seen], [(pid, "Dinner at Gran's", "🍽️", [self.kid_id], [], None)])
+        self.assertEqual(self.listing(self.kid)[0]["mine"], "in")
+        told = [e for e in self.events(self.mum) if e["type"] == "plan"]
+        self.assertEqual((len(told), told[0]["payload"]["new"], told[0]["payload"]["name"]), (1, True, "Sam"))
+        self.assertFalse(any(e["type"] == "plan" for e in self.events(self.kid)), "the person who made it is not buzzed about their own plan")
+
+    def test_saying_yes_no_or_taking_it_back(self):
+        pid = self.add().get_json()["id"]
+        d = self.post(self.mum, f"/api/plans/{pid}/rsvp", answer="in").get_json()["plan"]
+        self.assertEqual((sorted(d["in"]), d["out"], d["mine"]), (sorted([self.kid_id, self.mum_id]), [], "in"))
+        d = self.post(self.mum, f"/api/plans/{pid}/rsvp", answer="out").get_json()["plan"]
+        self.assertEqual((d["in"], d["out"], d["mine"]), ([self.kid_id], [self.mum_id], "out"))
+        d = self.post(self.mum, f"/api/plans/{pid}/rsvp", answer="").get_json()["plan"]
+        self.assertEqual((d["in"], d["out"], d["mine"]), ([self.kid_id], [], None))
+        d = self.post(self.mum, f"/api/plans/{pid}/rsvp", answer="maybe").get_json()["plan"]
+        self.assertEqual(d["mine"], None, "only in and out count")
+
+    def test_a_plan_needs_a_name_and_a_sensible_time(self):
+        self.assertEqual(self.add(title="  ").status_code, 400)
+        self.assertEqual(self.add(start="soon").status_code, 400)
+        self.assertEqual(self.add(start=None).status_code, 400)
+        self.assertEqual(self.add(hours=24 * 365 * 3).status_code, 400)
+        self.assertEqual(self.add(hours=-24 * 3).status_code, 400)
+        self.assertEqual(self.add(hours=1).status_code, 200)
+
+    def test_plans_are_in_date_order_and_old_ones_leave_the_list(self):
+        late, soon, gone = self.add(hours=30, title="Match").get_json()["id"], self.add(hours=1, title="Dentist").get_json()["id"], self.add(hours=-5, title="Over").get_json()["id"]
+        self.assertEqual([p["id"] for p in self.listing(self.mum)], [soon, late])
+        self.assertNotIn(gone, [p["id"] for p in self.listing(self.mum)])
+
+    def test_only_the_maker_or_a_parent_can_delete(self):
+        mine = self.add(self.mum).get_json()["id"]
+        self.assertEqual(self.c.delete(f"/api/plans/{mine}", headers=self.kid).status_code, 404)
+        kids = self.add(self.kid).get_json()["id"]
+        self.assertEqual(self.c.delete(f"/api/plans/{kids}", headers=self.mum).status_code, 200)
+        self.assertEqual(self.c.delete(f"/api/plans/{mine}", headers=self.mum).status_code, 200)
+        self.assertEqual(self.listing(self.mum), [])
+
+    def test_another_family_sees_and_changes_nothing(self):
+        pid = self.add().get_json()["id"]
+        other = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertEqual(self.listing(other), [])
+        self.assertEqual(self.post(other, f"/api/plans/{pid}/rsvp", answer="in").status_code, 404)
+        self.assertEqual(self.c.delete(f"/api/plans/{pid}", headers=other).status_code, 404)
+        self.assertEqual(self.c.get("/api/plans").status_code, 401)
+
+    def test_a_plan_starting_soon_nudges_everyone_except_who_said_no_and_only_once(self):
+        soon = self.add(hours=0.2, title="Leave for school").get_json()["id"]
+        far = self.add(hours=5, title="Later").get_json()["id"]
+        self.post(self.mum, f"/api/plans/{soon}/rsvp", answer="out")
+        server._last_remind[0] = 0
+        server.remind_plans()
+        nudged = lambda who: [e["payload"]["id"] for e in self.events(who) if e["type"] == "plan_soon"]
+        self.assertEqual(nudged(self.kid), [soon])
+        self.assertEqual(nudged(self.mum), [], "who said they cannot come is left alone")
+        self.assertNotIn(far, nudged(self.kid))
+        server._last_remind[0] = 0
+        server.remind_plans()
+        self.assertEqual(nudged(self.kid), [soon], "one nudge per plan")
+
+
+class Polls(Base):
+    def ask(self, who=None, **kw):
+        body = {"question": "What's for dinner?", "options": ["Pizza", "Tacos", "Soup"], **kw}
+        return self.post(who or self.mum, "/api/polls", **body)
+
+    def listing(self, who):
+        return self.get(who, "/api/polls").get_json()["polls"]
+
+    def test_ask_vote_change_your_mind_and_take_it_back(self):
+        pid = self.ask().get_json()["id"]
+        p = self.listing(self.kid)[0]
+        self.assertEqual((p["question"], p["options"], p["votes"], p["mine"], p["closed"]), ("What's for dinner?", ["Pizza", "Tacos", "Soup"], [[], [], []], None, False))
+        self.assertTrue(any(e["type"] == "poll" and e["payload"]["new"] for e in self.events(self.kid)))
+        p = self.post(self.kid, f"/api/polls/{pid}/vote", option=1).get_json()["poll"]
+        self.assertEqual((p["votes"], p["mine"]), ([[], [self.kid_id], []], 1))
+        p = self.post(self.kid, f"/api/polls/{pid}/vote", option=2).get_json()["poll"]
+        self.assertEqual((p["votes"], p["mine"]), ([[], [], [self.kid_id]], 2), "one vote each: it moves")
+        p = self.post(self.kid, f"/api/polls/{pid}/vote", option=2).get_json()["poll"]
+        self.assertEqual((p["votes"], p["mine"]), ([[], [], []], None), "tapping your answer again takes it back")
+        self.post(self.kid, f"/api/polls/{pid}/vote", option=0)
+        self.post(self.mum, f"/api/polls/{pid}/vote", option=0)
+        self.assertEqual(self.listing(self.mum)[0]["votes"][0], [self.kid_id, self.mum_id])
+
+    def test_a_question_needs_two_to_four_different_answers(self):
+        self.assertEqual(self.ask(question=" ").status_code, 400)
+        self.assertEqual(self.ask(options=["Only"]).status_code, 400)
+        self.assertEqual(self.ask(options=["Same", "same", " SAME "]).status_code, 400)
+        self.assertEqual(self.ask(options=list("abcde")).status_code, 400)
+        self.assertEqual(self.ask(options="Pizza").status_code, 400)
+        self.assertEqual(self.ask(options=["Yes", "", "No"]).status_code, 200, "blank answers are skipped")
+        self.assertEqual(self.listing(self.mum)[0]["options"], ["Yes", "No"])
+
+    def test_votes_must_be_one_of_the_answers(self):
+        pid = self.ask().get_json()["id"]
+        for bad in (-1, 3, 99, "1", None, True, 1.5):
+            self.assertEqual(self.post(self.kid, f"/api/polls/{pid}/vote", option=bad).status_code, 400, bad)
+
+    def test_closing_stops_votes_and_only_the_asker_or_a_parent_can_close_or_delete(self):
+        pid = self.ask(self.kid).get_json()["id"]
+        self.assertEqual(self.post(self.mum, f"/api/polls/{pid}/close").status_code, 200)
+        self.assertTrue(self.listing(self.kid)[0]["closed"])
+        self.assertEqual(self.post(self.kid, f"/api/polls/{pid}/vote", option=0).status_code, 400)
+        theirs = self.ask(self.mum).get_json()["id"]
+        self.assertEqual(self.post(self.kid, f"/api/polls/{theirs}/close").status_code, 404)
+        self.assertEqual(self.c.delete(f"/api/polls/{theirs}", headers=self.kid).status_code, 404)
+        self.assertEqual(self.c.delete(f"/api/polls/{theirs}", headers=self.mum).status_code, 200)
+        self.assertEqual([p["id"] for p in self.listing(self.mum)], [pid])
+
+    def test_open_questions_come_first_and_another_family_sees_nothing(self):
+        old = self.ask(question="Old one").get_json()["id"]
+        self.post(self.mum, f"/api/polls/{old}/close")
+        new = self.ask(question="New one").get_json()["id"]
+        self.assertEqual([p["id"] for p in self.listing(self.kid)], [new, old])
+        other = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertEqual(self.listing(other), [])
+        self.assertEqual(self.post(other, f"/api/polls/{new}/vote", option=0).status_code, 404)
+        self.assertEqual(self.c.get("/api/polls").status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()

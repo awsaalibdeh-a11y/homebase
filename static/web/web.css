@@ -292,3 +292,17 @@ body { line-height: 1.45; }
   .dock button:not(.sq) { padding: 9px 10px; font-size: 13px; white-space: nowrap; }
 }
 @media (max-width: 560px) { .tbtns { grid-template-columns: 1fr; } .dock .sq { width: 36px; } }
+
+/* v4: plans and family votes */
+.plan, .poll { border-radius: 16px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); display: grid; gap: 8px; }
+.plan.now { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.pl-top { display: flex; align-items: flex-start; gap: 10px; } .pl-e { font-size: 26px; line-height: 1.1; }
+.pl-m { flex: 1; min-width: 0; } .pl-m b { display: block; font-size: 15.5px; overflow-wrap: anywhere; } .pl-m small { display: block; margin-top: 2px; }
+.pl-top .link { padding: 2px 6px; text-decoration: none; }
+.pl-who { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.pl-btns { display: flex; gap: 8px; flex-wrap: wrap; } .pl-btns .btn { width: auto; }
+.pl-btns .btn.sel { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.opt { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 12px; background: var(--surface2); border: 1px solid var(--line); overflow: hidden; color: var(--ink); font-size: 14.5px; }
+.opt i { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--accent) 24%, transparent); transition: width .3s; }
+.opt .ot, .opt .on2 { position: relative; } .opt .on2 { color: var(--muted); font-size: 12.5px; text-align: right; overflow-wrap: anywhere; }
+.opt.mine { border-color: var(--accent); } .opt.win { border-color: var(--ok); } .poll.closed { opacity: .88; } .opt:disabled { cursor: default; }

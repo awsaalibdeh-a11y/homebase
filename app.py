@@ -23,7 +23,7 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "2"))
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "3"))
 KEEP_LOCATIONS_DAYS = 7
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _hits = defaultdict(list)
@@ -1531,6 +1531,189 @@ def drop_item(iid):
     return jsonify(ok=True)
 
 
+# ---------------------------------------------------------------- plans: the family calendar
+PLAN_GRACE = 3 * 3600          # a plan stays on the list for a few hours after it starts
+PLAN_SOON = 30 * 60            # "starts soon" nudge
+_last_remind = [0.0]
+
+
+def json_dict(text):
+    try:
+        d = json.loads(text or "{}")
+    except (ValueError, TypeError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def plan_view(r, me):
+    rs = {str(k): v for k, v in json_dict(r["rsvp"]).items() if v in ("in", "out")}
+    return {"id": r["id"], "title": r["title"], "emoji": r["emoji"], "start": r["start"], "note": r["note"], "by": r["created_by"],
+            "in": [int(k) for k, v in rs.items() if v == "in" and k.isdigit()], "out": [int(k) for k, v in rs.items() if v == "out" and k.isdigit()], "mine": rs.get(str(me))}
+
+
+@app.get("/api/plans")
+@need
+def get_plans():
+    rows = db.many(select(db.plans).where(db.plans.c.family_id == g.m["family_id"], db.plans.c.start >= time.time() - PLAN_GRACE).order_by(db.plans.c.start).limit(60))
+    return jsonify(plans=[plan_view(r, g.m["id"]) for r in rows])
+
+
+@app.post("/api/plans")
+@need
+def add_plan():
+    d = request.get_json(silent=True) or {}
+    title = clean(d.get("title"), 60)
+    if not title:
+        return err("Give the plan a name first.")
+    try:
+        start = float(d.get("start"))
+    except (TypeError, ValueError):
+        return err("Pick a day and a time.")
+    now = time.time()
+    if not (now - 86400 <= start <= now + 2 * 365 * 86400):
+        return err("That day is too far away.")
+    fid = g.m["family_id"]
+    if len(db.many(select(db.plans.c.id).where(db.plans.c.created_by == g.m["id"], db.plans.c.created > now - 3600))) >= 20:
+        return err("Slow down a little.", 429)
+    db.run(delete(db.plans).where(db.plans.c.family_id == fid, db.plans.c.start < now - 60 * 86400))
+    pid = db.run(insert(db.plans).values(family_id=fid, title=title, emoji=clean(d.get("emoji"), 8) or "📅", start=start, note=clean(d.get("note"), 120), created_by=g.m["id"],
+                                         created=now, rsvp=json.dumps({str(g.m["id"]): "in"}), reminded=False))
+    push_family(fid, "plan", {"id": pid, "new": True, "name": g.m["name"], "title": title, "emoji": clean(d.get("emoji"), 8) or "📅", "start": start}, skip=g.m["id"])
+    return jsonify(id=pid)
+
+
+@app.post("/api/plans/<int:pid>/rsvp")
+@need
+def rsvp_plan(pid):
+    r = db.one(select(db.plans).where(db.plans.c.id == pid, db.plans.c.family_id == g.m["family_id"]))
+    if not r:
+        return err("Not found.", 404)
+    answer = (request.get_json(silent=True) or {}).get("answer")
+    rs = json_dict(r["rsvp"])
+    if answer in ("in", "out"):
+        rs[str(g.m["id"])] = answer
+    else:
+        rs.pop(str(g.m["id"]), None)
+    db.run(update(db.plans).where(db.plans.c.id == pid).values(rsvp=json.dumps(rs)))
+    push_family(g.m["family_id"], "plan", {"id": pid}, skip=g.m["id"])
+    return jsonify(plan=plan_view({**r, "rsvp": json.dumps(rs)}, g.m["id"]))
+
+
+@app.delete("/api/plans/<int:pid>")
+@need
+def drop_plan(pid):
+    r = db.one(select(db.plans).where(db.plans.c.id == pid, db.plans.c.family_id == g.m["family_id"]))
+    if not r or not (r["created_by"] == g.m["id"] or g.m["role"] == "parent"):
+        return err("Not found.", 404)
+    db.run(delete(db.plans).where(db.plans.c.id == pid))
+    push_family(g.m["family_id"], "plan", {"id": pid, "removed": True}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
+def remind_plans():
+    """A plan that starts within half an hour tells everyone who has not said "can't". Runs from the event stream, at most every 20 seconds."""
+    now = time.time()
+    if now - _last_remind[0] < 20:
+        return
+    _last_remind[0] = now
+    for r in db.many(select(db.plans).where(db.plans.c.reminded == False, db.plans.c.start <= now + PLAN_SOON, db.plans.c.start > now - 600)):  # noqa: E712
+        db.run(update(db.plans).where(db.plans.c.id == r["id"]).values(reminded=True))
+        out = {k for k, v in json_dict(r["rsvp"]).items() if v == "out"}
+        for m in family_members(r["family_id"]):
+            if str(m["id"]) not in out:
+                push(m["id"], "plan_soon", {"id": r["id"], "title": r["title"], "emoji": r["emoji"], "start": r["start"]})
+
+
+# ---------------------------------------------------------------- polls: a question for the family
+def poll_view(r, me):
+    try:
+        opts = [str(o) for o in json.loads(r["options"] or "[]")]
+    except (ValueError, TypeError):
+        opts = []
+    who = [[] for _ in opts]
+    mine = None
+    for k, v in json_dict(r["votes"]).items():
+        if k.isdigit() and isinstance(v, int) and 0 <= v < len(opts):
+            who[v].append(int(k))
+            if int(k) == me:
+                mine = v
+    return {"id": r["id"], "question": r["question"], "options": opts, "votes": who, "mine": mine, "by": r["created_by"], "closed": bool(r["closed"]), "at": r["created"]}
+
+
+@app.get("/api/polls")
+@need
+def get_polls():
+    rows = db.many(select(db.polls).where(db.polls.c.family_id == g.m["family_id"]).order_by(db.polls.c.closed, db.polls.c.id.desc()).limit(20))
+    return jsonify(polls=[poll_view(r, g.m["id"]) for r in rows])
+
+
+@app.post("/api/polls")
+@need
+def add_poll():
+    d = request.get_json(silent=True) or {}
+    question = clean(d.get("question"), 100)
+    opts = []
+    for o in (d.get("options") if isinstance(d.get("options"), list) else []):
+        o = clean(o, 40)
+        if o and o.lower() not in [x.lower() for x in opts]:
+            opts.append(o)
+    if not question:
+        return err("Write the question first.")
+    if not 2 <= len(opts) <= 4:
+        return err("Give two to four different answers.")
+    fid, now = g.m["family_id"], time.time()
+    if len(db.many(select(db.polls.c.id).where(db.polls.c.created_by == g.m["id"], db.polls.c.created > now - 3600))) >= 10:
+        return err("Slow down a little.", 429)
+    db.run(delete(db.polls).where(db.polls.c.family_id == fid, db.polls.c.created < now - 30 * 86400))
+    pid = db.run(insert(db.polls).values(family_id=fid, question=question, options=json.dumps(opts, ensure_ascii=False), votes="{}", created_by=g.m["id"], created=now, closed=False))
+    push_family(fid, "poll", {"id": pid, "new": True, "name": g.m["name"], "question": question}, skip=g.m["id"])
+    return jsonify(id=pid)
+
+
+@app.post("/api/polls/<int:pid>/vote")
+@need
+def vote_poll(pid):
+    r = db.one(select(db.polls).where(db.polls.c.id == pid, db.polls.c.family_id == g.m["family_id"]))
+    if not r:
+        return err("Not found.", 404)
+    if r["closed"]:
+        return err("This vote is closed.")
+    n = len(json.loads(r["options"] or "[]"))
+    opt = (request.get_json(silent=True) or {}).get("option")
+    if not isinstance(opt, int) or isinstance(opt, bool) or not 0 <= opt < n:
+        return err("Pick one of the answers.")
+    votes = json_dict(r["votes"])
+    if votes.get(str(g.m["id"])) == opt:
+        votes.pop(str(g.m["id"]), None)                                  # tap your answer again to take the vote back
+    else:
+        votes[str(g.m["id"])] = opt
+    db.run(update(db.polls).where(db.polls.c.id == pid).values(votes=json.dumps(votes)))
+    push_family(g.m["family_id"], "poll", {"id": pid}, skip=g.m["id"])
+    return jsonify(poll=poll_view({**r, "votes": json.dumps(votes)}, g.m["id"]))
+
+
+@app.post("/api/polls/<int:pid>/close")
+@need
+def close_poll(pid):
+    r = db.one(select(db.polls).where(db.polls.c.id == pid, db.polls.c.family_id == g.m["family_id"]))
+    if not r or not (r["created_by"] == g.m["id"] or g.m["role"] == "parent"):
+        return err("Not found.", 404)
+    db.run(update(db.polls).where(db.polls.c.id == pid).values(closed=True))
+    push_family(g.m["family_id"], "poll", {"id": pid}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
+@app.delete("/api/polls/<int:pid>")
+@need
+def drop_poll(pid):
+    r = db.one(select(db.polls).where(db.polls.c.id == pid, db.polls.c.family_id == g.m["family_id"]))
+    if not r or not (r["created_by"] == g.m["id"] or g.m["role"] == "parent"):
+        return err("Not found.", 404)
+    db.run(delete(db.polls).where(db.polls.c.id == pid))
+    push_family(g.m["family_id"], "poll", {"id": pid, "removed": True}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
 # ---------------------------------------------------------------- the event stream: the apps hold this open and it wakes them
 @app.get("/api/events")
 @need
@@ -1544,6 +1727,7 @@ def event_stream():
     deadline, rows = time.time() + wait, []
     while True:
         expire_calls()
+        remind_plans()
         rows = db.many(select(db.events).where(db.events.c.member_id == m["id"], db.events.c.id > after).order_by(db.events.c.id).limit(100))
         if rows or time.time() >= deadline:
             break

@@ -86,6 +86,15 @@ blocks = Table("blocks", meta,                                            # "gro
     Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("family_id", Integer, index=True),
     Column("key", String(60)), Column("label", String(60)), Column("by_id", Integer, default=0),                      # by_id 0 = the owner
     Column("created", Float), Column("until", Float), Column("ended", Float, default=0))
+plans = Table("plans", meta,                                              # the family calendar: something on a day, and who says "I'm in"
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("title", String(60)), Column("emoji", String(8), default="📅"),
+    Column("start", Float, index=True), Column("note", String(120), default=""), Column("created_by", Integer), Column("created", Float),
+    Column("rsvp", Text, default=""),                                  # JSON {member id: "in" | "out"}
+    Column("reminded", Boolean, default=False))                        # the "starts soon" nudge went out
+polls = Table("polls", meta,                                              # a question for the family, one vote each
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("question", String(100)),
+    Column("options", Text), Column("votes", Text, default=""),         # options: JSON list of strings; votes: JSON {member id: option number}
+    Column("created_by", Integer), Column("created", Float), Column("closed", Boolean, default=False))
 meta.create_all(engine)
 try:                                                                  # older databases get the new column
     with engine.begin() as _c:

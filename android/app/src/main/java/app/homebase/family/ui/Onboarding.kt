@@ -52,7 +52,7 @@ fun Page(content: @Composable () -> Unit) {
 fun EmojiPicker(options: List<String>, picked: String, onPick: (String) -> Unit) {
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEach { e ->
-            Row(Modifier.clip(CircleShape).clickable { onPick(e) }) { Avatar(e, 48, if (e == picked) Mint.copy(alpha = 0.35f) else BlueSoft) }
+            Row(Modifier.clip(CircleShape).clickable { onPick(e) }) { Avatar(e, 48, if (e == picked) Mint.copy(alpha = 0.35f) else AccentSoft) }
         }
     }
 }
@@ -63,7 +63,7 @@ fun WelcomeScreen(nav: Nav) {
         Gap(40)
         Text("🏠", fontSize = 64.sp)
         Text("Homebase", style = MaterialTheme.typography.headlineLarge)
-        Text("Stay close. Stay yourself.", style = MaterialTheme.typography.titleLarge, color = Blue, modifier = Modifier.padding(top = 4.dp))
+        Text("Stay close. Stay yourself.", style = MaterialTheme.typography.titleLarge, color = Accent, modifier = Modifier.padding(top = 4.dp))
         Gap(10)
         Text("Location, messages and calls for your family, and honest about every bit of it. Nothing is hidden, and you can always pause.", style = MaterialTheme.typography.bodyLarge, color = Muted)
         Gap(28)

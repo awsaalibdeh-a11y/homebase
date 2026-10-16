@@ -84,7 +84,7 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
             val items = listOf("Family" to Icons.Filled.People, "Me" to Icons.Filled.Home)
             items.forEachIndexed { i, (label, icon) ->
                 NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icon, label) }, label = { Text(label) },
-                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Blue, selectedTextColor = Blue, indicatorColor = BlueSoft))
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Accent, selectedTextColor = Accent, indicatorColor = AccentSoft))
             }
         }
     }) { pad ->

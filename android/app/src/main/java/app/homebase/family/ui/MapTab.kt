@@ -45,7 +45,7 @@ fun MapTab(nav: Nav) {
             items(fam?.members.orEmpty()) { m ->
                 SoftCard(Modifier.width(260.dp), onClick = { m.location?.let { focus = it } }) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Avatar(m.emoji, 40, if (m.isParent) SunSoft else BlueSoft)
+                        Avatar(m.emoji, 40, if (m.isParent) SunSoft else AccentSoft)
                         Column {
                             Text(if (m.id == me) "${m.name} (you)" else m.name, style = MaterialTheme.typography.titleMedium)
                             Text(memberLine(m), style = MaterialTheme.typography.bodyMedium, color = Muted)

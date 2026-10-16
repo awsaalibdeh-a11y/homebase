@@ -82,8 +82,8 @@ fun InviteScreen(nav: Nav) {
                 }
             }
         } else {
-            SoftCard(tint = BlueSoft) {
-                Text(code!!, style = MaterialTheme.typography.headlineLarge, color = BlueDark)
+            SoftCard(tint = AccentSoft) {
+                Text(code!!, style = MaterialTheme.typography.headlineLarge, color = AccentDark)
                 Text("Works once, for 24 hours.", color = Muted)
             }
             BigButton("Share the code") {

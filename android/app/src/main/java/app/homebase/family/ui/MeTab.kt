@@ -45,6 +45,7 @@ fun MeTab(nav: Nav) {
     val me = fam?.members?.firstOrNull { it.id == app.store.myId }
     var pause by remember { mutableStateOf(false) }
     var late by remember { mutableStateOf(false) }
+    var statusOpen by remember { mutableStateOf(false) }
     var quietFrom by remember { mutableIntStateOf(-1) }
     var quietTo by remember { mutableIntStateOf(-1) }
     LaunchedEffect(Unit) {
@@ -76,7 +77,7 @@ fun MeTab(nav: Nav) {
         me?.let { meM ->
             SoftCard {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    MemberAvatar(meM, 64, if (meM.isParent) SunSoft else BlueSoft)
+                    MemberAvatar(meM, 64, if (meM.isParent) SunSoft else AccentSoft)
                     Column(Modifier.weight(1f)) { Text("Your photo", style = MaterialTheme.typography.titleMedium); Text("Shown on the map and in the family.", color = Muted) }
                 }
                 Row {
@@ -99,6 +100,13 @@ fun MeTab(nav: Nav) {
                 if (share == "on") OutlinedButton({ pause = true }) { Text("Pause…") }
                 if (share != "off") OutlinedButton({ setSharing("off") }) { Text("Turn off") }
             }
+        }
+
+        SoftCard {
+            val st = me?.status
+            Text("🙂 What I'm up to", style = MaterialTheme.typography.titleMedium)
+            Text(if (st != null) "${st.emoji} ${st.text}".trim() else "Tell your family in one tap. It goes away by itself.", Modifier.padding(top = 4.dp), color = Muted)
+            OutlinedButton({ statusOpen = true }, Modifier.padding(top = 8.dp)) { Text(if (st != null) "Change" else "Set") }
         }
 
         SectionLabel("Quick messages to the family")
@@ -136,6 +144,7 @@ fun MeTab(nav: Nav) {
         SoftButton("Settings") { nav.go(Screen.Settings) }
         Gap(8)
     }
+    if (statusOpen) StatusDialog { statusOpen = false }
     if (pause) PickDialog("Pause sharing for…", listOf("15 minutes" to 15, "1 hour" to 60, "3 hours" to 180, "Until tomorrow" to 720), { setSharing("paused", it) }, { pause = false })
     if (late) PickDialog("How late will you be?", listOf("About 10 minutes" to 10, "About 20 minutes" to 20, "About 30 minutes" to 30, "About an hour" to 60), { sendQuick(ctx, "late", "Running about $it minutes late", 0, false, "Sent") }, { late = false })
 }

@@ -14,28 +14,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-val Blue = Color(0xFF5B93FF)
-val BlueDark = Color(0xFFB8D0FF)
-val BlueSoft = Color(0xFF1A2438)
-val Mint = Color(0xFF3DD49B)
+val Accent = Color(0xFFE6B866)
+val AccentDark = Color(0xFFF3DDAA)
+val AccentSoft = Color(0xFF2B2412)
+val Mint = Color(0xFF4ADE94)
 val MintSoft = Color(0xFF12261F)
-val Sun = Color(0xFFF0B429)
+val Sun = Color(0xFFF2B640)
 val SunSoft = Color(0xFF2A2210)
-val Rose = Color(0xFFFF6B74)
+val Rose = Color(0xFFFF7B80)
 val RoseSoft = Color(0xFF2A1519)
-val Ink = Color(0xFFECECF0)
-val Muted = Color(0xFF8D8D96)
-val Bg = Color(0xFF0A0A0B)
-val Surface = Color(0xFF121214)
-val Surface2 = Color(0xFF1B1B1F)
-val OnAccent = Color(0xFF08101F)
+val Ink = Color(0xFFF5F5F7)
+val Muted = Color(0xFFAEAEB8)
+val Bg = Color(0xFF0C0C0D)
+val Surface = Color(0xFF18181B)
+val Surface2 = Color(0xFF222227)
+val OnAccent = Color(0xFF1B1306)
 
 private val colors = darkColorScheme(
-    primary = Blue, onPrimary = OnAccent, primaryContainer = BlueSoft, onPrimaryContainer = BlueDark,
+    primary = Accent, onPrimary = OnAccent, primaryContainer = AccentSoft, onPrimaryContainer = AccentDark,
     secondary = Mint, onSecondary = OnAccent, secondaryContainer = MintSoft, onSecondaryContainer = Mint,
     tertiary = Sun, onTertiary = OnAccent, error = Rose, onError = OnAccent, errorContainer = RoseSoft, onErrorContainer = Rose,
     background = Bg, onBackground = Ink, surface = Surface, onSurface = Ink, surfaceVariant = Surface2, onSurfaceVariant = Muted,
-    outline = Color(0xFF3A3A40), outlineVariant = Color(0xFF26262B), surfaceContainer = Surface, surfaceContainerHigh = Surface2, surfaceContainerHighest = Surface2,
+    outline = Color(0xFF47474E), outlineVariant = Color(0xFF2E2E34), surfaceContainer = Surface, surfaceContainerHigh = Surface2, surfaceContainerHighest = Surface2,
 )
 
 private val type = Typography(

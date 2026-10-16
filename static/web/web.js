@@ -29,7 +29,7 @@ const PERM_NAMES = { location: "location", trail: "trail", battery: "battery", m
 
 const S = { av: {}, token: localStorage.getItem("hb_token") || "", me: 0, family: null, members: [], places: [], ice: [], thread: 0, msgs: {}, unread: {}, items: [],
   map: null, markers: {}, circles: [], trail: null, adding: false, cursor: -1, running: false, geo: null, lastPos: null, lastSent: 0, focusedOnce: false,
-  online: navigator.onLine, open: 0, chatOpen: false, outbox: load("hb_out", []), savedAt: 0, tmp: -1 };
+  online: navigator.onLine, open: 0, chatOpen: false, outbox: load("hb_out", []), savedAt: 0, tmp: -1, plans: [], polls: [] };
 
 /* ---------- helpers ---------- */
 async function api(path, method = "GET", body) {
@@ -58,7 +58,7 @@ function pickEmoji(root, set) { root.querySelectorAll("#emo button").forEach(b =
 /* ---------- online / offline ---------- */
 function setOnline(v) {
   if (S.online === v) return; S.online = v; paintOffline();
-  if (v && S.token) { flushOutbox(); refreshFamily().catch(() => {}); refreshItems(); if (S.thread !== undefined) loadThread(S.thread, true); }
+  if (v && S.token) { flushOutbox(); refreshFamily().catch(() => {}); refreshItems(); refreshPlans(); refreshPolls(); if (S.thread !== undefined) loadThread(S.thread, true); }
 }
 function paintOffline() {
   const el = $("#offline"); if (!el) return;
@@ -126,7 +126,7 @@ async function startApp(fresh) {
   initMap(); initChrome(); paintOffline();
   if (!loadSnap() && !fresh) { /* first run: nothing to show yet */ }
   try { await refreshFamily(); } catch (e) { if (!e.offline) return; }
-  loadThread(0); refreshItems(); refreshChores(); flushOutbox();
+  loadThread(0); refreshItems(); refreshChores(); refreshPlans(); refreshPolls(); flushOutbox();
   const ans = location.hash.match(/answer=(\d+)/); if (ans) { history.replaceState(null, "", location.pathname); setTimeout(() => window.Calls && window.Calls.answerNow(+ans[1]), 600); }
   if (!S.running) { S.running = true; eventLoop(); }
   setInterval(() => { if (!document.hidden && S.token && S.online) refreshFamily().catch(() => {}); }, 12000);
@@ -187,7 +187,7 @@ function accordion(id, icon, title, sub, body, alert) {
 
 function jobsAlert() { return S.chores.filter(c => isParent() ? c.status === "done" : (c.status === "open" && (!c.to || c.to === S.me))).length; }
 function tabBadge(t) {
-  if (t === "family") { const kids = S.members.filter(m => m.role === "child"); const on = isParent() && kids.some(m => m.lock || (m.blocks || []).length); const n = jobsAlert(); return n ? `<i class="tb">${n}</i>` : on ? '<i class="tb dot"></i>' : ""; }
+  if (t === "family") { const kids = S.members.filter(m => m.role === "child"); const on = isParent() && kids.some(m => m.lock || (m.blocks || []).length); const n = jobsAlert() + pollAlert(); return n ? `<i class="tb">${n}</i>` : on ? '<i class="tb dot"></i>' : ""; }
   if (t === "me") { const m = me(); return m && m.role === "child" && (m.lock || (m.blocks || []).length) ? '<i class="tb dot"></i>' : ""; }
   return "";
 }
@@ -247,6 +247,7 @@ const statusChip = m => (m.status ? `<span class="stat">${esc(m.status.emoji || 
 function todayHtml() {
   const ms = S.members, live = ms.filter(isLive).length, home = ms.filter(m => m.home).length, st = me().status;
   const bits = [`${ms.length} ${ms.length === 1 ? "person" : "people"}`, live ? `${live} live on the map` : "nobody live right now"]; if (home) bits.push(`${home} at home`);
+  const nx = (S.plans || [])[0]; if (nx) bits.push(`next: ${nx.emoji} ${esc(nx.title)}, ${whenTxt(nx.start).toLowerCase()}`);
   return `<section class="today"><div><b>${esc(S.family ? S.family.name : "Your family")}</b><small>${bits.join(" · ")}</small></div>
     <div class="tbtns"><button class="btn sm" data-act="status">${st ? esc(st.emoji || "💬") + " " + esc(st.text || "My status") : "🙂 What I'm up to"}</button><button class="btn sm" data-act="chatall">💬 Message the family</button><button class="btn sm" data-act="fit">📍 Show everyone</button></div></section>`;
 }
@@ -274,10 +275,86 @@ function statusDialog() {
 }
 
 /* the Family tab: people first (their controls open right inside each card), then three small rows */
+/* ---------- plans: the family calendar ---------- */
+const PLAN_EMOJI = ["📅", "🎂", "⚽", "🍽️", "🎬", "🏥", "✈️", "📚", "🛒", "🎉"];
+function whenTxt(t) {
+  const d = new Date(t * 1000), now = new Date(), day0 = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(), diff = Math.round((day0(d) - day0(now)) / 86400000);
+  if (t * 1000 < Date.now()) return "Happening now";
+  if (diff === 0) return "Today · " + clock(t);
+  if (diff === 1) return "Tomorrow · " + clock(t);
+  if (diff > 1 && diff < 7) return d.toLocaleDateString([], { weekday: "long" }) + " · " + clock(t);
+  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }) + " · " + clock(t);
+}
+const nameOf = id => (id === S.me ? "You" : (member(id) || {}).name || "Someone");
+function planHtml(p) {
+  const going = p.in.map(nameOf).join(", "), mine = p.mine, canDel = p.by === S.me || isParent();
+  return `<div class="plan ${p.start * 1000 < Date.now() ? "now" : ""}"><div class="pl-top"><span class="pl-e">${esc(p.emoji)}</span><div class="pl-m"><b>${esc(p.title)}</b><small>${whenTxt(p.start)}${p.note ? " · " + esc(p.note) : ""}</small></div>${canDel ? `<button class="link" data-act="delplan" data-id="${p.id}" title="Delete" aria-label="Delete this plan">✕</button>` : ""}</div>
+    <div class="pl-who">${going ? "👍 " + esc(going) : "Nobody has said yes yet"}${p.out.length ? ` · can't: ${esc(p.out.map(nameOf).join(", "))}` : ""}</div>
+    <div class="pl-btns"><button class="btn sm ${mine === "in" ? "sel" : ""}" data-act="rsvp" data-id="${p.id}" data-a="${mine === "in" ? "" : "in"}">${mine === "in" ? "✓ I'm in" : "I'm in"}</button><button class="btn sm ${mine === "out" ? "sel" : ""}" data-act="rsvp" data-id="${p.id}" data-a="${mine === "out" ? "" : "out"}">${mine === "out" ? "✓ Can't" : "Can't"}</button></div></div>`;
+}
+function plansHtml() {
+  const list = S.plans.slice(0, 5);
+  return `<div class="sechead"><h3>📅 Coming up</h3><button class="btn sm" data-act="addplan">＋ Plan</button></div>${list.map(planHtml).join("") || '<div class="empty">Nothing planned yet. Add a dinner, a match or a trip so everyone knows.</div>'}${S.plans.length > 5 ? `<p class="tabhelp">${S.plans.length - 5} more after these.</p>` : ""}`;
+}
+async function refreshPlans() { try { S.plans = (await api("/api/plans")).plans; renderSide(); } catch (e) { /* keep the last list */ } }
+async function rsvp(id, answer) { try { const d = await api(`/api/plans/${id}/rsvp`, "POST", { answer }); S.plans = S.plans.map(p => p.id === id ? d.plan : p); renderSide(); } catch (e) { toast(e.message); } }
+function planDialog() {
+  const t = new Date(Date.now() + 3600e3), p2 = n => String(n).padStart(2, "0");
+  const dflt = `${t.getFullYear()}-${p2(t.getMonth() + 1)}-${p2(t.getDate())}`, tm = `${p2(t.getHours())}:00`;
+  let emoji = "📅";
+  modal(`<h2>Add a plan</h2><div class="sub">Everyone in the family sees it and can say if they are coming.</div>
+    <label class="l">What is it?</label><input class="field" id="plT" maxlength="60" placeholder="For example: Dinner at Grandma's" autocomplete="off">
+    <label class="l">Pick a picture</label>${emojiPicker(PLAN_EMOJI, emoji)}
+    <label class="l">When</label><div style="display:flex;gap:8px"><input class="field" type="date" id="plD" value="${dflt}"><input class="field" type="time" id="plH" value="${tm}"></div>
+    <label class="l">A note (optional)</label><input class="field" id="plN" maxlength="120" placeholder="Bring a jacket" autocomplete="off">
+    <div class="foot"><button class="btn" id="plX" type="button">Cancel</button><button class="btn solid" id="plOk" type="button">Add it</button></div>`, root => {
+    pickEmoji(root, e => { emoji = e; });
+    root.querySelector("#plX").onclick = closeModal; root.querySelector("#plT").focus();
+    root.querySelector("#plOk").onclick = async () => {
+      const title = root.querySelector("#plT").value.trim(), when = new Date(root.querySelector("#plD").value + "T" + (root.querySelector("#plH").value || "09:00"));
+      if (!title) return toast("Give the plan a name first");
+      if (isNaN(when)) return toast("Pick a day and a time");
+      try { await api("/api/plans", "POST", { title, emoji, start: when.getTime() / 1000, note: root.querySelector("#plN").value.trim() }); closeModal(); toast("Plan added"); refreshPlans(); } catch (e) { toast(e.message); }
+    };
+  });
+}
+
+/* ---------- polls: a question for the family ---------- */
+const pollAlert = () => S.polls.filter(p => !p.closed && p.mine === null).length;
+function pollHtml(p) {
+  const total = p.votes.reduce((a, v) => a + v.length, 0), top = Math.max(0, ...p.votes.map(v => v.length)), canMod = p.by === S.me || isParent();
+  const opts = p.options.map((o, i) => {
+    const n = p.votes[i].length, pc = total ? Math.round(100 * n / total) : 0, who = p.votes[i].map(nameOf).join(", ");
+    return `<button type="button" class="opt ${p.mine === i ? "mine" : ""} ${p.closed && n === top && n > 0 ? "win" : ""}" data-act="vote" data-id="${p.id}" data-o="${i}" ${p.closed ? "disabled" : ""}><i style="width:${pc}%"></i><span class="ot">${esc(o)}</span><span class="on2">${n ? n + (who ? " · " + esc(who) : "") : ""}</span></button>`;
+  }).join("");
+  return `<div class="poll ${p.closed ? "closed" : ""}"><div class="pl-top"><div class="pl-m"><b>${esc(p.question)}</b><small>${nameOf(p.by) === "You" ? "You asked" : esc(nameOf(p.by)) + " asked"} · ${total} ${total === 1 ? "vote" : "votes"}${p.closed ? " · closed" : ""}</small></div>${canMod ? `<button class="link" data-act="delpoll" data-id="${p.id}" title="Delete" aria-label="Delete this vote">✕</button>` : ""}</div>${opts}
+    ${canMod && !p.closed ? `<div class="pl-btns"><button class="btn sm" data-act="closepoll" data-id="${p.id}">Close the vote</button></div>` : ""}</div>`;
+}
+function pollsHtml() {
+  return `${S.polls.map(pollHtml).join("") || '<div class="empty">Ask the family something: pizza or tacos, which film, what time.</div>'}<button class="btn solid" data-act="addpoll" style="width:100%">＋ Ask the family</button>`;
+}
+async function refreshPolls() { try { S.polls = (await api("/api/polls")).polls; renderSide(); } catch (e) { /* keep the last list */ } }
+async function vote(id, option) { try { const d = await api(`/api/polls/${id}/vote`, "POST", { option }); S.polls = S.polls.map(p => p.id === id ? d.poll : p); renderSide(); } catch (e) { toast(e.message); } }
+function pollDialog() {
+  modal(`<h2>Ask the family</h2><div class="sub">Everyone gets one vote. You can close it when you have an answer.</div>
+    <label class="l">Your question</label><input class="field" id="poQ" maxlength="100" placeholder="For example: What's for dinner?" autocomplete="off">
+    <label class="l">Answers (two to four)</label>${[1, 2, 3, 4].map(i => `<input class="field poo" maxlength="40" placeholder="Answer ${i}${i > 2 ? " (optional)" : ""}" autocomplete="off" style="margin-bottom:6px">`).join("")}
+    <div class="foot"><button class="btn" id="poX" type="button">Cancel</button><button class="btn solid" id="poOk" type="button">Ask</button></div>`, root => {
+    root.querySelector("#poX").onclick = closeModal; root.querySelector("#poQ").focus();
+    root.querySelector("#poOk").onclick = async () => {
+      const question = root.querySelector("#poQ").value.trim(), options = [...root.querySelectorAll(".poo")].map(i => i.value.trim()).filter(Boolean);
+      if (!question) return toast("Write the question first");
+      if (options.length < 2) return toast("Give at least two answers");
+      try { await api("/api/polls", "POST", { question, options }); closeModal(); toast("Asked"); S.acc.polls = true; refreshPolls(); } catch (e) { toast(e.message); }
+    };
+  });
+}
+
 function familyHtml() {
-  const n = jobsAlert(), hasHome = S.places.some(p => p.name === "Home");
-  return todayHtml() + peopleHtml()
+  const n = jobsAlert(), hasHome = S.places.some(p => p.name === "Home"), pa = pollAlert();
+  return todayHtml() + plansHtml() + peopleHtml()
     + (isParent() ? `<button class="btn" data-act="invite">＋ Invite someone</button>` : "")
+    + accordion("polls", "🗳️", "Family votes", pa ? pa + " waiting for your vote" : (S.polls.length ? S.polls.length + " asked" : "Ask the family anything"), pollsHtml(), pa)
     + accordion("jobs", "✅", "Jobs and list", n ? (isParent() ? n + " to approve" : n + " to do") : "Points and the family list", jobsHtml(), n)
     + accordion("places", "📍", "Places and Home", hasHome ? S.places.length + " saved" : "Set the Home area", placesHtml())
     + accordion("rules", "📋", "Family rules", "What the family agreed", `<p class="tabhelp">${isParent() ? "Write the house rules and set each child's daily limit." : "Read what your family agreed."}</p><button class="btn solid" data-act="rules" data-id="0">${isParent() ? "Edit the rules" : "Read the rules"}</button>`);
@@ -580,6 +657,9 @@ function handleEvent(ev) {
     case "ground_warn": { const names = (p.apps || []).join(", "); toast("⏳ " + names + " will be grounded in 1 minute — finish up", 14000); notify("Finish up", names + " will be grounded in a minute.", { tag: "groundwarn", force: true }); break; }
     case "nudge": toast("💡 " + p.text, 12000); notify("Time for a break?", p.text, { tag: "nudge", force: false, thread: undefined }); break;
     case "list": refreshItems(); break;
+    case "plan": refreshPlans(); if (p.new) { toast(`${p.emoji || "📅"} ${p.name} planned: ${p.title}`, 5000); notify(p.name + " added a plan", `${p.title} · ${whenTxt(p.start)}`, { tag: "plan-" + p.id, force: false }); } break;
+    case "plan_soon": toast(`${p.emoji || "📅"} ${p.title} starts soon · ${clock(p.start)}`, 9000); notify("Starting soon", `${p.title} · ${clock(p.start)}`, { tag: "plan-soon-" + p.id, force: true }); break;
+    case "poll": refreshPolls(); if (p.new) { toast(`🗳️ ${p.name} asks: ${p.question}`, 6000); notify(p.name + " asks the family", p.question, { tag: "poll-" + p.id, force: false }); } break;
     case "chores": refreshChores(); break;
     case "location": { const m = member(p.member); if (m) { m.location = { lat: p.lat, lng: p.lng, acc: p.acc, at: p.at }; m.last_seen = Date.now() / 1000; m.battery = p.battery ?? m.battery; renderMap(); renderSide(); } break; }
     case "battery": { const m = member(p.member); if (m) { m.battery = p.battery; renderSide(); } toast(`🔋 ${p.name} has ${p.battery}% battery`); break; }
@@ -639,6 +719,13 @@ function initChrome() {
     else if (act === "more") { S.more = S.more || {}; S.more[id] = !S.more[id]; renderSide(); }
     else if (act === "delplace") { if (confirm("Remove this place?")) { await api("/api/places/" + id, "DELETE").catch(err => toast(err.message)); refreshFamily(); } }
     else if (act === "delitem") { await api("/api/list/" + id, "DELETE").catch(err => toast(err.message)); refreshItems(); }
+    else if (act === "addplan") planDialog();
+    else if (act === "rsvp") rsvp(id, el.dataset.a);
+    else if (act === "delplan") { if (confirm("Delete this plan?")) { await api("/api/plans/" + id, "DELETE").catch(err => toast(err.message)); refreshPlans(); } }
+    else if (act === "addpoll") pollDialog();
+    else if (act === "vote") vote(id, +el.dataset.o);
+    else if (act === "closepoll") { await api(`/api/polls/${id}/close`, "POST").catch(err => toast(err.message)); refreshPolls(); }
+    else if (act === "delpoll") { if (confirm("Delete this vote?")) { await api("/api/polls/" + id, "DELETE").catch(err => toast(err.message)); refreshPolls(); } }
   };
   $("#side").addEventListener("click", async e => {
     const el = e.target.closest("[data-chore]"); if (!el) return; const id = el.dataset.id, act = el.dataset.chore;
