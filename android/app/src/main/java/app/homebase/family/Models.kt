@@ -263,7 +263,7 @@ data class QuietInfo(val from: Int = -1, val to: Int = -1)
 data class MeResp(val me: Member, val family: FamilyInfo, val quiet: QuietInfo = QuietInfo())
 
 @Serializable
-data class FamilyConfig(@SerialName("version_code") val versionCode: Int = 1, @SerialName("apk_url") val apkUrl: String = "")
+data class FamilyConfig(@SerialName("version_code") val versionCode: Int = 1, @SerialName("apk_url") val apkUrl: String = "", @SerialName("version_name") val versionName: String = "", val notes: List<String> = emptyList())
 
 
 /** A meal on the family meal plan. [via] is "homebase" or the app it came from ("platter"); [cook] is a member id, 0 for nobody yet. */

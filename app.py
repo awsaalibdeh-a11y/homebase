@@ -28,7 +28,35 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "11"))
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "11"))      # what Android compares (a plain counter)
+VERSION_NAME = os.environ.get("APP_VERSION_NAME", "3.0")           # what people see: a whole number is a big update, a decimal is a small one
+CHANGELOG = [                                                         # newest first; shown on the install and update page
+    {"v": "3.0", "date": "16 Oct 2026", "big": True, "title": "Recipes, fun, and calls that connect", "items": [
+        "Search recipes inside Mellow (Home, Plan, and the web app). Pick one and it goes on the meal plan with its ingredients and method; anyone can open it in Platter.",
+        "Children can suggest recipes and meals. Parents get a notice and say yes or not now.",
+        "Fun: whose turn is it, coin, dice, would you rather, send a compliment, surprise dinner.",
+        "Fixed calls failing to connect: the call details were being cut short once video was added.",
+    ]},
+    {"v": "2.3", "date": "16 Oct 2026", "title": "Works with no signal", "items": [
+        "Messages, check-ins and SOS written offline are kept and sent by themselves when the signal comes back.",
+        "Plans, meals and the family list are saved on the phone so the tabs are never empty.",
+        "Emergency card (works offline, saved on the phone only) and a Pocket with a break timer and private notes.",
+    ]},
+    {"v": "2.2", "date": "16 Oct 2026", "title": "Link Platter and Scout", "items": [
+        "A popup for parents that explains how to install and link Platter and Scout, with clearer steps in More.",
+        "Platter and Scout now call the family app Mellow.",
+    ]},
+    {"v": "2.1", "date": "16 Oct 2026", "title": "Welcome, and Mellow on Windows", "items": [
+        "A one-time welcome popup on Android and the web.",
+        "The web version (for Windows) is now Mellow too: new name, black and white contour look, new icons.",
+    ]},
+    {"v": "2.0", "date": "16 Oct 2026", "big": True, "title": "Homebase becomes Mellow", "items": [
+        "New name, and a black and white look on a contour-line background (White is the main look, Dark is in Settings).",
+        "Five tabs: Home, Map, Plan, Chat and More. Messages laid out like a phone's own messages app.",
+        "Meals with recipes and who is cooking, friend groups with a mild-words filter, stickers and GIFs that move, family games, Directions on plans.",
+        "Photos in messages, a new call screen, video calls, and profile pictures taken in the app with a face check.",
+    ]},
+]
 KEEP_LOCATIONS_DAYS = 7
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _hits = defaultdict(list)
@@ -387,7 +415,7 @@ def get_family():
 
 @app.get("/api/config")
 def config():
-    return jsonify(ice_servers=ice_servers(), version_code=VERSION_CODE, apk_url=f"{request.host_url.rstrip('/')}/update")
+    return jsonify(ice_servers=ice_servers(), version_code=VERSION_CODE, version_name=VERSION_NAME, notes=CHANGELOG[0]["items"], apk_url=f"{request.host_url.rstrip('/')}/update")
 
 
 # ---------------------------------------------------------------- sharing a location (always the owner's choice)
@@ -3250,7 +3278,7 @@ def call_ice(cid):
 @app.get("/")
 def home():
     has_apk = os.path.exists(os.path.join(BASE, "static", "homebase.apk"))
-    return render_template("index.html", has_apk=has_apk, version=VERSION_CODE)
+    return render_template("index.html", has_apk=has_apk, version=VERSION_CODE, version_name=VERSION_NAME)
 
 
 @app.get("/app")
@@ -3275,7 +3303,7 @@ def web_manifest():
 
 @app.get("/update")
 def update_page():
-    return render_template("update.html", version=VERSION_CODE)
+    return render_template("update.html", version=VERSION_CODE, version_name=VERSION_NAME, changelog=CHANGELOG)
 
 
 @app.get("/iphone")

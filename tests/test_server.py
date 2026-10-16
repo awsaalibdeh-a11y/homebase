@@ -2329,5 +2329,24 @@ class BigCallDescriptions(Base):
         self.assertEqual(self.get(self.mum, f"/api/calls/{c['id']}").get_json()["answer"], offer)
 
 
+class UpdateLog(Base):
+    def test_the_update_page_has_the_log_and_a_readable_version(self):
+        page = self.c.get("/update")
+        html = page.get_data(as_text=True)
+        page.close()
+        self.assertIn("Update log", html)
+        self.assertIn(f"Mellow {server.VERSION_NAME}", html)
+        for u in server.CHANGELOG:
+            self.assertIn(u["v"], html)
+        self.assertEqual(server.CHANGELOG[0]["v"], server.VERSION_NAME, "the newest entry is the current version")
+
+    def test_big_updates_are_whole_numbers_and_small_ones_are_decimals(self):
+        for u in server.CHANGELOG:
+            major, _, minor = u["v"].partition(".")
+            self.assertEqual(bool(u.get("big")), minor == "0", u["v"])
+        cfg = self.c.get("/api/config").get_json()
+        self.assertEqual((cfg["version_name"], cfg["notes"]), (server.VERSION_NAME, server.CHANGELOG[0]["items"]))
+
+
 if __name__ == "__main__":
     unittest.main()

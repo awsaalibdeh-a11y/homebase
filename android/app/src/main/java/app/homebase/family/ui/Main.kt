@@ -1,6 +1,8 @@
 package app.homebase.family.ui
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -65,7 +67,8 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
     val owner = LocalLifecycleOwner.current
     val ctxU = LocalContext.current
     var newApk by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { runCatching { ctxU.hb.api.config() }.onSuccess { c -> if (c.versionCode > app.homebase.family.BuildConfig.VERSION_CODE) newApk = c.apkUrl } }
+    var newNotes by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) { runCatching { ctxU.hb.api.config() }.onSuccess { c -> if (c.versionCode > app.homebase.family.BuildConfig.VERSION_CODE) { newApk = c.apkUrl; newNotes = "Mellow ${c.versionName}" + c.notes.joinToString("") { "\n• $it" } } } }
     var welcome by remember { mutableStateOf(!ctxU.hb.store.mellowWelcome) }
     if (welcome) androidx.compose.material3.AlertDialog(onDismissRequest = {}, containerColor = Surface, title = { Text("Welcome to Mellow") },
         text = { Text("Homebase has a new name and a calmer look. Your family, messages and settings are all still here.\n\nNew: five tabs (Home, Map, Plan, Chat, More), meals, friend groups, stickers and GIFs, photos in chat, video calls, and a Dark look in Settings.") },
@@ -80,7 +83,7 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
     if (linkOpen) LinkAppsDialog { linkOpen = false }
     newApk?.let { url ->
         androidx.compose.material3.AlertDialog(onDismissRequest = { newApk = null }, title = { Text("A new Mellow is ready") },
-            text = { Text("Tap Update, then open the file when it finishes downloading. Your family, places and settings stay as they are.") },
+            text = { Text(newNotes + "\n\nTap Update to see the install page and the full update log. Your family, places and settings stay as they are.", modifier = Modifier.verticalScroll(rememberScrollState())) },
             confirmButton = { TextButton({ ctxU.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); newApk = null }) { Text("Update") } },
             dismissButton = { TextButton({ newApk = null }) { Text("Later") } })
     }

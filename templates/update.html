@@ -3,52 +3,68 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Update Homebase</title>
-  <meta name="theme-color" content="#0a0a0b">
+  <title>Install or update Mellow</title>
+  <meta name="theme-color" content="#fbfbf9">
   <style>
-    :root { --bg:#f6f6f7; --surface:#ffffff; --surface2:#efeff2; --line:#e1e1e6; --ink:#17171a; --muted:#62626b; --accent:#a96a0e; --accent-ink:#ffffff; --ok:#18a46a; color-scheme: light; }
+    :root { --bg:#fbfbf9; --surface:#ffffff; --surface2:#ecebe7; --line:rgba(0,0,0,.12); --ink:#121212; --muted:#6a6863; --accent:#141414; --accent-ink:#ffffff; color-scheme: light; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#050505; --surface:#161616; --surface2:#272726; --line:rgba(255,255,255,.14); --ink:#f2f2ef; --muted:#a3a19c; --accent:#f2f2ef; --accent-ink:#0b0b0b; color-scheme: dark; } }
     * { box-sizing: border-box; }
-    body { margin:0; font:17px/1.55 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
-    main { max-width:34rem; margin:0 auto; padding:1.6rem 1rem 3rem; }
-    h1 { font-size:1.7rem; margin:.4rem 0; letter-spacing:-.02em; }
-    h2 { font-size:1.1rem; margin:0 0 .6rem; }
+    body { margin:0; font:17px/1.55 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg) url(/static/web/bg-light.webp) center/cover fixed no-repeat; }
+    @media (prefers-color-scheme: dark) { body { background-image:url(/static/web/bg-dark.webp); } }
+    main { max-width:36rem; margin:0 auto; padding:1.6rem 1rem 3rem; }
+    h1 { font:500 2rem/1.15 Georgia,"Times New Roman",serif; margin:.4rem 0; }
+    h2 { font:600 1.1rem/1.3 Inter,system-ui,sans-serif; margin:0 0 .6rem; }
     p { color:var(--muted); margin:.3rem 0 1rem; }
-    .card { background:var(--surface); border:1px solid var(--line); border-radius:1.2rem; padding:1.1rem 1.2rem; margin:1rem 0; }
-    .card.best { border-color:rgba(169,106,14,.55); }
-    .btn { display:block; text-align:center; padding:1rem; border-radius:.9rem; background:var(--accent); color:var(--accent-ink); font-weight:700; text-decoration:none; margin:.8rem 0 .2rem; }
+    .card { background:color-mix(in srgb, var(--surface) 94%, transparent); border:1px solid var(--line); border-radius:1.1rem; padding:1.1rem 1.2rem; margin:1rem 0; }
+    .btn { display:block; text-align:center; padding:1rem; border-radius:.8rem; background:var(--accent); color:var(--accent-ink); font-weight:700; text-decoration:none; margin:.8rem 0 .2rem; }
     .btn.alt { background:var(--surface2); color:var(--ink); border:1px solid var(--line); }
-    ol { margin:.4rem 0 0; padding-left:1.3rem; } li { margin:.55rem 0; }
-    b { color:var(--ink); } .tag { display:inline-block; font-size:.78rem; padding:.1rem .55rem; border-radius:99px; background:rgba(24,164,106,.13); color:var(--ok); margin-left:.4rem; vertical-align:middle; }
+    ol { margin:.4rem 0 0; padding-left:1.3rem; } li { margin:.5rem 0; }
+    b { color:var(--ink); }
+    .ver { display:inline-block; font-size:.85rem; padding:.1rem .6rem; border-radius:99px; background:var(--surface2); border:1px solid var(--line); margin-left:.4rem; vertical-align:middle; font-weight:600; }
+    .log h2 { display:flex; align-items:baseline; gap:.5rem; margin-bottom:.2rem; }
+    .log .v { font:600 1.35rem/1 Georgia,serif; } .log .big .v { font-size:1.7rem; }
+    .log small { color:var(--muted); font-weight:400; font-size:.85rem; }
+    .log ul { margin:.4rem 0 0; padding-left:1.2rem; color:var(--muted); font-size:.95rem; } .log li { margin:.25rem 0; }
+    .log .item { padding:.9rem 0; border-top:1px solid var(--line); } .log .item:first-of-type { border-top:0; }
     footer { color:var(--muted); font-size:.85rem; margin-top:2rem; }
   </style>
 </head>
 <body>
 <main>
-  <h1>🏠 Update Homebase</h1>
-  <p>A newer Homebase is ready, with <b>screen time on the Family tab</b> and everything in just two tabs. Pick one way below. Your family, places and settings stay exactly as they are.</p>
+  <h1>Mellow <span class="ver">{{ version_name }}</span></h1>
+  <p>Install Mellow, or update it. Your family, places and settings stay exactly as they are.</p>
 
-  <div class="card best">
-    <h2>Way 1: Use the web version <span class="tag">never needs updating</span></h2>
-    <p>Always the newest, and it updates itself. You only do this once.</p>
+  <div class="card">
+    <h2>Android phone or tablet</h2>
     <ol>
-      <li>Open <b>Chrome</b> on your phone and go to <b>homebase-family.onrender.com/app</b></li>
-      <li>Sign in with your family code or your account.</li>
-      <li>Tap the <b>⋮ menu</b> (top right), then <b>Add to Home screen</b>, then <b>Install</b>.</li>
-      <li>Open the new <b>Homebase</b> icon. You can remove the old app.</li>
+      <li>Tap <b>Download Mellow {{ version_name }}</b> below.</li>
+      <li>When it finishes, tap <b>Open</b> on the download (or find it in your notifications or the Files app).</li>
+      <li>If Android asks, allow <b>Install unknown apps</b> for this browser, then go back.</li>
+      <li>Tap <b>Install</b> or <b>Update</b>. It installs over the old one, so you stay signed in.</li>
     </ol>
-    <a class="btn" href="/app">Open the web version</a>
+    <a class="btn" href="/download">Download Mellow {{ version_name }}</a>
   </div>
 
   <div class="card">
-    <h2>Way 2: Install the new Android app</h2>
-    <p>Does a bit more in the background (location, grounded apps). Updates after this are one tap.</p>
+    <h2>Windows computer or iPhone</h2>
+    <p>An Android app file (.apk) cannot run on Windows. Use the web version instead. It is always the newest and updates by itself.</p>
     <ol>
-      <li>Tap <b>Download the new app</b> below.</li>
-      <li>When it finishes, tap <b>Open</b> on the download (or open it from your notifications or the Files app).</li>
-      <li>If Android asks, tap <b>Settings</b>, allow <b>Install unknown apps</b> for this browser, then go back.</li>
-      <li>Tap <b>Install</b> or <b>Update</b>. It installs over the old one, so you stay signed in.</li>
+      <li>Open <b>Mellow on the web</b> below in Edge or Chrome.</li>
+      <li>Sign in with your family code. A browser stays signed in only in the same browser, so open it in the one you use.</li>
+      <li>To get its own window and icon: menu, <b>Apps</b>, <b>Install this site as an app</b> (on iPhone: Share, <b>Add to Home Screen</b>).</li>
     </ol>
-    <a class="btn alt" href="/download">Download the new app (version {{ version }})</a>
+    <a class="btn alt" href="/app">Open Mellow on the web</a>
+  </div>
+
+  <div class="card log" id="log">
+    <h2>Update log</h2>
+    <p>A whole number is a big update. A decimal is a small one.</p>
+    {% for u in changelog %}
+    <div class="item{% if u.big %} big{% endif %}">
+      <h2><span class="v">{{ u.v }}</span> {{ u.title }} <small>{{ u.date }}</small></h2>
+      <ul>{% for line in u['items'] %}<li>{{ line }}</li>{% endfor %}</ul>
+    </div>
+    {% endfor %}
   </div>
 
   <footer>Made by Aws, with Claude's help.</footer>
