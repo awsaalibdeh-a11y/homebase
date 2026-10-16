@@ -1,5 +1,6 @@
 import base64
 import calendar
+import datetime
 import json
 import os
 import sys
@@ -1643,6 +1644,487 @@ class Notices(Base):
         self.post(self.mum, "/api/notice", text="Private")
         zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
         self.assertIsNone(self.notice_for(zed))
+
+
+def in_days(n):
+    return (datetime.date.today() + datetime.timedelta(days=n)).isoformat()
+
+
+class Meals(Base):
+    def add(self, who=None, **kw):
+        return self.post(who or self.kid, "/api/meals", **{"day": in_days(3), "slot": "dinner", "title": "Chicken burger", **kw})
+
+    def listing(self, who, query=""):
+        return self.get(who, "/api/meals" + query).get_json()["meals"]
+
+    def test_a_meal_with_its_recipe_is_shared_with_the_family(self):
+        r = self.add(ingredients=["2 chicken breasts", "4 buns", " "], steps=["Flatten the chicken.", "Grill it."], servings=4, photo="https://img.example.com/burger.jpg",
+                     source="https://platter.example.com/#/r/53085")
+        self.assertEqual(r.status_code, 200)
+        m = self.listing(self.mum)[0]
+        self.assertEqual((m["title"], m["day"], m["slot"], m["servings"], m["via"]), ("Chicken burger", in_days(3), "dinner", 4, "homebase"))
+        self.assertEqual((m["ingredients"], m["steps"]), (["2 chicken breasts", "4 buns"], ["Flatten the chicken.", "Grill it."]))
+        self.assertEqual((m["photo"], m["source"]), ("https://img.example.com/burger.jpg", "https://platter.example.com/#/r/53085"))
+        self.assertTrue(any(e["type"] == "meals" for e in self.events(self.mum)))
+
+    def test_meals_come_back_in_day_order_inside_the_range_asked_for(self):
+        self.add(day=in_days(20), title="Later")
+        self.add(day=in_days(2), title="Soon")
+        self.add(day=in_days(2), slot="lunch", title="Soup")
+        self.assertEqual([m["title"] for m in self.listing(self.mum)], ["Soon", "Soup"], "the default window is the next two weeks")
+        self.assertEqual([m["title"] for m in self.listing(self.mum, f"?from={in_days(10)}&to={in_days(30)}")], ["Later"])
+        self.assertEqual(self.get(self.mum, f"/api/meals?from={in_days(0)}&to={in_days(120)}").status_code, 400, "more than ten weeks at once")
+        self.assertEqual(self.get(self.mum, f"/api/meals?from={in_days(9)}&to={in_days(1)}").status_code, 400)
+
+    def test_what_makes_a_meal_valid(self):
+        for bad in ({"day": "tomorrow"}, {"day": in_days(-400)}, {"day": in_days(2000)}, {"title": "  "}, {"day": None}):
+            self.assertEqual(self.add(**bad).status_code, 400, bad)
+        self.add(slot="midnight feast", servings=500, photo="http://insecure.example.com/x.jpg", ingredients="not a list")
+        m = self.listing(self.mum)[-1]
+        self.assertEqual((m["slot"], m["servings"], m["photo"], m["ingredients"]), ("dinner", 99, "", []), "odd values are tidied, not trusted")
+
+    def test_who_can_remove_a_meal(self):
+        mine = self.add(self.kid).get_json()["id"]
+        theirs = self.add(self.mum, title="Mum's pie").get_json()["id"]
+        self.assertEqual(self.c.delete(f"/api/meals/{theirs}", headers=self.kid).status_code, 404)
+        self.assertEqual(self.c.delete(f"/api/meals/{mine}", headers=self.kid).status_code, 200)
+        self.assertEqual(self.c.delete(f"/api/meals/{theirs}", headers=self.mum).status_code, 200)
+        self.assertEqual(self.listing(self.mum), [])
+
+    def test_another_family_sees_and_changes_nothing(self):
+        mid = self.add().get_json()["id"]
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertEqual(self.listing(zed), [])
+        self.assertEqual(self.c.delete(f"/api/meals/{mid}", headers=zed).status_code, 404)
+        self.assertEqual(self.c.get("/api/meals").status_code, 401)
+
+    def test_the_meal_plan_is_in_the_calendar_file(self):
+        self.add(title="Chicken burger", slot="dinner")
+        text = self.c.get("/api/calendar.ics", headers=self.mum).get_data(as_text=True).replace("\r\n ", "")
+        self.assertIn("Dinner: Chicken burger", text)
+        self.assertIn("DTSTART;VALUE=DATE:" + in_days(3).replace("-", ""), text)
+
+
+class LinkedApps(Base):
+    ORIGIN = "http://127.0.0.1:5075"
+
+    def link(self, name="Platter"):
+        return self.post(self.mum, "/api/integrations", name=name)
+
+    def ext(self, key, method, path, origin=None, **body):
+        headers = {"Authorization": f"Bearer {key}"}
+        if origin:
+            headers["Origin"] = origin
+        return getattr(self.c, method)(path, headers=headers, json=body or None)
+
+    def test_a_parent_links_an_app_and_the_key_is_shown_once(self):
+        made = self.link().get_json()
+        self.assertTrue(made["key"].startswith("hbk_") and len(made["key"]) > 30)
+        listed = self.get(self.mum, "/api/integrations").get_json()["integrations"]
+        self.assertEqual([(i["name"], "key" in i) for i in listed], [("Platter", False)], "the list never shows a key")
+        stored = db.one(db.select(db.integrations).where(db.integrations.c.id == made["id"]))
+        self.assertNotIn(made["key"], json.dumps(stored), "only a fingerprint is kept")
+        self.assertEqual(self.post(self.kid, "/api/integrations", name="Sneaky").status_code, 403)
+        self.assertEqual(self.get(self.kid, "/api/integrations").status_code, 403)
+        self.assertTrue(any("linked Platter" in m["body"] for m in self.get(self.kid, "/api/messages").get_json()["messages"]), "the family is told")
+
+    def test_at_most_five(self):
+        for i in range(5):
+            self.assertEqual(self.link(f"App {i}").status_code, 200)
+        self.assertEqual(self.link("One too many").status_code, 400)
+
+    def test_the_app_can_check_in_put_meals_and_take_them_off(self):
+        key = self.link().get_json()["key"]
+        self.assertEqual(self.ext(key, "get", "/api/ext/ping").get_json(), {"family": "The Vales", "app": "Platter", "scopes": ["meals"]})
+        body = {"ext_id": "platter:abc", "day": in_days(5), "slot": "dinner", "title": "Chicken burger", "ingredients": ["2 chicken breasts"], "steps": ["Grill it."], "servings": 4}
+        self.assertEqual(self.ext(key, "post", "/api/ext/meals", **body).status_code, 200)
+        self.assertEqual(self.ext(key, "post", "/api/ext/meals", **{**body, "day": in_days(6), "title": "Chicken burger (bigger)"}).status_code, 200)
+        meals = self.get(self.kid, "/api/meals?from=" + in_days(0) + "&to=" + in_days(14)).get_json()["meals"]
+        self.assertEqual([(m["title"], m["day"], m["via"], m["ext"]) for m in meals], [("Chicken burger (bigger)", in_days(6), "platter", "platter:abc")], "the same id updates, it does not pile up")
+        self.assertEqual(self.ext(key, "delete", "/api/ext/meals/platter:abc").status_code, 200)
+        self.assertEqual(self.get(self.kid, "/api/meals?from=" + in_days(0) + "&to=" + in_days(14)).get_json()["meals"], [])
+        self.assertEqual(self.ext(key, "post", "/api/ext/meals", day=in_days(1), title="No id").status_code, 400)
+
+    def test_a_wrong_or_revoked_key_gets_nothing_and_a_key_cannot_reach_anything_else(self):
+        made = self.link().get_json()
+        for bad in ("hbk_wrong", "", "notakey", self.mum["Authorization"].split()[1]):
+            self.assertEqual(self.ext(bad, "get", "/api/ext/ping").status_code, 401, bad)
+        self.assertEqual(self.c.get("/api/family", headers={"Authorization": "Bearer " + made["key"]}).status_code, 401, "it is not a person's token")
+        self.assertEqual(self.c.delete(f"/api/integrations/{made['id']}", headers=self.kid).status_code, 403)
+        self.assertEqual(self.c.delete(f"/api/integrations/{made['id']}", headers=self.mum).status_code, 200)
+        self.assertEqual(self.ext(made["key"], "get", "/api/ext/ping").status_code, 401, "revoked")
+
+    def test_a_key_only_touches_its_own_family(self):
+        key = self.link().get_json()["key"]
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.ext(key, "post", "/api/ext/meals", ext_id="platter:x", day=in_days(2), title="Ours")
+        self.assertEqual(self.get(zed, "/api/meals").get_json()["meals"], [])
+        self.assertEqual(len(self.get(self.mum, "/api/meals").get_json()["meals"]), 1)
+
+    def test_only_the_linked_apps_own_address_may_call_it_from_a_browser(self):
+        key = self.link().get_json()["key"]
+        pre = self.c.options("/api/ext/meals", headers={"Origin": self.ORIGIN, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization,content-type"})
+        self.assertIn(pre.status_code, (200, 204), "a browser accepts either for a preflight")
+        self.assertEqual(pre.headers["Access-Control-Allow-Origin"], self.ORIGIN)
+        self.assertIn("Authorization", pre.headers["Access-Control-Allow-Headers"])
+        ok = self.ext(key, "post", "/api/ext/meals", origin=self.ORIGIN, ext_id="platter:y", day=in_days(2), title="From the browser")
+        self.assertEqual((ok.status_code, ok.headers["Access-Control-Allow-Origin"]), (200, self.ORIGIN))
+        evil = self.ext(key, "get", "/api/ext/ping", origin="https://evil.example.com")
+        self.assertNotIn("Access-Control-Allow-Origin", evil.headers, "another website cannot read the answer")
+        self.assertNotIn("Access-Control-Allow-Origin", self.c.get("/api/meals", headers={**self.mum, "Origin": self.ORIGIN}).headers, "and the rest of the API stays closed to browsers from elsewhere")
+
+
+class ScoutLink(Base):
+    """Scout is linked with a key that may put places on the calendar, save them and share them, and nothing to do with meals."""
+    SCOUT = "http://127.0.0.1:5055"
+    link, ext = LinkedApps.link, LinkedApps.ext
+
+    def scout(self):
+        return self.link("Scout").get_json()
+
+    def start(self, days=3):
+        return time.time() + days * 86400
+
+    def test_the_key_carries_what_it_may_do_and_a_scout_key_cannot_touch_the_meal_plan(self):
+        made = self.scout()
+        self.assertEqual(made["scopes"], ["plans", "places", "share"])
+        self.assertEqual(self.link("Platter").get_json()["scopes"], ["meals"], "an app that is not Scout keeps to meals")
+        self.assertEqual(self.ext(made["key"], "get", "/api/ext/ping").get_json()["scopes"], ["plans", "places", "share"])
+        self.assertEqual(self.ext(made["key"], "post", "/api/ext/meals", ext_id="x", day=in_days(2), title="Nope").status_code, 403)
+        self.assertEqual(self.ext(made["key"], "delete", "/api/ext/meals/x").status_code, 403)
+        listed = self.get(self.mum, "/api/integrations").get_json()["integrations"]
+        self.assertEqual(sorted(i["scopes"] for i in listed), [["meals"], ["plans", "places", "share"]])
+
+    def test_a_platter_key_cannot_plan_save_or_share(self):
+        key = self.link("Platter").get_json()["key"]
+        for method, path, body in (("post", "/api/ext/plans", dict(ext_id="s:1", title="Cafe", start=self.start())), ("post", "/api/ext/places", dict(name="Cafe", lat=26.4, lng=50.1)),
+                                   ("post", "/api/ext/share", dict(name="Cafe")), ("delete", "/api/ext/plans/s:1", {})):
+            self.assertEqual(self.ext(key, method, path, **body).status_code, 403, path)
+        self.assertEqual(self.ext("hbk_wrong", "post", "/api/ext/plans", ext_id="s:1", title="Cafe", start=self.start()).status_code, 401)
+
+    def test_a_place_goes_on_the_calendar_keeps_its_spot_and_updates_instead_of_piling_up(self):
+        key = self.scout()["key"]
+        body = dict(ext_id="scout:abc", title="Dinner at Zaatar", emoji="\U0001F37D\ufe0f", start=self.start(), note="King Road, Khobar", lat=26.3, lng=50.2)
+        first = self.ext(key, "post", "/api/ext/plans", **body)
+        self.assertEqual(first.status_code, 200)
+        shown = self.get(self.kid, "/api/plans").get_json()["plans"]
+        self.assertEqual([(p["title"], p["note"], p["lat"], p["lng"], p["via"]) for p in shown], [("Dinner at Zaatar", "King Road, Khobar", 26.3, 50.2, "scout")])
+        self.assertTrue(any(e["type"] == "plan" and e["payload"].get("new") and e["payload"]["name"] == "Scout" for e in self.events(self.kid)), "the family is told")
+        again = self.ext(key, "post", "/api/ext/plans", **{**body, "title": "Lunch at Zaatar", "start": self.start(5)})
+        self.assertEqual(again.get_json()["id"], first.get_json()["id"])
+        shown = self.get(self.kid, "/api/plans").get_json()["plans"]
+        self.assertEqual([p["title"] for p in shown], ["Lunch at Zaatar"], "the same place updates, it does not pile up")
+        self.assertEqual(self.post(self.kid, f"/api/plans/{shown[0]['id']}/rsvp", answer="in").status_code, 200, "and the family can say they are in")
+        self.assertEqual(self.ext(key, "delete", "/api/ext/plans/scout:abc").status_code, 200)
+        self.assertEqual(self.get(self.kid, "/api/plans").get_json()["plans"], [])
+
+    def test_a_plan_with_a_spot_shows_it_in_the_calendar_file(self):
+        key = self.scout()["key"]
+        self.ext(key, "post", "/api/ext/plans", ext_id="scout:ics", title="Picnic", start=self.start(), note="Corniche", lat=26.35, lng=50.21)
+        text = self.c.get("/api/calendar.ics", headers=self.mum).get_data(as_text=True)
+        self.assertIn("GEO:26.350000;50.210000", text)
+        self.assertIn("LOCATION:Corniche", text)
+
+    def test_a_plan_from_a_place_is_checked(self):
+        key = self.scout()["key"]
+        ok = dict(ext_id="scout:v", title="Cafe", start=self.start())
+        self.assertEqual(self.ext(key, "post", "/api/ext/plans", **ok).status_code, 200, "the spot is optional")
+        for bad in ({**ok, "ext_id": ""}, {**ok, "title": "  "}, {**ok, "start": "soon"}, {**ok, "start": time.time() - 10 * 86400}, {**ok, "start": time.time() + 5 * 365 * 86400}):
+            self.assertEqual(self.ext(key, "post", "/api/ext/plans", **bad).status_code, 400, bad)
+        odd = self.ext(key, "post", "/api/ext/plans", **{**ok, "ext_id": "scout:w", "lat": 999, "lng": 5}).get_json()["id"]
+        row = [p for p in self.get(self.kid, "/api/plans").get_json()["plans"] if p["id"] == odd][0]
+        self.assertEqual((row["lat"], row["lng"]), (None, None), "a spot that is not on Earth is dropped, the plan stays")
+
+    def test_a_saved_place_tells_the_family_once_and_is_not_added_twice(self):
+        key = self.scout()["key"]
+        body = dict(name="Granny's house", emoji="\U0001F3E1", lat=26.4, lng=50.1)
+        first = self.ext(key, "post", "/api/ext/places", **body)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual([p["name"] for p in self.get(self.kid, "/api/family").get_json()["places"]], ["Granny's house"])
+        self.assertTrue(any("Scout saved the place Granny's house" in m["body"] for m in self.get(self.kid, "/api/messages").get_json()["messages"]))
+        again = self.ext(key, "post", "/api/ext/places", **{**body, "name": "granny's house", "lat": 26.4003})
+        self.assertEqual((again.get_json()["id"], again.get_json().get("existed")), (first.get_json()["id"], True))
+        self.assertEqual(len(self.get(self.kid, "/api/family").get_json()["places"]), 1)
+        self.assertEqual(self.ext(key, "post", "/api/ext/places", name="No spot").status_code, 400)
+        self.assertEqual(self.ext(key, "post", "/api/ext/places", lat=26.4, lng=50.1).status_code, 400)
+
+    def test_a_place_can_be_shared_to_the_family_chat_as_a_note_from_scout(self):
+        key = self.scout()["key"]
+        sent = self.ext(key, "post", "/api/ext/share", name="Pizza Hut", address="Prince Turki Road", lat=26.4, lng=50.1)
+        self.assertEqual(sent.status_code, 200)
+        msgs = [m for m in self.get(self.kid, "/api/messages").get_json()["messages"] if "Pizza Hut" in m["body"]]
+        self.assertEqual([(m["kind"], m["body"], m["lat"], m["from"]) for m in msgs], [("system", "\U0001F9ED Scout: Pizza Hut, Prince Turki Road", 26.4, 0)])
+        got = [e["payload"] for e in self.events(self.mum) if e["type"] == "message" and "Pizza Hut" in e["payload"]["body"]]
+        self.assertEqual((len(got), got[0]["name"]), (1, "Scout"))
+        self.assertEqual(self.ext(key, "post", "/api/ext/share").status_code, 400)
+
+    def test_a_scout_key_only_touches_its_own_family(self):
+        key = self.scout()["key"]
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.ext(key, "post", "/api/ext/plans", ext_id="scout:o", title="Ours", start=self.start())
+        self.ext(key, "post", "/api/ext/places", name="Ours", lat=1.0, lng=1.0)
+        self.assertEqual(self.get(zed, "/api/plans").get_json()["plans"], [])
+        self.assertEqual(self.get(zed, "/api/family").get_json()["places"], [])
+
+    def test_scout_may_call_from_a_browser_but_another_website_may_not(self):
+        key = self.scout()["key"]
+        ok = self.ext(key, "post", "/api/ext/plans", origin=self.SCOUT, ext_id="scout:c", title="Cafe", start=self.start())
+        self.assertEqual((ok.status_code, ok.headers["Access-Control-Allow-Origin"]), (200, self.SCOUT))
+        evil = self.ext(key, "get", "/api/ext/ping", origin="https://evil.example.com")
+        self.assertNotIn("Access-Control-Allow-Origin", evil.headers)
+
+    def test_old_keys_made_before_scopes_existed_still_mean_meals_only(self):
+        made = self.link("Platter").get_json()
+        db.run(db.update(db.integrations).where(db.integrations.c.id == made["id"]).values(scopes=None))
+        self.assertEqual(self.ext(made["key"], "get", "/api/ext/ping").get_json()["scopes"], ["meals"])
+        self.assertEqual(self.ext(made["key"], "post", "/api/ext/meals", ext_id="p:1", day=in_days(2), title="Still works").status_code, 200)
+        self.assertEqual(self.ext(made["key"], "post", "/api/ext/plans", ext_id="p:1", title="No", start=self.start()).status_code, 403)
+
+
+class GifMessages(Base):
+    def send(self, body, who=None):
+        return self.post(who or self.kid, "/api/messages", kind="gif", body=body)
+
+    def test_a_built_in_sticker_can_be_sent(self):
+        name = server.sticker_names()[0]
+        r = self.send(f"/static/stickers/{name}.gif")
+        self.assertEqual((r.status_code, r.get_json()["message"]["kind"], r.get_json()["message"]["body"]), (200, "gif", f"/static/stickers/{name}.gif"))
+        got = [e["payload"] for e in self.events(self.mum) if e["type"] == "message" and e["payload"]["kind"] == "gif"]
+        self.assertEqual((len(got), got[0]["name"]), (1, "Sam"))
+
+    def test_links_from_known_hosts_are_accepted_and_a_giphy_page_becomes_its_picture(self):
+        for good in ("https://media.giphy.com/media/abc123XYZ/giphy.gif", "https://media.tenor.com/xyz/cat.gif", "https://i.imgur.com/aBcDe.gif", "https://c.tenor.com/q/x.webp?width=200"):
+            self.assertEqual(self.send(good).status_code, 200, good)
+        page = self.send("https://giphy.com/gifs/cat-dancing-3o7abKhOpu0NwenH3O").get_json()["message"]["body"]
+        self.assertEqual(page, "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif")
+
+    def test_everything_else_is_refused(self):
+        for bad in ("http://media.giphy.com/media/a/giphy.gif", "https://evil.example.com/x.gif", "https://media.giphy.com.evil.example.com/x.gif", "https://tenor.com/view/cat-dance-gif-123456",
+                    "https://media.giphy.com/media/a/page.html", "/static/stickers/nope.gif", "/static/stickers/../../app.py", "javascript:alert(1)", "", "x" * 500, "https://giphy.com/gifs/"):
+            self.assertEqual(self.send(bad).status_code, 400, bad)
+
+    def test_the_sticker_list_comes_from_the_folder(self):
+        names = [s["name"] for s in self.c.get("/api/stickers").get_json()["stickers"]]
+        self.assertEqual(names, server.sticker_names())
+        self.assertGreaterEqual(len(names), 12)
+        for sticker in self.c.get("/api/stickers").get_json()["stickers"][:3]:
+            self.assertEqual(self.c.get(sticker["url"]).status_code, 200)
+
+    def test_a_gif_is_an_alert_on_a_closed_app_too(self):
+        self.assertEqual(server.web_note("message", {"kind": "gif", "name": "Sam", "from": 1})["body"], "\U0001F39E\ufe0f sent a GIF")
+
+
+class MealExtras(Base):
+    def meal(self, **kw):
+        return self.post(self.mum, "/api/meals", **{"day": in_days(2), "title": "Chicken burger", "ingredients": ["2 chicken breasts", "4 buns", "Hot sauce"], **kw}).get_json()["id"]
+
+    def test_who_is_cooking(self):
+        mid = self.meal()
+        self.assertEqual(self.post(self.kid, f"/api/meals/{mid}/cook", cook=self.kid_id).get_json()["cook"], self.kid_id)
+        self.assertEqual(self.get(self.mum, "/api/meals").get_json()["meals"][0]["cook"], self.kid_id)
+        self.assertEqual(self.post(self.kid, f"/api/meals/{mid}/cook", cook=self.mum_id).status_code, 403, "a child cannot name someone else")
+        self.assertEqual(self.post(self.mum, f"/api/meals/{mid}/cook", cook=self.mum_id).status_code, 200, "a parent can name anyone")
+        self.assertEqual(self.post(self.kid, f"/api/meals/{mid}/cook", cook=0).status_code, 403, "and nobody can take someone else's name off")
+        self.assertEqual(self.post(self.mum, f"/api/meals/{mid}/cook", cook=0).get_json()["cook"], 0)
+        self.assertEqual(self.post(self.mum, f"/api/meals/{mid}/cook", cook=99999).status_code, 404)
+
+    def test_ingredients_go_on_the_family_list_once(self):
+        mid = self.meal()
+        self.post(self.kid, "/api/list", text="hot sauce")
+        self.assertEqual(self.post(self.kid, f"/api/meals/{mid}/to-list").get_json()["added"], 2, "what is already waiting on the list is not doubled")
+        self.assertEqual(sorted(i["text"] for i in self.get(self.mum, "/api/list").get_json()["items"]), ["2 chicken breasts", "4 buns", "hot sauce"])
+        self.assertEqual(self.post(self.kid, f"/api/meals/{mid}/to-list").get_json()["added"], 0)
+        self.assertEqual(self.post(self.kid, "/api/meals/99999/to-list").status_code, 404)
+
+    def test_other_families_cannot_touch_a_meal(self):
+        mid = self.meal()
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertEqual(self.post(zed, f"/api/meals/{mid}/cook", cook=0).status_code, 404)
+        self.assertEqual(self.post(zed, f"/api/meals/{mid}/to-list").status_code, 404)
+
+    def test_the_activity_feed_shows_what_happened_newest_first(self):
+        self.post(self.mum, "/api/chores", title="Bins", points=5)
+        self.post(self.kid, "/api/messages", kind="late", body="Running about 10 minutes late")
+        self.post(self.kid, "/api/messages", body="a private chat does not belong in the feed", to=self.mum_id)
+        items = self.get(self.mum, "/api/feed").get_json()["items"]
+        self.assertEqual(items[0]["kind"], "late")
+        self.assertEqual((items[0]["name"], items[0]["emoji"]), ("Sam", "\U0001F9D2"))
+        self.assertTrue(any("added a job: Bins" in i["body"] for i in items))
+        self.assertFalse(any("private chat" in i["body"] for i in items))
+        self.assertEqual(self.c.get("/api/feed").status_code, 401)
+        zed = {"Authorization": "Bearer " + self.c.post("/api/family", json={"family": "Elsewhere", "name": "Zed"}).get_json()["token"]}
+        self.assertFalse(any("Bins" in i["body"] for i in self.get(zed, "/api/feed").get_json()["items"]))
+
+
+class FriendGroups(Base):
+    def setUp(self):
+        super().setUp()
+        d = self.c.post("/api/family", json={"family": "The Parks", "name": "Pat"}).get_json()
+        self.pat, self.pat_id = {"Authorization": "Bearer " + d["token"]}, d["me"]["id"]
+        code = self.post(self.pat, "/api/invite", role="child").get_json()["code"]
+        k = self.c.post("/api/join", json={"code": code, "name": "Zoe", "emoji": "\U0001F467"}).get_json()
+        self.zoe, self.zoe_id = {"Authorization": "Bearer " + k["token"]}, k["me"]["id"]
+
+    def groups(self, who):
+        return self.get(who, "/api/groups").get_json()
+
+    def make(self, name="Football mates"):
+        """Sam makes a group, Mum says yes, Zoe joins with the code, Pat says yes: both children are in, both families' parents can read."""
+        made = self.post(self.kid, "/api/groups", name=name).get_json()
+        self.post(self.mum, f"/api/groups/{made['id']}/approve", member=self.kid_id, ok=True)
+        self.post(self.zoe, "/api/groups/join", code=made["code"])
+        self.post(self.pat, f"/api/groups/{made['id']}/approve", member=self.zoe_id, ok=True)
+        return made["id"], made["code"]
+
+    def read(self, who, gid):
+        return self.get(who, f"/api/groups/{gid}/messages")
+
+    def say(self, who, gid, body, **kw):
+        return self.post(who, f"/api/groups/{gid}/messages", body=body, **kw)
+
+    # ---------------------------------------------------------------- joining needs a parent's yes
+    def test_a_child_makes_a_group_and_waits_for_a_parent(self):
+        made = self.post(self.kid, "/api/groups", name="Football mates").get_json()
+        self.assertEqual(made["status"], "pending")
+        mine = self.groups(self.kid)["groups"][0]
+        self.assertEqual((mine["status"], mine["code"]), ("pending", None), "no code to hand out until a parent has said yes")
+        ask = self.groups(self.mum)["requests"]
+        self.assertEqual([(a["group_name"], a["name"]) for a in ask], [("Football mates", "Sam")])
+        self.assertEqual(self.read(self.kid, made["id"]).status_code, 403)
+        self.assertEqual(self.say(self.kid, made["id"], "hello").status_code, 403)
+        self.assertTrue(any(e["type"] == "group_request" for e in self.events(self.mum)))
+        self.assertEqual(self.post(self.mum, f"/api/groups/{made['id']}/approve", member=self.kid_id, ok=True).status_code, 200)
+        self.assertEqual(self.groups(self.kid)["groups"][0]["status"], "active")
+        self.assertEqual(len(self.groups(self.kid)["groups"][0]["code"]), 8)
+        self.assertEqual(self.say(self.kid, made["id"], "hello").status_code, 200)
+
+    def test_a_no_removes_the_request(self):
+        made = self.post(self.kid, "/api/groups", name="Chess club").get_json()
+        self.post(self.mum, f"/api/groups/{made['id']}/approve", member=self.kid_id, ok=False)
+        self.assertEqual(self.groups(self.kid)["groups"], [])
+        self.assertTrue(any(e["type"] == "group" and e["payload"].get("declined") for e in self.events(self.kid)))
+
+    def test_a_friend_from_another_family_joins_with_the_code_and_her_parent_decides(self):
+        made = self.post(self.kid, "/api/groups", name="Football mates").get_json()
+        self.post(self.mum, f"/api/groups/{made['id']}/approve", member=self.kid_id, ok=True)
+        joined = self.post(self.zoe, "/api/groups/join", code=" " + made["code"].lower().replace("", " ").strip() + " ").get_json()
+        self.assertEqual((joined["status"], joined["name"]), ("pending", "Football mates"), "case and spaces in the code do not matter")
+        self.assertEqual([a["name"] for a in self.groups(self.pat)["requests"]], ["Zoe"])
+        self.assertEqual(self.groups(self.mum)["requests"], [], "only a child's own parents are asked")
+        self.assertEqual(self.post(self.mum, f"/api/groups/{made['id']}/approve", member=self.zoe_id, ok=True).status_code, 404, "another family's parent cannot approve her")
+        self.assertEqual(self.post(self.kid, f"/api/groups/{made['id']}/approve", member=self.zoe_id, ok=True).status_code, 403, "and a child cannot either")
+        self.post(self.pat, f"/api/groups/{made['id']}/approve", member=self.zoe_id, ok=True)
+        self.assertEqual(sorted(m["name"] for m in self.groups(self.zoe)["groups"][0]["members"]), ["Sam", "Zoe"])
+
+    def test_wrong_codes_and_guessing(self):
+        self.assertEqual(self.post(self.zoe, "/api/groups/join", code="NOPE1234").status_code, 404)
+        self.assertEqual(self.post(self.zoe, "/api/groups/join", code="").status_code, 404)
+        codes = [self.post(self.zoe, "/api/groups/join", code=f"AAAA{i:04d}").status_code for i in range(12)]
+        self.assertEqual(codes[-1], 429, "guessing codes is slowed right down")
+
+    # ---------------------------------------------------------------- parents can read, only members can write
+    def test_every_childs_parents_can_read_the_group_but_cannot_write_in_it(self):
+        gid, _ = self.make()
+        self.say(self.kid, gid, "Training at 4?")
+        for parent in (self.mum, self.pat):
+            r = self.read(parent, gid).get_json()
+            self.assertEqual((r["role"], r["messages"][-1]["body"]), ("overseer", "Training at 4?"))
+            self.assertEqual(self.say(parent, gid, "Hi from a parent").status_code, 403)
+        self.assertEqual(self.read(self.zoe, gid).get_json()["role"], "member")
+        self.assertEqual([g["overseeing"] for g in self.groups(self.mum)["groups"]], [["Sam"]])
+        self.assertEqual([g["overseeing"] for g in self.groups(self.pat)["groups"]], [["Zoe"]])
+
+    def test_a_stranger_or_the_parent_of_a_child_who_is_not_in_it_sees_nothing(self):
+        gid, _ = self.make()
+        d = self.c.post("/api/family", json={"family": "Strangers", "name": "Sue"}).get_json()
+        sue = {"Authorization": "Bearer " + d["token"]}
+        self.assertEqual(self.read(sue, gid).status_code, 404)
+        self.assertEqual(self.say(sue, gid, "hi").status_code, 404)
+        self.assertEqual(self.groups(sue)["groups"], [])
+
+    def test_family_chat_and_group_chat_are_separate(self):
+        gid, _ = self.make()
+        self.say(self.kid, gid, "only for the group")
+        self.assertFalse(any("only for the group" in m["body"] for m in self.get(self.mum, "/api/messages").get_json()["messages"]))
+        self.post(self.kid, "/api/messages", body="only for the family")
+        self.assertNotIn("only for the family", [m["body"] for m in self.read(self.zoe, gid).get_json()["messages"]])
+
+    # ---------------------------------------------------------------- the filter
+    def test_rude_words_are_starred_out_and_the_right_people_see_the_right_things(self):
+        gid, _ = self.make()
+        r = self.say(self.kid, gid, "you are so dumb").get_json()
+        self.assertEqual((r["body"], r["flagged"]), ("you are so d***", True))
+        self.assertIn("Your parents are told", r["note"])
+        zoe_sees = self.read(self.zoe, gid).get_json()["messages"][-1]
+        self.assertEqual((zoe_sees["body"], zoe_sees["flagged"], zoe_sees["cats"]), ("you are so d***", True, ["insult"]))
+        self.assertNotIn("original", zoe_sees)
+        self.assertNotIn("flags", zoe_sees)
+        mum_sees = self.read(self.mum, gid).get_json()["messages"][-1]
+        self.assertEqual((mum_sees["original"], mum_sees["flags"]), ("you are so dumb", [{"word": "dumb", "cat": "insult"}]), "the sender's own parent sees what was really typed")
+        pat_sees = self.read(self.pat, gid).get_json()["messages"][-1]
+        self.assertEqual((pat_sees["flagged"], "original" in pat_sees, "flags" in pat_sees), (True, False, False), "another family's parent sees that it was flagged, not the words")
+
+    def test_both_families_parents_are_told_about_a_flag_and_clean_messages_are_quiet(self):
+        gid, _ = self.make()
+        self.say(self.kid, gid, "may your pillow be hot on both sides")
+        self.assertFalse(any(e["type"] == "group_flag" for e in self.events(self.mum) + self.events(self.pat)), "mild cheek is fine and nobody is bothered")
+        self.assertFalse(self.read(self.zoe, gid).get_json()["messages"][-1]["flagged"])
+        self.say(self.kid, gid, "stupid ref")
+        for parent in (self.mum, self.pat):
+            flags = [e["payload"] for e in self.events(parent) if e["type"] == "group_flag"]
+            self.assertEqual((len(flags), flags[0]["name"], flags[0]["group"], flags[0]["cat"]), (1, "Sam", "Football mates", "insult"))
+        zoe_events = [e["payload"] for e in self.events(self.zoe) if e["type"] == "gmessage"]
+        self.assertEqual([m["body"] for m in zoe_events], ["may your pillow be hot on both sides", "s***** ref"], "friends get the censored text, never the original")
+        self.assertFalse(any(e["type"] == "gmessage" for e in self.events(self.mum)), "parents are not buzzed about every chat")
+
+    def test_a_slur_is_a_break_at_once_and_three_rude_messages_are_a_break_too(self):
+        gid, _ = self.make()
+        r = self.say(self.kid, gid, "you nga").get_json()
+        self.assertIn("hurtful", r["note"])
+        self.assertIn("10 minutes", r["note"])
+        blocked = self.say(self.kid, gid, "sorry")
+        self.assertEqual(blocked.status_code, 429)
+        self.assertIn("short break", blocked.get_json()["error"])
+        self.assertEqual(self.read(self.kid, gid).status_code, 200, "a break is only from writing")
+        self.assertEqual(self.say(self.zoe, gid, "I never said anything wrong").status_code, 200, "and only for that person")
+        for n in range(3):
+            last = self.say(self.zoe, gid, f"idiot {n}")
+        self.assertIn("15 minutes", last.get_json()["note"])
+        self.assertEqual(self.say(self.zoe, gid, "ok").status_code, 429)
+
+    def test_gifs_go_through_the_same_checks_as_everywhere_else(self):
+        gid, _ = self.make()
+        sticker = f"/static/stickers/{server.sticker_names()[0]}.gif"
+        self.assertEqual(self.say(self.kid, gid, sticker, kind="gif").status_code, 200)
+        self.assertEqual(self.say(self.kid, gid, "https://evil.example.com/x.gif", kind="gif").status_code, 400)
+        last = self.read(self.zoe, gid).get_json()["messages"][-1]
+        self.assertEqual((last["kind"], last["body"], last["flagged"]), ("gif", sticker, False))
+
+    def test_empty_messages_and_group_names(self):
+        gid, _ = self.make()
+        self.assertEqual(self.say(self.kid, gid, "   ").status_code, 400)
+        self.assertEqual(self.post(self.kid, "/api/groups", name="Dumb club").status_code, 400, "a group cannot be named something rude")
+        self.assertEqual(self.post(self.kid, "/api/groups", name="  ").status_code, 400)
+
+    # ---------------------------------------------------------------- taking someone out
+    def test_a_parent_can_take_their_own_child_out_and_a_child_can_leave(self):
+        gid, _ = self.make()
+        self.assertEqual(self.c.delete(f"/api/groups/{gid}/members/{self.zoe_id}", headers=self.mum).status_code, 404, "not another family's child")
+        self.assertEqual(self.c.delete(f"/api/groups/{gid}/members/{self.kid_id}", headers=self.kid).status_code, 403)
+        self.assertEqual(self.c.delete(f"/api/groups/{gid}/members/{self.kid_id}", headers=self.mum).status_code, 200)
+        self.assertEqual(self.read(self.kid, gid).status_code, 404)
+        self.assertEqual(self.read(self.mum, gid).status_code, 404, "and Mum no longer oversees a group her child is not in")
+        self.assertEqual(self.post(self.zoe, f"/api/groups/{gid}/leave").status_code, 200)
+        self.assertEqual(self.read(self.zoe, gid).status_code, 404)
+        self.assertEqual(db.one(db.select(db.friend_groups).where(db.friend_groups.c.id == gid)), None, "the last one out turns off the light")
+
+    def test_a_parent_can_be_a_member_straight_away_and_there_is_a_limit_on_groups(self):
+        made = self.post(self.mum, "/api/groups", name="Book club").get_json()
+        self.assertEqual(made["status"], "active")
+        self.assertEqual(self.say(self.mum, made["id"], "Chapter 3 next week").status_code, 200)
+        for i in range(7):
+            self.assertEqual(self.post(self.mum, "/api/groups", name=f"Group {i}").status_code, 200)
+        self.assertEqual(self.post(self.mum, "/api/groups", name="One too many").status_code, 400)
 
 
 if __name__ == "__main__":

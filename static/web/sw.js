@@ -1,8 +1,8 @@
 /* Homebase offline worker. It keeps the app itself, the map library and every map tile you have looked at,
    so the laptop app opens and shows the last thing it saw even with no connection. Live data (/api) is never cached here:
    the page keeps its own snapshot and message queue. */
-const VERSION = "hb-web-v15";
-const SHELL = ["/app", "/static/web/web.css", "/static/web/web.js", "/static/web/calls.js", "/static/web/icon.svg", "/static/web/icon-192.png", "/manifest.webmanifest",
+const VERSION = "hb-web-v17";
+const SHELL = ["/app", "/static/web/web.css", "/static/web/web.js", "/static/web/web2.js", "/static/web/calls.js", "/static/web/icon.svg", "/static/web/icon-192.png", "/manifest.webmanifest",
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css", "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"];
 const TILES = "hb-tiles-v1", TILE_LIMIT = 900;
 

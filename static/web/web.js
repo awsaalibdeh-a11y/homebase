@@ -128,7 +128,7 @@ async function startApp(fresh) {
   initMap(); initChrome(); paintOffline();
   if (!loadSnap() && !fresh) { /* first run: nothing to show yet */ }
   try { await refreshFamily(); } catch (e) { if (!e.offline) return; }
-  loadThread(0); refreshItems(); refreshChores(); refreshPlans(); refreshPolls(); refreshRewards(); refreshBoard(); flushOutbox();
+  loadThread(0); refreshItems(); refreshChores(); refreshPlans(); refreshPolls(); refreshRewards(); refreshBoard(); flushOutbox(); hb2Boot();
   fetch("/api/config").then(r => r.json()).then(c => { S.latest = c.version_code || 0; renderSide(); }).catch(() => { /* offline: no hint */ });
   subscribePush();
   setTimeout(() => { if (!localStorage.getItem("hb_setup") && !setupDone() && !document.querySelector(".tr-scrim") && !$("#over").classList.contains("on")) setupDialog(); }, 2500);   // a new device offers to set everything up, once
@@ -177,10 +177,10 @@ function youCard() {
     ${on || paused ? `<div class="quick">Pause for <button class="btn sm" data-pause="15">15 min</button><button class="btn sm" data-pause="60">1 hour</button>${paused ? `<button class="btn sm" data-pause="0">Resume</button>` : ""}</div>` : ""}</section>`;
 }
 /* ---------- the left panel: five clearly labelled tabs instead of one long scroll ---------- */
-const TABS = [["family", "👨‍👩‍👧", "Family"], ["me", "🙂", "Me"]];
-const LEGACY_TAB = { people: "family", controls: "family", jobs: "family", places: "family" };
-function curTab() { let t = S.tab || localStorage.getItem("hb_tab") || "family"; t = LEGACY_TAB[t] || t; return TABS.some(x => x[0] === t) ? t : "family"; }
-function setTab(t) { S.tab = t; try { localStorage.setItem("hb_tab", t); } catch (e) { /* private mode */ } renderSide(); const bd = $("#side .tabbody"); if (bd) bd.scrollTop = 0; }
+const TABS = [["home", "🏠", "Home"], ["map", "🗺️", "Map"], ["plan", "📅", "Plan"], ["chat", "💬", "Chat"], ["more", "☰", "More"]];
+const LEGACY_TAB = { family: "home", me: "more", people: "map", controls: "more", jobs: "more", places: "map" };
+function curTab() { let t = S.tab || localStorage.getItem("hb_tab") || "home"; t = LEGACY_TAB[t] || t; return TABS.some(x => x[0] === t) ? t : "home"; }
+function setTab(t) { S.tab = t; try { localStorage.setItem("hb_tab", t); } catch (e) { /* private mode */ } renderSide(); const bd = $("#side .tabbody"); if (bd) bd.scrollTop = 0; if (t === "more" && typeof refreshFeed === "function") refreshFeed(); }
 
 /* the small collapsible rows under the people (Jobs, Places, Rules): closed by default, remembered */
 S.acc = (() => { try { return JSON.parse(localStorage.getItem("hb_acc") || "{}"); } catch (e) { return {}; } })();
@@ -192,13 +192,14 @@ function accordion(id, icon, title, sub, body, alert) {
 
 function jobsAlert() { return S.chores.filter(c => isParent() ? c.status === "done" : (c.status === "open" && (!c.to || c.to === S.me))).length; }
 function tabBadge(t) {
-  if (t === "family") { const kids = S.members.filter(m => m.role === "child"); const on = isParent() && kids.some(m => m.lock || (m.blocks || []).length); const n = jobsAlert() + pollAlert() + rewardsAlert(); return n ? `<i class="tb">${n}</i>` : on ? '<i class="tb dot"></i>' : ""; }
-  if (t === "me") { const m = me(); return m && m.role === "child" && (m.lock || (m.blocks || []).length) ? '<i class="tb dot"></i>' : ""; }
-  return "";
+  const n = t === "home" ? (isParent() ? S.requests.length : 0) + pollAlert() : t === "plan" ? pollAlert() : t === "chat" ? Object.values(S.unread).reduce((a, b) => a + b, 0) + (isParent() ? S.requests.length : 0) : t === "more" ? jobsAlert() + rewardsAlert() : 0;
+  if (n) return `<i class="tb">${n}</i>`;
+  const kids = S.members.filter(m => m.role === "child"), locked = isParent() ? kids.some(m => m.lock || (m.blocks || []).length) : (me() && me().role === "child" && (me().lock || (me().blocks || []).length));
+  return t === "home" && locked ? '<i class="tb dot"></i>' : "";
 }
 function tabsBar() {
   const t = curTab();
-  return `<nav class="stabs two" role="tablist" aria-label="Sections">${TABS.map(([k, e, n]) => `<button role="tab" class="${t === k ? "on" : ""}" aria-selected="${t === k}" data-tab="${k}"><span class="ti">${e}</span><span class="tn">${n}</span>${tabBadge(k)}</button>`).join("")}</nav>`;
+  return `<nav class="stabs" role="tablist" aria-label="Sections">${TABS.map(([k, e, n]) => `<button role="tab" class="${t === k ? "on" : ""}" aria-selected="${t === k}" data-tab="${k}"><span class="ti">${e}</span><span class="tn">${n}</span>${tabBadge(k)}</button>`).join("")}</nav>`;
 }
 
 function tile(act, id, emoji, title, sub, off) {
@@ -438,14 +439,14 @@ function planHtml(p) {
   const going = p.in.map(nameOf).join(", "), mine = p.mine, canDel = p.by === S.me || isParent();
   return `<div class="plan ${p.start * 1000 < Date.now() ? "now" : ""}"><div class="pl-top"><span class="pl-e">${esc(p.emoji)}</span><div class="pl-m"><b>${esc(p.title)}</b><small>${whenTxt(p.start)}${p.note ? " · " + esc(p.note) : ""}</small></div>${canDel ? `<button class="link" data-act="delplan" data-id="${p.id}" title="Delete" aria-label="Delete this plan">✕</button>` : ""}</div>
     <div class="pl-who">${going ? "👍 " + esc(going) : "Nobody has said yes yet"}${p.out.length ? ` · can't: ${esc(p.out.map(nameOf).join(", "))}` : ""}</div>
-    <div class="pl-btns"><button class="btn sm ${mine === "in" ? "sel" : ""}" data-act="rsvp" data-id="${p.id}" data-a="${mine === "in" ? "" : "in"}">${mine === "in" ? "✓ I'm in" : "I'm in"}</button><button class="btn sm ${mine === "out" ? "sel" : ""}" data-act="rsvp" data-id="${p.id}" data-a="${mine === "out" ? "" : "out"}">${mine === "out" ? "✓ Can't" : "Can't"}</button></div></div>`;
+    <div class="pl-btns">${p.lat != null ? `<a class="btn sm" href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}" target="_blank" rel="noopener">📍 Directions</a>` : ""}<button class="btn sm ${mine === "in" ? "sel" : ""}" data-act="rsvp" data-id="${p.id}" data-a="${mine === "in" ? "" : "in"}">${mine === "in" ? "✓ I'm in" : "I'm in"}</button><button class="btn sm ${mine === "out" ? "sel" : ""}" data-act="rsvp" data-id="${p.id}" data-a="${mine === "out" ? "" : "out"}">${mine === "out" ? "✓ Can't" : "Can't"}</button></div></div>`;
 }
 function plansHtml() {
   const list = S.plans.slice(0, 5);
   return `<div class="sechead"><h3>📅 Coming up</h3><span class="secbtns"><button class="btn sm" data-act="calendar">🗓️ Month</button><button class="btn sm" data-act="addplan">＋ Plan</button></span></div>${list.map(planHtml).join("") || '<div class="empty">Nothing planned yet. Add a dinner, a match or a trip so everyone knows.</div>'}${S.plans.length > 5 ? `<p class="tabhelp">${S.plans.length - 5} more after these.</p>` : ""}`;
 }
 async function refreshPlans() { try { S.plans = (await api("/api/plans")).plans; renderSide(); } catch (e) { /* keep the last list */ } }
-async function rsvp(id, answer) { try { const d = await api(`/api/plans/${id}/rsvp`, "POST", { answer }); S.plans = S.plans.map(p => p.id === id ? d.plan : p); renderSide(); } catch (e) { toast(e.message); } }
+async function rsvp(id, answer) { try { const d = await api(`/api/plans/${id}/rsvp`, "POST", { answer }); S.plans = S.plans.map(p => p.id === id ? d.plan : p); renderSide(); if (typeof loadCal === "function") loadCal(); } catch (e) { toast(e.message); } }
 function planDialog(day) {
   const t = new Date(Date.now() + 3600e3), p2 = n => String(n).padStart(2, "0");
   const dflt = day || `${t.getFullYear()}-${p2(t.getMonth() + 1)}-${p2(t.getDate())}`, tm = day ? "18:00" : `${p2(t.getHours())}:00`;
@@ -587,7 +588,7 @@ function myControlsHtml() {
 
 function renderSide() {
   const t = curTab(), keep = $("#itemIn") && document.activeElement === $("#itemIn") ? $("#itemIn").value : "";
-  const body = t === "me" ? setupCardHtml() + youCard() + statusCardHtml() + pickupCardHtml() + birthdayCardHtml() + myControlsHtml() : familyHtml();
+  const body = sectionHtml(t);
   const scroll = $("#side .tabbody") ? $("#side .tabbody").scrollTop : 0;
   $("#side").innerHTML = tabsBar() + `<div class="tabbody">${body}</div>`;
   const bd = $("#side .tabbody"); if (bd) bd.scrollTop = scroll;
@@ -679,6 +680,7 @@ function bubble(m) {
   if (m.kind === "checkin") { cls = "loc"; body = "✅ " + esc(m.body || "I'm OK") + (m.lat != null ? " · 📍 tap to see where" : ""); }
   if (m.kind === "late") body = "⏰ " + esc(m.body);
   if (m.kind === "sos") { cls = "sos loc"; body = "🆘 <b>" + esc(m.body || "I need help") + "</b>" + (m.lat != null ? " · 📍 tap to see where" : ""); }
+  if (m.kind === "gif") { cls = "gifb"; body = `<img class="gif" src="${esc(m.body)}" alt="GIF" loading="lazy">`; }
   if (m.kind === "pickup") { cls = "loc"; body = "🚗 <b>" + esc(m.body || "Can someone pick me up?") + "</b>" + (m.lat != null ? " · 📍 tap to see where" : "") + (mine || m.pending ? "" : `<div class="pk">${[5, 10, 20, 30].map(n => `<button type="button" data-pk="${n}">On my way · ${n} min</button>`).join("")}</div>`); }
   const rx = Object.entries(m.reactions || {}).map(([e, ids]) => `<button type="button" data-rx="${e}" class="${ids.includes(S.me) ? "mine" : ""}" aria-label="${e} ${ids.length}">${e} ${ids.length}</button>`).join("");
   return `<div class="b ${mine ? "me" : ""} ${cls} ${m.pending ? "pending" : ""}" data-mid="${m.id}" ${m.lat != null ? `data-lat="${m.lat}" data-lng="${m.lng}"` : ""}>${S.thread === 0 && !mine ? `<div class="who">${esc(who)}</div>` : ""}${body}${rx ? `<div class="rx">${rx}</div>` : ""}<small>${m.pending ? "⏳ waiting to send" : clock(m.at)}</small>${m.pending || m.id < 0 ? "" : '<button type="button" class="rb" aria-label="React to this message">🙂</button>'}</div>`;
@@ -777,6 +779,7 @@ async function meDialog() {
     ${perms}
     <div class="msec">Quiet hours</div><div class="sub">Messages stay quiet and calls do not ring. An urgent "ring anyway" still works.</div>
     <div style="display:flex;gap:10px;align-items:center"><input class="field" type="time" id="qFrom" value="${hm(q.from)}"><span class="muted">to</span><input class="field" type="time" id="qTo" value="${hm(q.to)}"><button class="btn sm" id="qSave">Save</button><button class="btn sm" id="qOff">Off</button></div>
+    <div class="msec">Help</div><div class="seg"><button class="btn sm" id="mTour" type="button">▶ Show the tutorial</button></div>
     <div class="msec">Your data</div><div class="seg"><button class="btn sm" id="mHist">Delete my location history</button><a class="btn sm" href="/download">Android app</a><a class="btn sm" href="/iphone">iPhone / iPad</a>${window.__installPrompt ? '<button class="btn sm" id="mInstall">Install on this computer</button>' : ""}</div>
     <div class="foot" style="justify-content:space-between"><button class="btn bad" id="mLeave">Leave family</button><span><button class="btn" id="mOut">Sign out</button> <button class="btn solid" id="mDone">Done</button></span></div>`, root => {
     root.querySelectorAll("#segTheme [data-v]").forEach(b => b.onclick = () => { store("hb_theme", b.dataset.v); applyTheme(); root.querySelectorAll("#segTheme .btn").forEach(x => x.classList.toggle("sel", x === b)); });
@@ -789,6 +792,7 @@ async function meDialog() {
     const mins = v => { const [h, mm] = v.split(":").map(Number); return h * 60 + mm; };
     root.querySelector("#qSave").onclick = async () => { const a = root.querySelector("#qFrom").value, b = root.querySelector("#qTo").value; if (!a || !b) { toast("Pick both times."); return; } try { await api("/api/me", "PATCH", { quiet_from: mins(a), quiet_to: mins(b), tz_offset: new Date().getTimezoneOffset() }); toast("Quiet hours saved"); } catch (e) { toast(e.message); } };
     root.querySelector("#qOff").onclick = async () => { try { await api("/api/me", "PATCH", { quiet_from: -1, quiet_to: -1 }); toast("Quiet hours off"); root.querySelector("#qFrom").value = root.querySelector("#qTo").value = ""; } catch (e) { toast(e.message); } };
+    root.querySelector("#mTour").onclick = () => { closeModal(); if (window.Tour) window.Tour.open(); else toast("The tutorial did not load. Reload the page."); };
     root.querySelector("#mHist").onclick = async () => { if (confirm("Delete everything Homebase saved about where you have been?")) { await api("/api/history", "DELETE").then(() => toast("Deleted")).catch(e => toast(e.message)); } };
     root.querySelector("#mLeave").onclick = async () => { if (confirm("Leave the family? Everything you shared is deleted.")) { await api("/api/me", "DELETE").catch(e => toast(e.message)); signOut(); } };
     root.querySelector("#mOut").onclick = signOut; root.querySelector("#mDone").onclick = closeModal;
@@ -886,6 +890,7 @@ function handleEvent(ev) {
     case "place": toast(`${p.emoji} ${p.name} ${p.kind === "arrive" ? "arrived at" : "left"} ${p.place}`, 5000); break;
     case "ping": pingDialog(p); break;
     case "ping_result": if (p.status === "shared") { toast(`📍 ${p.name} shared their location`); refreshFamily().then(() => focusMember(p.member)); } else toast(`${p.name} said not now`); break;
+    case "meals": case "group": case "gmessage": case "group_flag": case "group_request": hb2Event(ev.type, p); break;
     case "call": case "call_update": case "ice": window.Calls && window.Calls.onEvent(ev.type, p); break;
   }
 }
@@ -947,7 +952,7 @@ function initChrome() {
     else if (act === "announce") announceDialog();
     else if (act === "clearnotice") { await api("/api/notice", "DELETE").catch(err => toast(err.message)); refreshFamily(); }
     else if (act === "addplan") planDialog();
-    else if (act === "calendar") openCalendar();
+    else if (act === "calendar") setTab("plan");
     else if (act === "updnudge") askUpdate(id);
     else if (act === "rsvp") rsvp(id, el.dataset.a);
     else if (act === "delplan") { if (confirm("Delete this plan?")) { await api("/api/plans/" + id, "DELETE").catch(err => toast(err.message)); refreshPlans(); } }
@@ -955,6 +960,7 @@ function initChrome() {
     else if (act === "vote") vote(id, +el.dataset.o);
     else if (act === "closepoll") { await api(`/api/polls/${id}/close`, "POST").catch(err => toast(err.message)); refreshPolls(); }
     else if (act === "delpoll") { if (confirm("Delete this vote?")) { await api("/api/polls/" + id, "DELETE").catch(err => toast(err.message)); refreshPolls(); } }
+    else await hb2Act(act, id, el);
   };
   $("#side").addEventListener("click", async e => {
     const el = e.target.closest("[data-chore]"); if (!el) return; const id = el.dataset.id, act = el.dataset.chore;

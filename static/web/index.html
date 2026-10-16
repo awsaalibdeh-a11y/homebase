@@ -30,6 +30,7 @@
       <button id="bLate" title="Running late">⏰ <span>Late</span></button>
       <button id="bSos" class="sos" title="Hold for 2 seconds">🆘 <span>SOS</span></button>
       <i class="sep"></i>
+      <button id="bSearch" title="Search">🔎 <span>Search</span></button>
       <button id="bInvite">＋ <span>Invite</span></button>
       <button id="bMe" title="Settings">☰ <span>Menu</span></button>
     </div>
@@ -40,7 +41,7 @@
     <div class="thr" id="thr"></div>
     <div id="msgs"></div>
     <div class="qr" id="qr"></div>
-    <form class="composer" id="composer"><input class="field" id="msgIn" placeholder="Write a message" autocomplete="off" maxlength="600"><button class="btn solid" type="submit">Send</button></form>
+    <form class="composer" id="composer"><button class="btn" type="button" id="gifBtn" aria-label="Send a sticker or GIF" title="Stickers and GIFs">🎞️</button><input class="field" id="msgIn" placeholder="Write a message" autocomplete="off" maxlength="600"><button class="btn solid" type="submit">Send</button></form>
   </aside>
   <div class="pill dock">
     <button class="sq" id="bZoomOut" aria-label="Zoom out">−</button><button class="sq" id="bZoomIn" aria-label="Zoom in">+</button>
@@ -57,6 +58,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="/static/web/web.js"></script>
+<script src="/static/web/web2.js"></script>
 <script src="/static/web/calls.js"></script>
 <script src="/static/tour.js" data-app="homebase" defer></script>
 <script src="/static/hub.js" data-app="homebase" defer></script>

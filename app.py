@@ -5,6 +5,7 @@ and there is no hidden mode. Parents never get silent access to a child's phone:
 ("where are you?") can be declined, and quiet hours are the child's own setting."""
 
 import calendar
+import datetime
 import hmac
 import io
 import json
@@ -20,6 +21,7 @@ from flask import Flask, g, jsonify, render_template, request, send_from_directo
 
 import db
 from db import delete, insert, select, update
+from moderation import moderate, worst
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
@@ -1343,7 +1345,7 @@ def delete_screentime():
 
 
 # ---------------------------------------------------------------- messages: texts, check-ins, running late, SOS, hearts
-KINDS = ("text", "checkin", "late", "sos", "heart", "pickup")
+KINDS = ("text", "checkin", "late", "sos", "heart", "pickup", "gif")
 
 
 REACTIONS = ("👍", "❤️", "😂", "😮", "🙏", "🎉")
@@ -1374,7 +1376,11 @@ def send_message():
         return err("Not found.", 404)
     if kind == "text" and not body:
         return err("Write something first.")
-    if to_id and kind in ("text", "heart") and not parent_may(m, same_family(to_id), "messages"):
+    if kind == "gif":
+        body = gif_url(body)
+        if not body:
+            return err("That is not a GIF link we can show. Pick a sticker, or paste a link ending in .gif from Giphy, Tenor or Imgur.")
+    if to_id and kind in ("text", "heart", "gif") and not parent_may(m, same_family(to_id), "messages"):
         return denied(same_family(to_id), "messages")
     if limited(f"msg:{m['id']}", 120):
         return err("Slow down a little.", 429)
@@ -1390,7 +1396,7 @@ def send_message():
     for x in family_members(m["family_id"]):
         if x["id"] == m["id"] or (to_id and x["id"] != to_id):
             continue
-        if kind in ("text", "heart") and not parent_may(m, x, "messages"):
+        if kind in ("text", "heart", "gif") and not parent_may(m, x, "messages"):
             continue
         push(x["id"], "message", {**msg_view(row), "name": m["name"], "emoji": m["emoji"], "quiet": in_quiet(x) and kind not in ("sos", "pickup"), "urgent": kind == "sos"})
     return jsonify(message=msg_view(row))
@@ -1627,7 +1633,8 @@ def json_dict(text):
 def plan_view(r, me):
     rs = {str(k): v for k, v in json_dict(r["rsvp"]).items() if v in ("in", "out")}
     return {"id": r["id"], "title": r["title"], "emoji": r["emoji"], "start": r["start"], "note": r["note"], "by": r["created_by"],
-            "in": [int(k) for k, v in rs.items() if v == "in" and k.isdigit()], "out": [int(k) for k, v in rs.items() if v == "out" and k.isdigit()], "mine": rs.get(str(me))}
+            "in": [int(k) for k, v in rs.items() if v == "in" and k.isdigit()], "out": [int(k) for k, v in rs.items() if v == "out" and k.isdigit()], "mine": rs.get(str(me)),
+            "lat": r.get("lat"), "lng": r.get("lng"), "via": r.get("via") or ""}
 
 
 @app.get("/api/plans")
@@ -1983,6 +1990,667 @@ def drop_board(bid):
     return jsonify(ok=True)
 
 
+# ---------------------------------------------------------------- GIFs in the chat
+STICKER_DIR = os.path.join(BASE, "static", "stickers")
+GIF_HOSTS = ("giphy.com", "tenor.com", "imgur.com", "wikimedia.org")           # where a pasted link may point (never an unknown site: it would learn who looked)
+
+
+def sticker_names():
+    try:
+        return sorted(f[:-4] for f in os.listdir(STICKER_DIR) if f.endswith(".gif"))
+    except OSError:
+        return []
+
+
+def gif_url(text):
+    """The address to store for a GIF message, or None. A sticker of ours, or an https link to a GIF on a known host (a Giphy page link is turned into its picture)."""
+    text = str(text or "").strip()
+    if text.startswith("/static/stickers/") and text.endswith(".gif") and text[len("/static/stickers/"):-4] in sticker_names():
+        return text
+    m = re.match(r"^https://([a-z0-9.-]+)(/[^\s]*)?$", text, re.I)
+    if not m or len(text) > 400:
+        return None
+    host, path = m.group(1).lower(), (m.group(2) or "")
+    if not any(host == h or host.endswith("." + h) for h in GIF_HOSTS):
+        return None
+    if host in ("giphy.com", "www.giphy.com") and path.startswith("/gifs/"):                 # a page link: the last part of it ends with the picture's id
+        gid = path.split("?")[0].rstrip("/").rsplit("-", 1)[-1].rsplit("/", 1)[-1]
+        return f"https://media.giphy.com/media/{gid}/giphy.gif" if re.fullmatch(r"[A-Za-z0-9]{6,30}", gid) else None
+    return text if re.search(r"\.(gif|webp)(\?[^\s]*)?$", path, re.I) else None
+
+
+@app.get("/api/stickers")
+def get_stickers():
+    return jsonify(stickers=[{"name": n, "url": f"/static/stickers/{n}.gif"} for n in sticker_names()])
+
+
+# ---------------------------------------------------------------- friend groups: separate from the family, but a child's parents can read them
+GROUP_LIMIT, GROUP_SIZE = 8, 20
+MUTES = {"slur": 10 * 60, "strikes": 15 * 60}                          # a slur is a 10 minute break at once; three rude messages in ten minutes is 15
+
+
+def group_row(gid):
+    return db.one(select(db.friend_groups).where(db.friend_groups.c.id == gid))
+
+
+def membership(gid, member_id):
+    t = db.friend_members.c
+    return db.one(select(db.friend_members).where(t.group_id == gid, t.member_id == member_id))
+
+
+def kids_in_my_family(m):
+    return [k for k in family_members(m["family_id"]) if k["role"] == "child"] if m["role"] == "parent" else []
+
+
+def overseen_children(gid, m):
+    """The children of this parent's family who are in the group (so the parent may read it)."""
+    kids = {k["id"]: k for k in kids_in_my_family(m)}
+    if not kids:
+        return []
+    t = db.friend_members.c
+    return [kids[r["member_id"]] for r in db.many(select(t).where(t.group_id == gid, t.status == "active")) if r["member_id"] in kids]
+
+
+def group_access(gid, m):
+    """("member" | "overseer" | "pending" | None, the membership row or the children being overseen)."""
+    mine = membership(gid, m["id"])
+    if mine:
+        return ("member" if mine["status"] == "active" else "pending"), mine
+    kids = overseen_children(gid, m)
+    return ("overseer", kids) if kids else (None, None)
+
+
+def group_people(gid):
+    t = db.friend_members.c
+    ids = [r["member_id"] for r in db.many(select(t).where(t.group_id == gid, t.status == "active").order_by(t.id))]
+    people = {x["id"]: x for x in db.many(select(db.members).where(db.members.c.id.in_(ids)))} if ids else {}
+    return [{"id": i, "name": people[i]["name"], "emoji": people[i]["emoji"], "role": people[i]["role"]} for i in ids if i in people]
+
+
+def tell_parents(child, kind, payload):
+    for p in family_members(child["family_id"]):
+        if p["role"] == "parent":
+            push(p["id"], kind, payload)
+
+
+def group_message_view(r, viewer, people):
+    sender = people.get(r["from_id"]) or {}
+    flags = json.loads(r["flags"] or "[]") if r["flags"] else []
+    out = {"id": r["id"], "from": r["from_id"], "name": sender.get("name", ""), "emoji": sender.get("emoji", ""), "kind": r["kind"], "body": r["body"], "at": r["created"], "flagged": bool(flags)}
+    if flags:
+        out["cats"] = sorted({f["cat"] for f in flags})
+        if viewer["role"] == "parent" and sender.get("family_id") == viewer["family_id"]:       # only the sender's own parents see which words, and what was really typed
+            out["flags"], out["original"] = flags, r["original"]
+    return out
+
+
+@app.get("/api/groups")
+@need
+def list_groups():
+    m, t = g.m, db.friend_members.c
+    mine = {r["group_id"]: r for r in db.many(select(t).where(t.member_id == m["id"]))}
+    overseen = {}
+    for kid in kids_in_my_family(m):
+        for r in db.many(select(t).where(t.member_id == kid["id"], t.status == "active")):
+            overseen.setdefault(r["group_id"], []).append(kid["name"])
+    out = []
+    for gid in sorted(set(mine) | set(overseen)):
+        grp = group_row(gid)
+        if not grp:
+            continue
+        status = mine[gid]["status"] if gid in mine else None
+        last = db.one(select(db.friend_messages).where(db.friend_messages.c.group_id == gid).order_by(db.friend_messages.c.id.desc()).limit(1)) if status != "pending" else None
+        people = group_people(gid)
+        out.append({"id": gid, "name": grp["name"], "emoji": grp["emoji"], "status": status, "code": grp["code"] if status == "active" else None, "overseeing": overseen.get(gid, []),
+                    "members": people, "last": ({"body": last["body"] if last["kind"] == "text" else "\U0001F39E\ufe0f GIF", "at": last["created"],
+                                               "name": next((x["name"] for x in people if x["id"] == last["from_id"]), "")} if last else None)})
+    asks = []
+    for kid in kids_in_my_family(m):
+        for r in db.many(select(t).where(t.member_id == kid["id"], t.status == "pending")):
+            grp = group_row(r["group_id"])
+            if grp:
+                asks.append({"group": grp["id"], "group_name": grp["name"], "member": kid["id"], "name": kid["name"], "emoji": kid["emoji"]})
+    return jsonify(groups=out, requests=asks)
+
+
+def join_group(grp, m):
+    """Adds someone to a group. A child waits as 'pending' until one of their parents says yes."""
+    t = db.friend_members.c
+    have = membership(grp["id"], m["id"])
+    if have:
+        return have["status"], None
+    if len(db.many(select(t.id).where(t.member_id == m["id"]))) >= GROUP_LIMIT:
+        return None, f"That is plenty of groups ({GROUP_LIMIT}). Leave one first."
+    if len(db.many(select(t.id).where(t.group_id == grp["id"]))) >= GROUP_SIZE:
+        return None, "That group is full."
+    status = "active" if m["role"] == "parent" else "pending"
+    db.run(insert(t_members()).values(group_id=grp["id"], member_id=m["id"], status=status, joined=time.time()))
+    if status == "pending":
+        tell_parents(m, "group_request", {"gid": grp["id"], "group": grp["name"], "name": m["name"], "emoji": m["emoji"]})
+    else:
+        for x in group_people(grp["id"]):
+            if x["id"] != m["id"]:
+                push(x["id"], "group", {"gid": grp["id"]})
+    return status, None
+
+
+def t_members():
+    return db.friend_members
+
+
+@app.post("/api/groups")
+@need
+def make_group():
+    b = request.get_json(silent=True) or {}
+    name = clean(b.get("name"), 40)
+    if not name:
+        return err("Give the group a name.")
+    if moderate(name)[1]:
+        return err("Pick a friendlier name.")
+    if len(db.many(select(db.friend_members.c.id).where(db.friend_members.c.member_id == g.m["id"]))) >= GROUP_LIMIT:
+        return err(f"That is plenty of groups ({GROUP_LIMIT}). Leave one first.")
+    code = secrets.token_hex(4).upper()
+    gid = db.run(insert(db.friend_groups).values(name=name, emoji=clean(b.get("emoji"), 8) or "\U0001F465", code=code, created_by=g.m["id"], created=time.time()))
+    status, problem = join_group(group_row(gid), g.m)
+    return jsonify(id=gid, code=code, status=status)
+
+
+@app.post("/api/groups/join")
+@need
+def join_by_code():
+    if limited(f"gjoin:{g.m['id']}", 10):
+        return err("Slow down a little.", 429)
+    code = re.sub(r"[^A-Za-z0-9]", "", str((request.get_json(silent=True) or {}).get("code") or "")).upper()
+    grp = db.one(select(db.friend_groups).where(db.friend_groups.c.code == code)) if code else None
+    if not grp:
+        return err("That code does not match a group.", 404)
+    status, problem = join_group(grp, g.m)
+    if problem:
+        return err(problem)
+    return jsonify(id=grp["id"], status=status, name=grp["name"])
+
+
+@app.post("/api/groups/<int:gid>/approve")
+@parent_only
+def approve_member(gid):
+    b = request.get_json(silent=True) or {}
+    kid = same_family(int(b["member"])) if str(b.get("member", "")).isdigit() else None
+    row = membership(gid, kid["id"]) if kid and kid["role"] == "child" else None
+    grp = group_row(gid)
+    if not row or row["status"] != "pending" or not grp:
+        return err("Nothing to answer.", 404)
+    if bool(b.get("ok", True)):
+        db.run(update(db.friend_members).where(db.friend_members.c.id == row["id"]).values(status="active", joined=time.time()))
+        push(kid["id"], "group", {"gid": gid, "approved": True, "group": grp["name"], "name": g.m["name"]})
+        for x in group_people(gid):
+            if x["id"] != kid["id"]:
+                push(x["id"], "group", {"gid": gid})
+    else:
+        db.run(delete(db.friend_members).where(db.friend_members.c.id == row["id"]))
+        push(kid["id"], "group", {"gid": gid, "declined": True, "group": grp["name"]})
+    return jsonify(ok=True)
+
+
+@app.post("/api/groups/<int:gid>/leave")
+@need
+def leave_group(gid):
+    row = membership(gid, g.m["id"])
+    if not row:
+        return err("Not found.", 404)
+    db.run(delete(db.friend_members).where(db.friend_members.c.id == row["id"]))
+    if not db.many(select(db.friend_members.c.id).where(db.friend_members.c.group_id == gid)):
+        db.run(delete(db.friend_messages).where(db.friend_messages.c.group_id == gid))
+        db.run(delete(db.friend_groups).where(db.friend_groups.c.id == gid))
+    return jsonify(ok=True)
+
+
+@app.delete("/api/groups/<int:gid>/members/<int:mid>")
+@parent_only
+def remove_member(gid, mid):
+    """A parent takes their own child out of a group."""
+    kid = same_family(mid)
+    row = membership(gid, mid) if kid and kid["role"] == "child" else None
+    if not row:
+        return err("Not found.", 404)
+    db.run(delete(db.friend_members).where(db.friend_members.c.id == row["id"]))
+    push(kid["id"], "group", {"gid": gid, "removed": True})
+    return jsonify(ok=True)
+
+
+@app.get("/api/groups/<int:gid>/messages")
+@need
+def group_messages(gid):
+    role, _ = group_access(gid, g.m)
+    if role == "pending":
+        return err("A parent needs to say yes first.", 403)
+    if role not in ("member", "overseer"):
+        return err("Not found.", 404)
+    t = db.friend_messages.c
+    rows = db.many(select(db.friend_messages).where(t.group_id == gid, t.id > qint("after", 0)).order_by(t.id.desc()).limit(80))
+    ids = {r["from_id"] for r in rows}
+    people = {x["id"]: x for x in db.many(select(db.members).where(db.members.c.id.in_(list(ids))))} if ids else {}
+    grp = group_row(gid)
+    return jsonify(role=role, group={"id": gid, "name": grp["name"], "emoji": grp["emoji"], "members": group_people(gid)}, messages=[group_message_view(r, g.m, people) for r in reversed(rows)])
+
+
+@app.post("/api/groups/<int:gid>/messages")
+@need
+def send_group_message(gid):
+    role, mine = group_access(gid, g.m)
+    if role == "pending":
+        return err("A parent needs to say yes first.", 403)
+    if role == "overseer":
+        return err("You can read this group, but only its members can write in it.", 403)
+    if role != "member":
+        return err("Not found.", 404)
+    now = time.time()
+    if (mine["muted_until"] or 0) > now:
+        return err(f"You are on a short break from this group for {int(((mine['muted_until'] - now) // 60) + 1)} more minutes.", 429)
+    if limited(f"gmsg:{g.m['id']}", 120):
+        return err("Slow down a little.", 429)
+    b = request.get_json(silent=True) or {}
+    kind = "gif" if b.get("kind") == "gif" else "text"
+    flags, original = [], ""
+    if kind == "gif":
+        body = gif_url(b.get("body"))
+        if not body:
+            return err("That is not a GIF link we can show. Pick a sticker, or paste a link ending in .gif from Giphy, Tenor or Imgur.")
+    else:
+        raw = clean(b.get("body"), 600)
+        if not raw:
+            return err("Write something first.")
+        body, flags = moderate(raw)
+        original = raw if flags else ""
+    mid = db.run(insert(db.friend_messages).values(group_id=gid, from_id=g.m["id"], kind=kind, body=body, original=original, flags=json.dumps(flags) if flags else "", created=now))
+    grp = group_row(gid)
+    people = group_people(gid)
+    note = None
+    if flags:
+        top = worst(flags)
+        recent = [r for r in db.many(select(db.friend_messages).where(db.friend_messages.c.from_id == g.m["id"], db.friend_messages.c.created > now - 600, db.friend_messages.c.flags != ""))]
+        pause = MUTES["slur"] if top == "slur" else MUTES["strikes"] if len(recent) >= 3 else 0
+        if pause:
+            db.run(update(db.friend_members).where(db.friend_members.c.id == mine["id"]).values(muted_until=now + pause))
+        note = ("Your message was changed because it had " + {"slur": "a hurtful", "profanity": "a rude", "insult": "an unkind"}[top] + " word. Your parents are told."
+                + (f" You are on a break from this group for {pause // 60} minutes." if pause else ""))
+        for kid_parent in family_members(g.m["family_id"]):                      # the sender's own parents, always
+            pass
+        flag = {"gid": gid, "group": grp["name"], "name": g.m["name"], "cat": top, "id": mid, "paused": bool(pause)}
+        told = set()
+        for x in people:                                                          # every parent of every child in the group hears about a flag
+            owner = db.one(select(db.members).where(db.members.c.id == x["id"]))
+            if owner and owner["role"] == "child":
+                for p in family_members(owner["family_id"]):
+                    if p["role"] == "parent" and p["id"] not in told and p["id"] != g.m["id"]:
+                        told.add(p["id"])
+                        push(p["id"], "group_flag", flag)
+    event = {"gid": gid, "group": grp["name"], "id": mid, "from": g.m["id"], "name": g.m["name"], "emoji": g.m["emoji"], "kind": kind, "body": body, "flagged": bool(flags)}
+    for x in people:
+        if x["id"] != g.m["id"]:
+            push(x["id"], "gmessage", event)
+    return jsonify(id=mid, body=body, flagged=bool(flags), note=note)
+
+
+# ---------------------------------------------------------------- the family meal plan, and apps (like Platter) that put recipes on it
+SLOTS = ("breakfast", "lunch", "dinner", "snack")
+EXT_ORIGINS = [o.strip() for o in os.environ.get("EXT_ORIGINS", "https://platter-87b0.onrender.com,http://127.0.0.1:5075,http://localhost:5075,https://scout-15t6.onrender.com,http://127.0.0.1:5055,http://localhost:5055").split(",") if o.strip()]
+APP_SCOPES = {"Platter": "meals", "Scout": "plans,places,share"}          # what each known app may do; anything else gets the meal plan only
+
+
+def clean_day(value):
+    try:
+        d = datetime.date.fromisoformat(str(value or ""))
+    except ValueError:
+        return None
+    today = datetime.date.today()
+    return d.isoformat() if today - datetime.timedelta(days=90) <= d <= today + datetime.timedelta(days=800) else None
+
+
+def clean_lines(value, n=80, width=300):
+    return [re.sub(r"\s+", " ", str(x)).strip()[:width] for x in (value if isinstance(value, list) else []) if str(x).strip()][:n]
+
+
+def clean_https(value, n=400):
+    v = str(value or "").strip()
+    return v[:n] if v.startswith("https://") and len(v) <= n else ""
+
+
+def meal_view(r):
+    def lines(text):
+        try:
+            d = json.loads(text or "[]")
+        except ValueError:
+            return []
+        return d if isinstance(d, list) else []
+    return {"id": r["id"], "day": r["day"], "slot": r["slot"], "title": r["title"], "photo": r["photo"] or "", "source": r["source"] or "", "servings": r["servings"] or 0,
+            "ingredients": lines(r["ingredients"]), "steps": lines(r["steps"]), "via": r["via"], "by": r["added_by"], "ext": r["ext_id"] or "", "cook": r["cook"] or 0}
+
+
+def save_meal(fid, who, via, b, ext_id=""):
+    """Adds a meal, or (for a linked app that sends the same id again) updates it. Returns (meal row id, error text)."""
+    day, title = clean_day(b.get("day")), clean(b.get("title"), 120)
+    if not day:
+        return None, "Pick a day."
+    if not title:
+        return None, "What are we eating?"
+    slot = b.get("slot") if b.get("slot") in SLOTS else "dinner"
+    try:
+        servings = max(0, min(99, int(b.get("servings") or 0)))
+    except (TypeError, ValueError):
+        servings = 0
+    values = dict(day=day, slot=slot, title=title, photo=clean_https(b.get("photo")), source=clean_https(b.get("source")), servings=servings,
+                  ingredients=json.dumps(clean_lines(b.get("ingredients")), ensure_ascii=False), steps=json.dumps(clean_lines(b.get("steps"), 60, 1200), ensure_ascii=False))
+    t = db.meals.c
+    if ext_id:
+        old = db.one(select(db.meals).where(t.family_id == fid, t.ext_id == ext_id))
+        if old:
+            db.run(update(db.meals).where(t.id == old["id"]).values(**values))
+            return old["id"], None
+    if len(db.many(select(t.id).where(t.family_id == fid))) >= 600:
+        return None, "That is a lot of meals planned already. Remove some old ones first."
+    return db.run(insert(db.meals).values(family_id=fid, ext_id=ext_id, via=via, added_by=who, created=time.time(), **values)), None
+
+
+@app.get("/api/meals")
+@need
+def get_meals():
+    today = datetime.date.today()
+    a = clean_day(request.args.get("from")) or today.isoformat()
+    b = clean_day(request.args.get("to")) or (today + datetime.timedelta(days=14)).isoformat()
+    if not a <= b or (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days > 70:
+        return err("Pick up to ten weeks at a time.")
+    t = db.meals.c
+    rows = db.many(select(db.meals).where(t.family_id == g.m["family_id"], t.day >= a, t.day <= b).order_by(t.day, t.id).limit(400))
+    return jsonify(meals=[meal_view(r) for r in rows])
+
+
+@app.post("/api/meals")
+@need
+def add_meal():
+    mid, problem = save_meal(g.m["family_id"], g.m["id"], "homebase", request.get_json(silent=True) or {})
+    if problem:
+        return err(problem)
+    push_family(g.m["family_id"], "meals", {"id": mid}, skip=g.m["id"])
+    return jsonify(id=mid)
+
+
+@app.delete("/api/meals/<int:mid>")
+@need
+def drop_meal(mid):
+    r = db.one(select(db.meals).where(db.meals.c.id == mid, db.meals.c.family_id == g.m["family_id"]))
+    if not r or not (g.m["role"] == "parent" or r["added_by"] == g.m["id"]):
+        return err("Not found.", 404)
+    db.run(delete(db.meals).where(db.meals.c.id == mid))
+    push_family(g.m["family_id"], "meals", {"id": mid}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
+@app.post("/api/meals/<int:mid>/cook")
+@need
+def set_cook(mid):
+    """"I'll cook it". Anyone can put their own name on a meal or take it off; a parent can name anyone."""
+    r = db.one(select(db.meals).where(db.meals.c.id == mid, db.meals.c.family_id == g.m["family_id"]))
+    if not r:
+        return err("Not found.", 404)
+    who = (request.get_json(silent=True) or {}).get("cook")
+    who = int(who) if str(who or "").isdigit() else 0
+    if who and not same_family(who):
+        return err("Not found.", 404)
+    if g.m["role"] != "parent" and who not in (0, g.m["id"]):
+        return err("You can put your own name on it, or take it off.", 403)
+    if g.m["role"] != "parent" and not who and r["cook"] not in (0, g.m["id"]):
+        return err("Someone else is cooking that one.", 403)
+    db.run(update(db.meals).where(db.meals.c.id == mid).values(cook=who))
+    push_family(g.m["family_id"], "meals", {"id": mid}, skip=g.m["id"])
+    return jsonify(ok=True, cook=who)
+
+
+@app.post("/api/meals/<int:mid>/to-list")
+@need
+def meal_to_list(mid):
+    """Puts a meal's ingredients on the family shopping list (skipping what is already waiting there)."""
+    r = db.one(select(db.meals).where(db.meals.c.id == mid, db.meals.c.family_id == g.m["family_id"]))
+    if not r:
+        return err("Not found.", 404)
+    fid, t = g.m["family_id"], db.lists.c
+    have = {row["text"].lower() for row in db.many(select(t.text).where(t.family_id == fid, t.done == False))}  # noqa: E712
+    added = 0
+    for line in meal_view(r)["ingredients"]:
+        text = clean(line, 120)
+        if text and text.lower() not in have and len(have) < 300:
+            db.run(insert(db.lists).values(family_id=fid, text=text, done=False, added_by=g.m["id"], created=time.time()))
+            have.add(text.lower())
+            added += 1
+    if added:
+        push_family(fid, "list", {"meal": mid}, skip=g.m["id"])
+    return jsonify(ok=True, added=added)
+
+
+@app.get("/api/feed")
+@need
+def activity_feed():
+    """What has been happening in the family: arrivals, jobs, rewards, plans, check-ins, alerts."""
+    t = db.messages.c
+    rows = db.many(select(t).where(t.family_id == g.m["family_id"], t.to_id == 0, t.kind.in_(["system", "sos", "late", "checkin", "pickup"])).order_by(t.id.desc()).limit(60))
+    people = {m["id"]: m for m in family_members(g.m["family_id"])}
+    return jsonify(items=[{"id": r["id"], "kind": r["kind"], "body": r["body"], "at": r["created"], "from": r["from_id"], "name": (people.get(r["from_id"]) or {}).get("name", ""),
+                           "emoji": (people.get(r["from_id"]) or {}).get("emoji", "")} for r in rows])
+
+
+@app.get("/api/integrations")
+@parent_only
+def list_integrations():
+    rows = db.many(select(db.integrations).where(db.integrations.c.family_id == g.m["family_id"]).order_by(db.integrations.c.id))
+    return jsonify(integrations=[{"id": r["id"], "name": r["name"], "created": r["created"], "last_used": r["last_used"] or 0, "scopes": (r["scopes"] or "meals").split(",")} for r in rows])
+
+
+@app.post("/api/integrations")
+@parent_only
+def add_integration():
+    """Links an app. The key is shown once, here; only a fingerprint of it is kept, and it can only do what that app is meant to (Platter: the meal plan; Scout: plans, places and sharing)."""
+    name = clean((request.get_json(silent=True) or {}).get("name"), 40) or "Platter"
+    fid = g.m["family_id"]
+    if len(db.many(select(db.integrations.c.id).where(db.integrations.c.family_id == fid))) >= 5:
+        return err("That is plenty of linked apps (5). Remove one first.")
+    key = "hbk_" + secrets.token_urlsafe(24)
+    scopes = APP_SCOPES.get(name, "meals")
+    iid = db.run(insert(db.integrations).values(family_id=fid, name=name, key_hash=db.hash_token(key), created_by=g.m["id"], created=time.time(), scopes=scopes))
+    say(fid, g.m["id"], f"{g.m['name']} linked {name} to the family meal plan" if scopes == "meals" else f"{g.m['name']} linked {name} to Homebase")
+    return jsonify(id=iid, name=name, key=key, scopes=scopes.split(","))
+
+
+@app.delete("/api/integrations/<int:iid>")
+@parent_only
+def drop_integration(iid):
+    r = db.one(select(db.integrations).where(db.integrations.c.id == iid, db.integrations.c.family_id == g.m["family_id"]))
+    if not r:
+        return err("Not found.", 404)
+    db.run(delete(db.integrations).where(db.integrations.c.id == iid))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} unlinked {r['name']}")
+    return jsonify(ok=True)
+
+
+def ext_app():
+    """The linked app a request comes from (by its key), or None."""
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not token.startswith("hbk_"):
+        return None
+    row = db.one(select(db.integrations).where(db.integrations.c.key_hash == db.hash_token(token)))
+    if row and time.time() - (row["last_used"] or 0) > 60:
+        db.run(update(db.integrations).where(db.integrations.c.id == row["id"]).values(last_used=time.time()))
+    return row
+
+
+def ext_guard(scope):
+    """(the linked app, None) when the key is good and allowed to do this, else (None, the answer to send back)."""
+    row = ext_app()
+    if not row:
+        return None, err("This link is not valid any more. Link it again from Homebase.", 401)
+    if scope not in (row["scopes"] or "meals").split(","):
+        return None, err("This link is not allowed to do that.", 403)
+    return row, None
+
+
+def ext_cors(resp):
+    origin = request.headers.get("Origin", "")
+    if request.path.startswith("/api/ext/") and origin in EXT_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+        resp.headers["Access-Control-Max-Age"] = "600"
+        resp.headers["Vary"] = "Origin"
+    return resp
+
+
+app.after_request(ext_cors)
+
+
+@app.route("/api/ext/<path:rest>", methods=["OPTIONS"])
+def ext_preflight(rest):
+    return app.response_class("", status=204)
+
+
+@app.get("/api/ext/ping")
+def ext_ping():
+    row = ext_app()
+    if not row:
+        return err("This link is not valid any more. Link it again from Homebase.", 401)
+    fam = db.one(select(db.families).where(db.families.c.id == row["family_id"]))
+    return jsonify(family=fam["name"], app=row["name"], scopes=(row["scopes"] or "meals").split(","))
+
+
+@app.post("/api/ext/meals")
+def ext_put_meal():
+    row, bad = ext_guard("meals")
+    if bad:
+        return bad
+    if limited(f"ext:{row['id']}", 900):
+        return err("Slow down a little.", 429)
+    b = request.get_json(silent=True) or {}
+    ext_id = clean(b.get("ext_id"), 80)
+    if not ext_id:
+        return err("Say which meal this is.")
+    mid, problem = save_meal(row["family_id"], 0, row["name"].lower()[:20], b, ext_id)
+    if problem:
+        return err(problem)
+    push_family(row["family_id"], "meals", {"id": mid})
+    return jsonify(id=mid)
+
+
+@app.delete("/api/ext/meals/<path:ext_id>")
+def ext_drop_meal(ext_id):
+    row, bad = ext_guard("meals")
+    if bad:
+        return bad
+    t = db.meals.c
+    mine = db.one(select(db.meals).where(t.family_id == row["family_id"], t.ext_id == ext_id))
+    if mine:
+        db.run(delete(db.meals).where(t.id == mine["id"]))
+        push_family(row["family_id"], "meals", {"id": mine["id"]})
+    return jsonify(ok=True)
+
+
+def ext_point(b):
+    """A latitude and longitude from a request, or None when they are missing or not on Earth."""
+    try:
+        lat, lng = float(b["lat"]), float(b["lng"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (lat, lng) if -90 <= lat <= 90 and -180 <= lng <= 180 else None
+
+
+@app.post("/api/ext/plans")
+def ext_put_plan():
+    """Scout (or another linked app) puts a place on the family calendar. The same ext_id updates the plan instead of adding another."""
+    row, bad = ext_guard("plans")
+    if bad:
+        return bad
+    if limited(f"ext:{row['id']}", 900):
+        return err("Slow down a little.", 429)
+    b = request.get_json(silent=True) or {}
+    ext_id, title = clean(b.get("ext_id"), 80), clean(b.get("title"), 60)
+    if not ext_id or not title:
+        return err("Say which place this is and give it a name.")
+    try:
+        start = float(b.get("start"))
+    except (TypeError, ValueError):
+        return err("Pick a day and a time.")
+    now = time.time()
+    if not (now - 86400 <= start <= now + 2 * 365 * 86400):
+        return err("That day is too far away.")
+    point = ext_point(b) or (None, None)
+    fid, emoji = row["family_id"], clean(b.get("emoji"), 8) or "\U0001F4CD"
+    values = dict(title=title, emoji=emoji, start=start, note=clean(b.get("note"), 120), lat=point[0], lng=point[1], via=row["name"].lower()[:20])
+    mine = db.one(select(db.plans).where(db.plans.c.family_id == fid, db.plans.c.ext_id == ext_id))
+    if mine:
+        db.run(update(db.plans).where(db.plans.c.id == mine["id"]).values(**values, reminded=False))
+        pid = mine["id"]
+    else:
+        pid = db.run(insert(db.plans).values(family_id=fid, created_by=0, created=now, rsvp="{}", reminded=False, ext_id=ext_id, **values))
+    push_family(fid, "plan", {"id": pid, "new": not mine, "name": row["name"], "title": title, "emoji": emoji, "start": start})
+    return jsonify(id=pid)
+
+
+@app.delete("/api/ext/plans/<path:ext_id>")
+def ext_drop_plan(ext_id):
+    row, bad = ext_guard("plans")
+    if bad:
+        return bad
+    t = db.plans.c
+    mine = db.one(select(db.plans).where(t.family_id == row["family_id"], t.ext_id == ext_id))
+    if mine:
+        db.run(delete(db.plans).where(t.id == mine["id"]))
+        push_family(row["family_id"], "plan", {"id": mine["id"]})
+    return jsonify(ok=True)
+
+
+@app.post("/api/ext/places")
+def ext_put_place():
+    """Saves a place for the family (everyone is told when someone arrives or leaves it, same as a place added in Homebase). One per name and spot."""
+    row, bad = ext_guard("places")
+    if bad:
+        return bad
+    if limited(f"extp:{row['id']}", 30):
+        return err("Slow down a little.", 429)
+    b = request.get_json(silent=True) or {}
+    point, name = ext_point(b), clean(b.get("name"), 40)
+    if not point or not name:
+        return err("Say where the place is and give it a name.")
+    fid, t = row["family_id"], db.places.c
+    have = db.many(select(db.places).where(t.family_id == fid))
+    for p in have:
+        if p["name"].lower() == name.lower() and metres(point[0], point[1], p["lat"], p["lng"]) < 200:
+            return jsonify(id=p["id"], existed=True)
+    if len(have) >= 20:
+        return err("That is plenty of places (20).")
+    radius = max(50, min(1000, int(b["radius"]))) if str(b.get("radius", "")).isdigit() else 150
+    pid = db.run(insert(db.places).values(family_id=fid, name=name, emoji=clean(b.get("emoji"), 8) or "\U0001F4CD", lat=point[0], lng=point[1], radius=radius, created_by=row["created_by"], created=time.time()))
+    say(fid, row["created_by"], f"{row['name']} saved the place {name}. Everyone is told when someone arrives or leaves.")
+    push_family(fid, "places", {"id": pid, "name": name, "by": row["name"]})
+    return jsonify(id=pid)
+
+
+@app.post("/api/ext/share")
+def ext_share():
+    """Shows a place in the family chat (as a note from the app, not as a person), with its spot so a tap shows where."""
+    row, bad = ext_guard("share")
+    if bad:
+        return bad
+    if limited(f"exts:{row['id']}", 30, 900):
+        return err("Slow down a little.", 429)
+    b = request.get_json(silent=True) or {}
+    name, address = clean(b.get("name"), 60), clean(b.get("address"), 100)
+    if not name:
+        return err("Say which place to share.")
+    point = ext_point(b) or (None, None)
+    body = f"\U0001F9ED {row['name']}: {name}" + (f", {address}" if address else "")
+    mid = say(row["family_id"], 0, body, kind="system", lat=point[0], lng=point[1])
+    msg = db.one(select(db.messages).where(db.messages.c.id == mid))
+    for m in family_members(row["family_id"]):
+        push(m["id"], "message", {**msg_view(msg), "name": row["name"], "emoji": "🧭", "quiet": False, "urgent": False})
+    return jsonify(id=mid)
+
+
 # ---------------------------------------------------------------- web push: alerts on an iPhone (or any browser) while the app is closed
 PUSH_SUB = os.environ.get("VAPID_SUB", "https://homebase-family.onrender.com")
 PUSH_SYNC = False                                                       # tests send straight away instead of on a thread
@@ -2023,6 +2691,8 @@ def web_note(kind, p):
             return {"title": f"\U0001F697 {name} needs a pickup", "body": p.get("body") or "Open Homebase to see where they are.", "tag": "pickup", "urgent": True}
         if mk == "heart":
             return {"title": f"\u2764\ufe0f {name}", "body": "is thinking of you", "tag": f"msg-{p.get('from')}"}
+        if mk == "gif":
+            return {"title": name, "body": "\U0001F39E\ufe0f sent a GIF", "tag": f"msg-{p.get('from')}"}
         return {"title": name, "body": p.get("body") or "", "tag": f"msg-{p.get('from')}"}
     if kind == "call":
         return {"title": f"\U0001F4DE {name} is calling", "body": "Open Homebase to answer", "tag": f"call-{p.get('id')}", "urgent": True}
@@ -2044,6 +2714,12 @@ def web_note(kind, p):
         return {"title": f"\U0001F382 Happy birthday, {name}!" if p.get("self") else f"\U0001F382 It's {name}'s birthday", "body": "Your family is thinking of you." if p.get("self") else "Send them some love today.", "tag": f"bday-{p.get('id')}"}
     if kind == "nudge":
         return {"title": "Time for a break?", "body": p.get("text") or "", "tag": "nudge"}
+    if kind == "gmessage":
+        return {"title": f"{name} \u00b7 {p.get('group') or 'friends'}", "body": p.get("body") if p.get("kind") != "gif" else "\U0001F39E\ufe0f sent a GIF", "tag": f"group-{p.get('gid')}"}
+    if kind == "group_flag":
+        return {"title": f"\u26a0\ufe0f {name}'s message was censored", "body": f"In {p.get('group')}: {p.get('cat') or 'rude'} language. Open Homebase to read it.", "tag": f"flag-{p.get('gid')}", "urgent": True}
+    if kind == "group_request":
+        return {"title": f"\U0001F465 {name} wants to join {p.get('group')}", "body": "Open Homebase to say yes or not now.", "tag": f"request-{p.get('gid')}"}
     if kind == "notice" and p.get("text"):
         return {"title": f"\U0001F4E2 {name}", "body": p["text"], "tag": "notice"}
     return None
@@ -2135,7 +2811,13 @@ def calendar_file():
                   "DTEND:" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(r["start"] + 3600)), "SUMMARY:" + ics_text(f"{r['emoji']} {r['title']}".strip())]
         if r["note"]:
             lines.append("DESCRIPTION:" + ics_text(r["note"]))
+        if r["lat"] is not None and r["lng"] is not None:
+            lines += [f"GEO:{r['lat']:.6f};{r['lng']:.6f}", "LOCATION:" + ics_text(r["note"] or r["title"])]
         lines.append("END:VEVENT")
+    today = datetime.date.today()
+    for r in db.many(select(db.meals).where(db.meals.c.family_id == fid, db.meals.c.day >= (today - datetime.timedelta(days=1)).isoformat(), db.meals.c.day <= (today + datetime.timedelta(days=365)).isoformat()).order_by(db.meals.c.day).limit(500)):
+        lines += ["BEGIN:VEVENT", f"UID:meal-{r['id']}@homebase", f"DTSTAMP:{stamp}", "DTSTART;VALUE=DATE:" + r["day"].replace("-", ""),
+                  "SUMMARY:" + ics_text(f"\U0001F37D\ufe0f {r['slot'].capitalize()}: {r['title']}"), "END:VEVENT"]
     year = time.gmtime(now).tm_year
     for m in family_members(fid):
         if not m["birthday"]:

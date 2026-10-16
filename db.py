@@ -94,7 +94,9 @@ plans = Table("plans", meta,                                              # the 
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("title", String(60)), Column("emoji", String(8), default="📅"),
     Column("start", Float, index=True), Column("note", String(120), default=""), Column("created_by", Integer), Column("created", Float),
     Column("rsvp", Text, default=""),                                  # JSON {member id: "in" | "out"}
-    Column("reminded", Boolean, default=False))                        # the "starts soon" nudge went out
+    Column("reminded", Boolean, default=False),                        # the "starts soon" nudge went out
+    Column("lat", Float), Column("lng", Float),                        # a plan made from a place (Scout) knows where it is
+    Column("ext_id", String(80), default="", index=True), Column("via", String(20), default=""))   # which linked app made it, and its own id for it
 polls = Table("polls", meta,                                              # a question for the family, one vote each
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("question", String(100)),
     Column("options", Text), Column("votes", Text, default=""),         # options: JSON list of strings; votes: JSON {member id: option number}
@@ -119,6 +121,26 @@ push_subs = Table("push_subs", meta,                                      # a br
     Column("p256dh", Text), Column("auth", Text), Column("created", Float), Column("ua", String(80), default=""))
 settings = Table("settings", meta,                                        # small things the server keeps for itself (its push keys)
     Column("key", String(40), primary_key=True), Column("value", Text))
+meals = Table("meals", meta,                                              # the family meal plan: what we are cooking on which day (typed in, or sent by a linked app like Platter)
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("day", String(10), index=True),
+    Column("slot", String(10), default="dinner"), Column("title", String(120)), Column("photo", String(400), default=""), Column("source", String(400), default=""),
+    Column("servings", Integer, default=0), Column("ingredients", Text, default=""), Column("steps", Text, default=""),            # JSON lists of text
+    Column("ext_id", String(80), default="", index=True), Column("via", String(20), default="homebase"), Column("added_by", Integer, default=0), Column("created", Float),
+    Column("cook", Integer, default=0))                                  # who said they will cook it (0 = nobody yet)
+integrations = Table("integrations", meta,                                # an app the family linked (Platter): its own revocable key that can only touch the meal plan
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("name", String(40)), Column("key_hash", String(64), unique=True),
+    Column("created_by", Integer), Column("created", Float), Column("last_used", Float, default=0),
+    Column("scopes", String(60), default="meals"))                         # what the key may do: meals | plans | places | share
+friend_groups = Table("friend_groups", meta,                              # a group of friends: separate from the family, but a child's parents can read it
+    Column("id", Integer, primary_key=True), Column("name", String(40)), Column("emoji", String(8), default="\U0001F465"), Column("code", String(10), unique=True),
+    Column("created_by", Integer), Column("created", Float))
+friend_members = Table("friend_members", meta,
+    Column("id", Integer, primary_key=True), Column("group_id", Integer, index=True), Column("member_id", Integer, index=True),
+    Column("status", String(10), default="active"),                        # active | pending (a child waiting for a parent to say yes)
+    Column("joined", Float), Column("muted_until", Float, default=0))
+friend_messages = Table("friend_messages", meta,
+    Column("id", Integer, primary_key=True), Column("group_id", Integer, index=True), Column("from_id", Integer), Column("kind", String(6), default="text"),
+    Column("body", Text), Column("original", Text, default=""), Column("flags", Text, default=""), Column("created", Float, index=True))
 meta.create_all(engine)
 try:                                                                  # older databases get the new column
     with engine.begin() as _c:
@@ -132,7 +154,9 @@ for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABL
             "ALTER TABLE rewards ADD COLUMN minutes INTEGER DEFAULT 0", "ALTER TABLE redemptions ADD COLUMN minutes INTEGER DEFAULT 0",
             "ALTER TABLE members ADD COLUMN birthday VARCHAR(5) DEFAULT ''", "ALTER TABLE members ADD COLUMN bday_year INTEGER DEFAULT 0",
             "ALTER TABLE members ADD COLUMN app_version INTEGER DEFAULT 0",
-            "ALTER TABLE families ADD COLUMN notice VARCHAR(200) DEFAULT ''", "ALTER TABLE families ADD COLUMN notice_until FLOAT DEFAULT 0", "ALTER TABLE families ADD COLUMN notice_by INTEGER DEFAULT 0"):
+            "ALTER TABLE families ADD COLUMN notice VARCHAR(200) DEFAULT ''", "ALTER TABLE families ADD COLUMN notice_until FLOAT DEFAULT 0", "ALTER TABLE families ADD COLUMN notice_by INTEGER DEFAULT 0",
+            "ALTER TABLE plans ADD COLUMN lat FLOAT", "ALTER TABLE plans ADD COLUMN lng FLOAT", "ALTER TABLE plans ADD COLUMN ext_id VARCHAR(80) DEFAULT ''",
+            "ALTER TABLE plans ADD COLUMN via VARCHAR(20) DEFAULT ''", "ALTER TABLE integrations ADD COLUMN scopes VARCHAR(60) DEFAULT 'meals'"):
     try:
         with engine.begin() as _c:
             _c.exec_driver_sql(_sql)

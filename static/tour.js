@@ -9,13 +9,17 @@
   const TOURS = {
     homebase: { ready: () => { const a = document.getElementById("app"); return a && !a.classList.contains("hidden"); }, steps: [
       S("🏠", "Welcome to Homebase", "Your family on a map, with messages and calls. It is honest about everything it shares, and you can always pause. This takes a minute."),
+      S("🧭", "Five sections", "The left panel has Home, Map, Plan, Chat and More. Home is today at a glance. Map is your people and places. Plan has the calendar and the meals. Chat has the family chat and friend groups. More has rewards, jobs, the family board, rules and linked apps."),
       S("🗺️", "The map", "Everyone who is sharing shows up as a pin, parents too. If someone goes offline you still see where they were last, and how long ago."),
       S("📍", "Share my location", "In the left panel, the Share my location switch is yours. You can pause for 15 minutes or an hour. The family always sees when it is paused, so nobody wonders."),
       S("💬", "Messages and calls", "Click a person to Message, Call, or ask Where are you?. They can always say not now. Turn on desktop notifications in the left panel so you never miss a message or call."),
       S("✅", "Check in", "The bar at the top has I'm OK, Late and SOS. Hold SOS for two seconds in an emergency and everyone is told with your location."),
       S("🏡", "Places and Home", "Set the Home area and add places like school. Everyone is told when someone arrives or leaves, including the person it is about."),
       S("⏱️", "Screen time, rules and locks", "Children can see their own screen time (only time spent playing or watching). Parents can read it if the child allows, set the family rules, and lock a device for a while, never more than 4 hours a day."),
-      S("🔒", "Everyone is in control", "Open Menu to switch off what parents can do, set quiet hours, or change the look. Whatever is off, the family can see that it is off."),
+      S("📅", "Calendar and meals", "In Plan, add things to the family calendar and say who is in. Plan a meal for any day and say who is cooking: the recipe comes with it. Apps like Platter and Scout can add to the calendar too."),
+      S("🎞️", "Stickers and friend groups", "Send stickers and GIFs in chat. Friend groups are separate from the family: friends can chat, but mild words only. Swearing and insults are censored, and a child's parents can read the group."),
+      S("🔗", "Linked apps", "A parent can link Platter and Scout from More, then Linked apps. Each linked app can only do the one thing it is for, and you can unlink it any time."),
+      S("🔒", "Everyone is in control", "Open Menu to switch off what parents can do, set quiet hours, or change the look. Whatever is off, the family can see that it is off. The Menu also has this tutorial under Help, so you can read it again any time."),
     ] },
     alibi: { steps: [
       S("🕵️", "Welcome to Alibi", "A murder party for your phones. A normal weekend turns into a mystery, and one of the players is the killer."),
