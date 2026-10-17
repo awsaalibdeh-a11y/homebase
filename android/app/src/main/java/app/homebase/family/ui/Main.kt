@@ -58,7 +58,7 @@ fun memberLine(m: Member): String {
 }
 
 /** Plain names for the things a person can switch off for their parents. */
-val PERM_LABELS = listOf("location" to "location", "trail" to "trail", "battery" to "battery", "messages" to "messages", "calls" to "calls", "ping" to "where-are-you", "screentime" to "screen time")
+val PERM_LABELS = listOf("location" to "location", "trail" to "trail", "battery" to "battery", "messages" to "messages", "calls" to "calls", "ping" to "where-are-you", "screentime" to "screen time", "critical" to "critical check-ins")
 
 @Composable
 fun MainScreen(nav: Nav, initialTab: Int = 0) {

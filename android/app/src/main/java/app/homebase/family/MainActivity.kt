@@ -72,6 +72,9 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
         val o = open.value ?: return@LaunchedEffect
         if (o.startsWith("chat:") && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Thread(o.removePrefix("chat:").toIntOrNull() ?: 0)) }
         else if (o.startsWith("group:") && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 3; nav.go(Screen.Group(o.removePrefix("group:").toIntOrNull() ?: 0)) }
+        else if (o == "sos" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 0; state.sosAsk.value = true }
+        else if (o == "safety" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Safety) }
+        else if (o == "places" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Places) }
         else if (o == "map" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 1 }
         else if (o == "plans" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 2 }
         else if (o == "meals" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 2 }
@@ -79,6 +82,12 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
         else if (o == "rewards" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Rewards) }
         open.value = null
     }
+    var splash by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(open.value == null) }   // straight in for an SOS or a notification
+    val sosAsk by state.sosAsk.collectAsState()
+    val support by state.support.collectAsState()
+    if (splash) { app.homebase.family.ui.SplashScreen { splash = false }; return }
+    if (sosAsk) app.homebase.family.ui.SosCountdown { state.sosAsk.value = false }
+    support?.let { app.homebase.family.ui.SupportDialog(it) { state.support.value = null } }
     Box(Modifier.fillMaxSize()) {
         when (val s = nav.current) {
             Screen.Welcome -> WelcomeScreen(nav)
@@ -103,6 +112,8 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
             is Screen.Recipes -> app.homebase.family.ui.RecipesScreen(nav, s.surprise)
             Screen.Fun -> app.homebase.family.ui.FunScreen(nav)
             Screen.Emergency -> app.homebase.family.ui.EmergencyScreen(nav)
+            Screen.Safety -> app.homebase.family.ui.SafetyScreen(nav)
+            Screen.SafeBrowsing -> app.homebase.family.ui.SafeBrowsingScreen(nav)
             Screen.Pocket -> app.homebase.family.ui.PocketScreen(nav)
             is Screen.Camera -> app.homebase.family.ui.CameraScreen(nav, s.purpose)
             is Screen.ScreenTime -> app.homebase.family.ui.ScreenTimeScreen(nav, s.memberId)

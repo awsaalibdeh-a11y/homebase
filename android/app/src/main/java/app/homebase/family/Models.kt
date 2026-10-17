@@ -29,6 +29,10 @@ data class Member(
     val status: StatusInfo? = null,
     val birthday: String? = null,                                   // "MM-DD", chosen by the person
     @SerialName("app_version") val appVersion: Int = 0,               // the Android build they last used (0 = not known)
+    val sos: Boolean = false,                                         // sent an SOS in the last half hour: shown live
+    val eta: EtaInfo? = null,                                         // "running late": roughly how far from home
+    @SerialName("safe_dns") val safeDns: String? = null,              // the phone's web filter (a child's, seen by parents): a host name, "off", or not reported
+    val critical: CriticalInfo? = null,                               // a parent's Critical Check-In waiting for "I'm OK" (only in my own view)
 ) {
     val isParent get() = role == "parent"
     /** Whether a parent may do [key] with this person. Everything is allowed until they turn it off. */
@@ -36,7 +40,25 @@ data class Member(
 }
 
 @Serializable
-data class Place(val id: Int, val name: String, val emoji: String = "📍", val lat: Double, val lng: Double, val radius: Int = 150)
+data class Place(val id: Int, val name: String, val emoji: String = "📍", val lat: Double, val lng: Double, val radius: Int = 150, val pending: Boolean = false)
+
+@Serializable
+data class EtaInfo(val min: Int = 0, val until: Double = 0.0)
+
+@Serializable
+data class CriticalInfo(val at: Double = 0.0, val by: String = "A parent")
+
+/** How often the server wants this phone to send its location ("sos" = live, "saver" = low battery). */
+@Serializable
+data class LocResp(val interval: Int = 120, val mode: String = "normal", val shared: Boolean = true)
+
+/** A message in Mellow that looked dangerous. Only parents get these, and only the message that matched. */
+@Serializable
+data class RiskAlert(val id: Int, val member: Int = 0, val name: String = "", val cat: String = "", val what: String = "", val role: String = "sent",
+                     val other: String = "", val where: String = "", val snippet: String = "", val at: Double = 0.0, val seen: Boolean = false)
+
+@Serializable
+data class RiskResp(val alerts: List<RiskAlert> = emptyList())
 
 @Serializable
 data class FamilyInfo(val id: Int, val name: String, val notice: NoticeInfo? = null)
@@ -167,7 +189,7 @@ data class BoardResp(val items: List<BoardItem> = emptyList())
 data class MessagesResp(val messages: List<Message> = emptyList())
 
 @Serializable
-data class SendResp(val message: Message)
+data class SendResp(val message: Message, val support: String? = null)
 
 @Serializable
 data class Item(val id: Int, val text: String, val done: Boolean = false, val by: Int = 0, @SerialName("done_by") val doneBy: Int = 0)

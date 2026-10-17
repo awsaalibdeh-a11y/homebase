@@ -55,6 +55,11 @@ fun PersonCard(nav: Nav, m: Member, onFocus: (app.homebase.family.Spot) -> Unit)
                     m.status?.let { s -> Chip("${s.emoji} ${s.text}".trim(), AccentSoft, AccentDark) }
                     if (me.isParent && m.id != me.myId && m.appVersion in 1 until app.homebase.family.BuildConfig.VERSION_CODE) Chip("App update available", SunSoft, Ink)
                 }
+                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (m.sos) Chip("🚨 SOS live", Rose, androidx.compose.ui.graphics.Color.White)
+                    m.eta?.let { e -> if (e.until * 1000 > System.currentTimeMillis()) Chip("🏃 about ${e.min} min from home", AccentSoft, AccentDark) }
+                    if (!m.isParent && (me.isParent || m.id == me.myId) && m.safeDns != null) Chip(safeDnsLabel(m.safeDns), if (safeDnsLabel(m.safeDns).startsWith("🛡️")) MintSoft else SunSoft, Ink)
+                }
             }
         }
         if (!m.isParent) screenLine(m)?.let { Text(it, Modifier.padding(top = 2.dp), color = if (m.screen?.hidden == true) Sun else Ink, style = MaterialTheme.typography.bodyMedium) }
@@ -67,6 +72,9 @@ fun PersonCard(nav: Nav, m: Member, onFocus: (app.homebase.family.Spot) -> Unit)
             if (m.id == me.myId || (me.isParent && !m.isParent)) TextButton({ nav.go(Screen.History(m.id)) }) { Text("Trail", maxLines = 1, softWrap = false) }
         }
         if (!m.isParent && me.isParent) BigButton("🎛️ Controls: screen time, lock, ground apps") { nav.go(Screen.Controls(m.id)) }
+        if (!m.isParent && me.isParent) TextButton({
+            ctx.hb.scope.launch { runCatching { ctx.hb.api.critical(m.id) }.onSuccess { toast(ctx, "${m.name}'s phone will ring until they tap I'm OK") }.onFailure { toast(ctx, it.message ?: "Could not send it") } }
+        }, enabled = canDo(m, "critical")) { Text("🚨 Critical Check-In (rings through silent)", maxLines = 1) }
         if (!m.isParent && m.id == me.myId) TextButton({ nav.go(Screen.ScreenTime(m.id)) }) { Text("My screen time", maxLines = 1, softWrap = false) }
         if (me.isParent && m.id != me.myId) TextButton({
             ctx.hb.scope.launch { runCatching { ctx.hb.api.askUpdate(m.id) }.onSuccess { toast(ctx, "Asked ${m.name} to update") }.onFailure { toast(ctx, it.message ?: "Could not ask") } }
@@ -93,7 +101,10 @@ fun HomeTab(nav: Nav) {
     val nameOf: (Int) -> String = { id -> if (id == me.myId) "You" else fam?.members?.firstOrNull { it.id == id }?.name ?: "Someone" }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SetupBanner()
+        SafetyBanners()
+        SosAlerts(nav)
         Heading(fam?.family?.name ?: me.familyName.ifBlank { "Home" }, "${fam?.members?.size ?: 1} people")
+        if (!me.isParent) SosButton { state.sosAsk.value = true }
         GroupRequests()
         val now = System.currentTimeMillis() / 1000.0
         val all = fam?.members.orEmpty()
@@ -160,5 +171,5 @@ fun HomeTab(nav: Nav) {
     if (planOpen) AddPlanDialog(null) { planOpen = false }
     if (pollOpen) AskPollDialog { pollOpen = false }
     if (mealOpen) AddMealDialog(null) { mealOpen = false }
-    if (lateOpen) PickDialog("How late will you be?", listOf("About 10 minutes" to 10, "About 20 minutes" to 20, "About 30 minutes" to 30, "About an hour" to 60), { sendQuick(ctx, "late", "Running about $it minutes late", 0, false, "Sent") }, { lateOpen = false })
+    if (lateOpen) PickDialog("How late will you be?", LATE_CHOICES, { lateSend(ctx, it) }, { lateOpen = false })
 }

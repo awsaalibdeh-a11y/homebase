@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import app.homebase.family.ui.gameText
+import app.homebase.family.ui.safeDnsStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,7 +83,19 @@ class HomebaseService : Service() {
 
     private fun granted(p: String) = ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
     private val appVisible get() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-    private fun sharingNow() = hb.state.me?.share == "on" && granted(Manifest.permission.ACCESS_FINE_LOCATION)
+    private fun sharingNow() = (hb.state.me?.share == "on" || hb.state.me?.sos == true) && granted(Manifest.permission.ACCESS_FINE_LOCATION)
+    private var sendEveryMs = 120_000L                                 // set by the server: 2 minutes, 15 on a low battery, 10 seconds during an SOS
+    private var lastDnsReport = 0L
+
+    /** The server says how often to send. SOS asks the GPS for a fix every few seconds; the battery saver barely wakes it. */
+    private fun applyRate(intervalSec: Int, mode: String) {
+        sendEveryMs = intervalSec.coerceIn(5, 3600) * 1000L
+        when (mode) {
+            "sos" -> locationClient?.setRate(5_000L, 0f)
+            "saver" -> locationClient?.setRate(600_000L, 100f)
+            else -> locationClient?.setRate(60_000L, 25f)
+        }
+    }
 
     private fun goForeground() {
         val call = hb.state.call.value
@@ -107,6 +120,15 @@ class HomebaseService : Service() {
         scope.launch {
             app.state.family.collect { fam ->
                 lockOverlay.update(if (app.store.isParent) null else fam?.members?.firstOrNull { it.id == app.store.myId }?.lock)
+                val meNow = fam?.members?.firstOrNull { it.id == app.store.myId }
+                withContext(Dispatchers.Main) {                         // a Critical Check-In waiting on the server rings until "I'm OK"
+                    if (meNow?.critical != null) CriticalAlarm.start(this@HomebaseService, meNow.critical.by) else CriticalAlarm.stop(this@HomebaseService)
+                    if (meNow?.sos == true) applyRate(10, "sos")
+                }
+                if (System.currentTimeMillis() - lastDnsReport > 30 * 60_000L) {          // tell the family whether the web filter is on (never which sites)
+                    lastDnsReport = System.currentTimeMillis()
+                    runCatching { app.api.patchMe("safe_dns" to safeDnsStatus(this@HomebaseService)) }
+                }
                 withContext(Dispatchers.Main) {
                     if (sharingNow()) {
                         if (locationClient == null) locationClient = LocationClient(this@HomebaseService) { fix -> scope.launch { sendFix(fix) } }
@@ -127,11 +149,14 @@ class HomebaseService : Service() {
     private suspend fun sendFix(fix: Location) {
         val now = System.currentTimeMillis()
         val moved = lastSent?.distanceTo(fix) ?: 1e9f
-        if (now - lastSentAt < 20_000 && moved < 15f) return
+        val sos = hb.state.me?.sos == true
+        val farEnough = if (sendEveryMs > 300_000L) 1000f else 150f
+        if (!sos && now - lastSentAt < sendEveryMs && moved < farEnough) return
         lastSent = fix; lastSentAt = now
         hb.store.lastLat = fix.latitude.toFloat(); hb.store.lastLng = fix.longitude.toFloat(); hb.store.lastSentAt = now
         val battery = (getSystemService(Context.BATTERY_SERVICE) as BatteryManager).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         runCatching { hb.api.postLocation(fix.latitude, fix.longitude, fix.accuracy, fix.speed, battery) }
+            .onSuccess { r -> withContext(Dispatchers.Main) { applyRate(r.interval, r.mode) } }
     }
 
     private suspend fun eventLoop() {
@@ -193,7 +218,8 @@ class HomebaseService : Service() {
                         else -> name to m.body
                     }
                     val alert = m.kind == "sos" || m.kind == "checkin" || m.kind == "late" || m.kind == "pickup"
-                    val channel = if (alert) Notifications.CH_ALERTS else if (p.flag("quiet")) Notifications.CH_QUIET else Notifications.CH_MESSAGES
+                    val channel = if (m.kind == "sos") Notifications.CH_SOS else if (alert) Notifications.CH_ALERTS else if (p.flag("quiet")) Notifications.CH_QUIET else Notifications.CH_MESSAGES
+                    if (m.kind == "sos") app.state.refreshFamily()
                     Notifications.post(this, channel, title, body, "chat:${app.state.threadOf(m)}", m.kind == "sos")
                 }
             }
@@ -255,6 +281,13 @@ class HomebaseService : Service() {
                 app.state.refreshFamily()
                 if (p.str("text").isNotBlank()) Notifications.post(this, Notifications.CH_ALERTS, "\uD83D\uDCE2 ${p.str("name")}", p.str("text"))
             }
+            "risk_alert" -> Notifications.post(this, Notifications.CH_ALERTS, "⚠️ Safety alert for ${p.str("name")}", "A message looked like ${p.str("what")}. Open Mellow to see it.", "safety")
+            "zone_request" -> { app.state.refreshFamily(); Notifications.post(this, Notifications.CH_MESSAGES, "📍 ${p.str("name")} asks for a zone", p.str("place"), "places") }
+            "zone_ok" -> { app.state.refreshFamily(); Notifications.post(this, Notifications.CH_MESSAGES, if (p.flag("approved")) "📍 ${p.str("place")} is a zone now" else "${p.str("name")} said not now", p.str("place"), "places") }
+            "offline" -> Notifications.post(this, Notifications.CH_ALERTS, "📵 ${p.str("name")}'s phone went offline", "Not heard from for ${p.int("minutes")} minutes" + (if (p.int("battery") >= 0) " (battery was ${p.int("battery")}%)" else ""), "map")
+            "online" -> Notifications.post(this, Notifications.CH_MESSAGES, "✅ ${p.str("name")}'s phone is back online", "", "map")
+            "critical" -> { app.state.refreshFamily(); withContext(Dispatchers.Main) { CriticalAlarm.start(this@HomebaseService, p.str("name")) } }
+            "critical_ok" -> Notifications.post(this, Notifications.CH_ALERTS, "✅ ${p.str("name")} is OK", "They answered your Critical Check-In.", "map")
             "meals" -> app.state.refreshMeals()
             "meal_suggest" -> {
                 app.state.refreshMeals()

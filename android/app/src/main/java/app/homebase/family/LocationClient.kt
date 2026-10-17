@@ -12,6 +12,15 @@ import android.os.Looper
 class LocationClient(private val ctx: Context, private val onFix: (Location) -> Unit) {
     private val manager = ctx.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private var running = false
+    private var everyMs = 20_000L
+    private var metres = 15f
+
+    /** How often to ask the GPS: fast during an SOS, slow on a low battery. Takes effect at once if it is running. */
+    fun setRate(ms: Long, minMetres: Float) {
+        if (ms == everyMs && minMetres == metres) return
+        everyMs = ms; metres = minMetres
+        if (running) { stop(); start() }
+    }
     private val listener = object : LocationListener {
         override fun onLocationChanged(l: Location) { onFix(l) }
         override fun onProviderEnabled(p: String) {}
@@ -24,7 +33,7 @@ class LocationClient(private val ctx: Context, private val onFix: (Location) -> 
         if (running) return
         running = true
         for (p in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
-            runCatching { if (manager.isProviderEnabled(p)) manager.requestLocationUpdates(p, 20_000L, 15f, listener, Looper.getMainLooper()) }
+            runCatching { if (manager.isProviderEnabled(p)) manager.requestLocationUpdates(p, everyMs, metres, listener, Looper.getMainLooper()) }
         }
         runCatching { manager.getLastKnownLocation(LocationManager.GPS_PROVIDER) ?: manager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull()?.let(onFix)
     }

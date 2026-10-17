@@ -37,13 +37,16 @@ fun PlacesScreen(nav: Nav) {
     val scope = ctx.hb.scope
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { TextButton({ nav.back() }) { Text("Back") } }
-        Heading("Saved places", "Everyone in the family is told when someone arrives at or leaves one, including the person it is about.")
+        Heading("Zones", "Places like School, Home or Grandma's. Everyone is told when someone arrives or leaves, including the person it is about." + (if (ctx.hb.store.isParent) "" else " You can ask for one; a parent says yes."))
         fam?.places.orEmpty().forEach { p ->
             SoftCard {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Avatar(p.emoji, 44, MintSoft)
-                    Column(Modifier.weight(1f)) { Text(p.name, style = MaterialTheme.typography.titleMedium); Text("${p.radius} m around", color = Muted) }
-                    if (ctx.hb.store.isParent) TextButton({ scope.launch { runCatching { ctx.hb.api.removePlace(p.id) }.onSuccess { ctx.hb.state.refreshFamily() } } }) { Text("Remove") }
+                    Column(Modifier.weight(1f)) { Text(p.name, style = MaterialTheme.typography.titleMedium); Text("${p.radius} m around" + if (p.pending) " · waiting for a parent" else "", color = Muted) }
+                    if (ctx.hb.store.isParent && p.pending) {
+                        TextButton({ scope.launch { runCatching { ctx.hb.api.approvePlace(p.id, true) }.onSuccess { ctx.hb.state.refreshFamily() } } }) { Text("Yes") }
+                        TextButton({ scope.launch { runCatching { ctx.hb.api.approvePlace(p.id, false) }.onSuccess { ctx.hb.state.refreshFamily() } } }) { Text("Not now") }
+                    } else if (ctx.hb.store.isParent) TextButton({ scope.launch { runCatching { ctx.hb.api.removePlace(p.id) }.onSuccess { ctx.hb.state.refreshFamily() } } }) { Text("Remove") }
                 }
             }
         }
@@ -55,8 +58,8 @@ fun PlacesScreen(nav: Nav) {
                 if (st.lastSentAt == 0L) toast(ctx, "Turn on your location sharing first, so Mellow knows where you are.")
                 else scope.launch { runCatching { ctx.hb.api.setHome(st.lastLat.toDouble(), st.lastLng.toDouble(), 200) }.onSuccess { ctx.hb.state.refreshFamily(); toast(ctx, "Home area saved") }.onFailure { toast(ctx, it.message ?: "Could not save it") } }
             }
-            SoftButton("Add another place") { nav.go(Screen.AddPlace) }
-        }
+            SoftButton("Add another zone") { nav.go(Screen.AddPlace) }
+        } else SoftButton("Ask for a zone") { nav.go(Screen.AddPlace) }
     }
 }
 
@@ -84,7 +87,7 @@ fun AddPlaceScreen(nav: Nav) {
                 busy = true
                 ctx.hb.scope.launch {
                     runCatching { ctx.hb.api.addPlace(name, emoji, picked!!.first, picked!!.second, radius) }
-                        .onSuccess { ctx.hb.state.refreshFamily(); nav.back() }
+                        .onSuccess { ctx.hb.state.refreshFamily(); if (!ctx.hb.store.isParent) toast(ctx, "Asked. A parent will say yes or not now."); nav.back() }
                         .onFailure { toast(ctx, it.message ?: "Could not save"); busy = false }
                 }
             }

@@ -17,6 +17,7 @@ object Notifications {
     const val CH_QUIET = "quiet"
     const val CH_ALERTS = "alerts"
     const val CH_CALLS = "calls"
+    const val CH_SOS = "sos_alarm"
     const val ID_SERVICE = 1
     const val ID_CALL = 2
     private var next = 100
@@ -28,6 +29,12 @@ object Notifications {
         nm.createNotificationChannel(NotificationChannel(CH_MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH).apply { setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), attrs); enableVibration(true) })
         nm.createNotificationChannel(NotificationChannel(CH_QUIET, "Messages in quiet hours", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null) })
         nm.createNotificationChannel(NotificationChannel(CH_ALERTS, "Check-ins, places and SOS", NotificationManager.IMPORTANCE_HIGH).apply { setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), attrs); enableVibration(true) })
+        val alarm = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+        nm.createNotificationChannel(NotificationChannel(CH_SOS, "SOS and Critical Check-Ins", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Loud, even on silent. Only for an SOS from the family or a parent's Critical Check-In."
+            setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), alarm); enableVibration(true); vibrationPattern = longArrayOf(0, 800, 300, 800, 300, 800)
+            setBypassDnd(true); lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        })
         nm.createNotificationChannel(NotificationChannel(CH_CALLS, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply { setSound(null, null); enableVibration(false); lockscreenVisibility = Notification.VISIBILITY_PUBLIC })
     }
 

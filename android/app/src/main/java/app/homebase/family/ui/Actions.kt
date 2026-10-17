@@ -32,13 +32,26 @@ fun lastSpot(ctx: Context): Spot? {
 fun sendQuick(ctx: Context, kind: String, body: String, to: Int = 0, withSpot: Boolean = false, done: String = "Sent") {
     ctx.hb.scope.launch {
         val spot = if (withSpot) lastSpot(ctx) else null
-        runCatching { ctx.hb.api.send(kind, body, to, spot?.lat, spot?.lng) }
-            .onSuccess { ctx.hb.state.add(it); toast(ctx, done) }
+        runCatching { ctx.hb.api.sendFull(kind, body, to, spot?.lat, spot?.lng) }
+            .onSuccess { r ->
+                ctx.hb.state.add(r.message); toast(ctx, done)
+                r.support?.let { ctx.hb.state.support.value = it }
+                if (kind == "sos" || kind == "checkin") ctx.hb.state.refreshFamily()      // SOS starts live location; "I'm OK" ends it
+                if (kind == "checkin") app.homebase.family.CriticalAlarm.stop(ctx)
+            }
             .onFailure {
                 if (it is ApiError) toast(ctx, it.message ?: "Could not send")
                 else { ctx.hb.state.queueSend(kind, body, to, spot?.lat, spot?.lng); toast(ctx, "You are offline. Saved: it sends by itself when you have signal.") }
             }
     }
+}
+
+/** "Running late": the first choice sends where you are, and the server works out how far from Home that is. */
+val LATE_CHOICES = listOf("📍 Work it out from where I am" to 0, "About 10 minutes" to 10, "About 20 minutes" to 20, "About 30 minutes" to 30, "About an hour" to 60)
+
+fun lateSend(ctx: Context, minutes: Int) {
+    if (minutes == 0) sendQuick(ctx, "late", "", 0, true, "Sent, with how far from home you are")
+    else sendQuick(ctx, "late", "Running about $minutes minutes late", 0, false, "Sent")
 }
 
 /** "Where are you?" is a request. The other person decides whether to answer. */

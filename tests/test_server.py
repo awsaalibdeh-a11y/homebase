@@ -60,9 +60,9 @@ class Family(Base):
         self.assertEqual(self.c.get("/api/invite/NOPE1234").status_code, 404)
         self.assertEqual(self.c.get(f"/api/invite/{code}").status_code, 200)               # looking does not use it up
 
-    def test_children_cannot_invite_or_add_places(self):
+    def test_children_cannot_invite_and_can_only_ask_for_places(self):
         self.assertEqual(self.post(self.kid, "/api/invite", role="parent").status_code, 403)
-        self.assertEqual(self.post(self.kid, "/api/places", name="Park", lat=1, lng=1).status_code, 403)
+        self.assertTrue(self.post(self.kid, "/api/places", name="Park", lat=1, lng=1).get_json()["pending"])
         self.assertEqual(self.c.get("/api/family").status_code, 401)
 
     def test_families_cannot_see_each_other(self):
@@ -2346,6 +2346,115 @@ class UpdateLog(Base):
             self.assertEqual(bool(u.get("big")), minor == "0", u["v"])
         cfg = self.c.get("/api/config").get_json()
         self.assertEqual((cfg["version_name"], cfg["notes"]), (server.VERSION_NAME, server.CHANGELOG[0]["items"]))
+
+
+class SafetyV4(Base):
+    def me(self, who, mid):
+        return {m["id"]: m for m in self.get(who, "/api/family").get_json()["members"]}[mid]
+
+    # ---- safety alerts
+    def test_a_risky_message_alerts_the_childs_parents_and_nothing_else_does(self):
+        self.post(self.kid, "/api/messages", kind="text", body="see you at football later", to=0)
+        self.assertFalse([e for e in self.events(self.mum) if e["type"] == "risk_alert"], "ordinary messages are never reported")
+        r = self.post(self.kid, "/api/messages", kind="text", body="nobody likes you, go die", to=0).get_json()
+        got = [e["payload"] for e in self.events(self.mum) if e["type"] == "risk_alert"]
+        self.assertEqual((len(got), got[0]["cat"], got[0]["name"], got[0]["role"]), (1, "bullying", "Sam", "sent"))
+        self.assertIsNone(r["support"])
+        listed = self.get(self.mum, "/api/risk").get_json()["alerts"]
+        self.assertEqual((listed[0]["snippet"], listed[0]["what"]), ("nobody likes you, go die", "bullying"))
+        self.assertEqual(self.get(self.kid, "/api/risk").status_code, 403, "only parents read alerts")
+
+    def test_self_harm_gets_the_child_a_kind_note_and_tells_the_parents(self):
+        r = self.post(self.kid, "/api/messages", kind="text", body="i want to die honestly", to=0).get_json()
+        self.assertIn("You are not alone", r["support"])
+        self.assertEqual([e["payload"]["cat"] for e in self.events(self.mum) if e["type"] == "risk_alert"], ["self_harm"])
+
+    def test_grooming_from_an_adult_alerts_the_child_parents(self):
+        r = self.post(self.mum, "/api/messages", kind="text", body="don't tell your dad, it's our little secret", to=self.kid_id).get_json()
+        got = [e["payload"] for e in self.events(self.mum) if e["type"] == "risk_alert"]
+        self.assertEqual((got[0]["cat"], got[0]["role"], got[0]["other"]), ("grooming", "received", "Mum"))
+        self.assertIsNone(r["support"])
+
+    def test_the_patterns(self):
+        self.assertEqual(server.risk_scan("send nudes"), ["adult"])
+        self.assertEqual(server.risk_scan("Are you home alone? add me on snapchat"), ["grooming"])
+        self.assertEqual(server.risk_scan("I'm killing it at maths"), [])
+        self.assertEqual(server.risk_scan("that film was so bad i wanted to die laughing"), ["self_harm"], "false alarms happen; parents see the message to judge")
+
+    # ---- zones
+    def test_a_child_asks_for_a_zone_and_a_parent_says_yes(self):
+        pid = self.post(self.kid, "/api/places", name="Grandma's", lat=51.5, lng=-0.12, radius=200).get_json()["id"]
+        self.assertEqual([e["payload"]["place"] for e in self.events(self.mum) if e["type"] == "zone_request"], ["Grandma's"])
+        place = [x for x in self.get(self.mum, "/api/family").get_json()["places"] if x["id"] == pid][0]
+        self.assertTrue(place["pending"])
+        self.where(self.kid, 51.5, -0.12)
+        self.assertFalse([e for e in self.events(self.mum) if e["type"] == "place"], "a zone waiting for a yes tells nobody")
+        self.assertEqual(self.post(self.kid, f"/api/places/{pid}/approve", ok=True).status_code, 403)
+        self.assertEqual(self.post(self.mum, f"/api/places/{pid}/approve", ok=True).status_code, 200)
+        self.assertFalse([x for x in self.get(self.mum, "/api/family").get_json()["places"] if x["id"] == pid][0]["pending"])
+        self.assertEqual([e["payload"]["approved"] for e in self.events(self.kid) if e["type"] == "zone_ok"], [True])
+
+    # ---- SOS and battery-aware location
+    def test_sos_streams_location_even_when_paused_and_im_ok_ends_it(self):
+        self.post(self.kid, "/api/sharing", state="paused", minutes=60)
+        self.assertEqual(self.where(self.kid, 51.5, -0.1, battery=50).get_json()["shared"], False)
+        self.post(self.kid, "/api/messages", kind="sos", body="", lat=51.5, lng=-0.1, to=0)
+        r = self.where(self.kid, 51.51, -0.1, battery=10).get_json()
+        self.assertEqual((r["shared"], r["interval"], r["mode"]), (True, 10, "sos"), "SOS beats both the pause and the battery saver")
+        kid = self.me(self.mum, self.kid_id)
+        self.assertTrue(kid["sos"])
+        self.assertAlmostEqual(kid["location"]["lat"], 51.51)
+        self.post(self.kid, "/api/messages", kind="checkin", body="I'm OK", to=0)
+        self.assertNotIn("sos", self.me(self.mum, self.kid_id))
+
+    def test_battery_saver_interval(self):
+        self.assertEqual(self.where(self.kid, 51.5, -0.1, battery=80).get_json()["interval"], 120)
+        self.assertEqual(self.where(self.kid, 51.5, -0.1, battery=19).get_json()["interval"], 900)
+
+    # ---- running late with an ETA
+    def test_late_works_out_an_eta_to_home(self):
+        self.post(self.mum, "/api/home", lat=51.5, lng=-0.12, radius=150)
+        m = self.post(self.kid, "/api/messages", kind="late", body="", lat=51.509, lng=-0.12, to=0).get_json()["message"]
+        self.assertRegex(m["body"], r"^Running late · about \d+ min from home \(1\.0 km\)$")
+        eta = self.me(self.mum, self.kid_id)["eta"]
+        self.assertTrue(10 <= eta["min"] <= 20)
+        plain = self.post(self.kid, "/api/messages", kind="late", body="Running 20 min late", to=0).get_json()["message"]
+        self.assertEqual(plain["body"], "Running 20 min late", "no location: the words stay as they are")
+
+    # ---- Critical Check-In
+    def test_critical_check_in_until_im_ok(self):
+        self.assertEqual(self.post(self.mum, f"/api/members/{self.kid_id}/critical").status_code, 200)
+        self.assertEqual([e["payload"]["name"] for e in self.events(self.kid) if e["type"] == "critical"], ["Mum"])
+        self.assertEqual(self.me(self.kid, self.kid_id)["critical"]["by"], "Mum", "it waits on the server, so the next check picks it up")
+        self.assertNotIn("critical", self.me(self.mum, self.kid_id), "only the child's own view carries it")
+        self.post(self.kid, "/api/messages", kind="checkin", body="I'm OK", to=0)
+        self.assertNotIn("critical", self.me(self.kid, self.kid_id))
+        self.assertTrue([e for e in self.events(self.mum) if e["type"] == "critical_ok"])
+        self.assertEqual(self.post(self.kid, f"/api/members/{self.mum_id}/critical").status_code, 403)
+
+    def test_a_child_can_switch_critical_check_ins_off(self):
+        self.c.patch("/api/me", headers=self.kid, json={"perms": {"critical": False}})
+        self.assertEqual(self.post(self.mum, f"/api/members/{self.kid_id}/critical").status_code, 403)
+
+    # ---- safe browsing and going offline
+    def test_safe_browsing_status_is_shown_to_parents(self):
+        self.c.patch("/api/me", headers=self.kid, json={"safe_dns": "family-filter-dns.cleanbrowsing.org"})
+        self.assertEqual(self.me(self.mum, self.kid_id)["safe_dns"], "family-filter-dns.cleanbrowsing.org")
+        self.c.patch("/api/me", headers=self.kid, json={"safe_dns": ""})
+        self.assertEqual(self.me(self.mum, self.kid_id)["safe_dns"], "off")
+
+    def test_parents_hear_when_a_phone_goes_quiet_and_comes_back(self):
+        db.run(db.update(db.members).where(db.members.c.id == self.kid_id).values(app_version=12, last_seen=time.time() - 25 * 60))
+        server._last_offline[0] = 0
+        server.check_offline()
+        self.assertEqual([e["payload"]["name"] for e in self.events(self.mum) if e["type"] == "offline"], ["Sam"])
+        server._last_offline[0] = 0
+        server.check_offline()
+        self.assertEqual(len([e for e in self.events(self.mum) if e["type"] == "offline"]), 1, "told once")
+        db.run(db.update(db.members).where(db.members.c.id == self.kid_id).values(last_seen=time.time()))
+        server._last_offline[0] = 0
+        server.check_offline()
+        self.assertEqual([e["payload"]["name"] for e in self.events(self.mum) if e["type"] == "online"], ["Sam"])
 
 
 if __name__ == "__main__":

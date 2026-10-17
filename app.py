@@ -28,9 +28,20 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "11"))      # what Android compares (a plain counter)
-VERSION_NAME = os.environ.get("APP_VERSION_NAME", "3.0")           # what people see: a whole number is a big update, a decimal is a small one
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "12"))      # what Android compares (a plain counter)
+VERSION_NAME = os.environ.get("APP_VERSION_NAME", "4.0")           # what people see: a whole number is a big update, a decimal is a small one
 CHANGELOG = [                                                         # newest first; shown on the install and update page
+    {"v": "4.0", "date": "17 Oct 2026", "big": True, "title": "The humongous update: safety, zones, a new look and a welcome animation", "items": [
+        "SOS: a big button on Home and a home-screen widget. It sounds a loud alarm on parents' phones and sends live location every 10 seconds for 30 minutes, even if sharing was paused. \"I'm OK\" ends it.",
+        "Critical Check-In: a parent can make a child's phone ring through silent until they tap I'm OK. The child can switch this off in What parents can do, and parents see that.",
+        "Zones: children can ask for a place (school, Grandma's) and a parent says yes. Everyone is told when someone arrives or leaves.",
+        "Running late works out an ETA from where you are to Home and shows it on the map.",
+        "Safety alerts: a message in Mellow that looks like bullying, self-harm, adult content or grooming alerts a child's parents (only that message, never a log of everything).",
+        "Safe browsing: a family web filter (adult content and malware) that also works in private tabs, with its on or off status shown to parents.",
+        "Parents are told when a child's phone goes offline for 20 minutes, and when it is back.",
+        "Battery saver: location is sent every 15 minutes under 20% battery (every 2 minutes otherwise); SOS always sends live.",
+        "A clearer map, a bolder background, and tidier calls and chats.",
+    ]},
     {"v": "3.0", "date": "16 Oct 2026", "big": True, "title": "Recipes, fun, and calls that connect", "items": [
         "Search recipes inside Mellow (Home, Plan, and the web app). Pick one and it goes on the meal plan with its ingredients and method; anyone can open it in Platter.",
         "Children can suggest recipes and meals. Parents get a notice and say yes or not now.",
@@ -167,7 +178,7 @@ def in_quiet(m, now=None):
 
 PERMS = {"location": "see where they are", "trail": "see their location trail", "battery": "see their battery level",
          "messages": "send them messages", "calls": "call them", "ping": 'ask "Where are you?"',
-         "screentime": "see their screen time"}
+         "screentime": "see their screen time", "critical": "ring through silent with a Critical Check-In"}
 
 
 def perms_of(m):
@@ -203,7 +214,17 @@ def member_view(m, viewer=None):
            "paused_until": m["paused_until"] if state == "paused" else 0, "last_seen": m["last_seen"], "quiet": m["quiet_from"] >= 0,
            "location": None, "perms": perms, "lock": lock_view(m), "home": at_home(m), "blocks": block_views(m),
            "avatar": (f"/api/avatar/{m['id']}?v={int(m['avatar_at'] or 0)}" if m["avatar"] else None), "status": status_view(m), "birthday": m["birthday"] or None, "app_version": m.get("app_version") or 0}
-    if state == "on" and m["last_lat"] is not None and not (gated and not perms["location"]):
+    now = time.time()
+    if (m.get("sos_until") or 0) > now:
+        out["sos"] = True
+    if (m.get("eta_until") or 0) > now and m.get("eta_min"):
+        out["eta"] = {"min": m["eta_min"], "until": m["eta_until"]}
+    if m["role"] == "child" and viewer and (viewer["id"] == m["id"] or viewer["role"] == "parent"):
+        out["safe_dns"] = m.get("safe_dns") or ""
+    if viewer and viewer["id"] == m["id"] and (m.get("critical_at") or 0) > now - 3600:
+        by = db.one(select(db.members).where(db.members.c.id == m["critical_by"])) if m.get("critical_by") else None
+        out["critical"] = {"at": m["critical_at"], "by": by["name"] if by else "A parent"}
+    if (state == "on" or out.get("sos")) and m["last_lat"] is not None and not (gated and not perms["location"] and not out.get("sos")):
         out["location"] = {"lat": m["last_lat"], "lng": m["last_lng"], "acc": m["last_acc"], "at": m["last_at"]}
     if gated and not perms["location"]:
         out["share"] = "off"
@@ -371,6 +392,9 @@ def patch_me():
             vals[k] = max(-1, min(1439, int(b[k]))) if str(b[k]).lstrip("-").isdigit() else -1
     if "tz_offset" in b and str(b["tz_offset"]).lstrip("-").isdigit():
         vals["tz_offset"] = max(-840, min(840, int(b["tz_offset"])))
+    if "safe_dns" in b:                                                  # what the phone reports about its private DNS filter: a host name, or "off"
+        vals["safe_dns"] = clean(b.get("safe_dns"), 80) or "off"
+        vals["safe_dns_at"] = time.time()
     if isinstance(b.get("perms"), dict):
         off = {k: False for k, v in {**perms_of(g.m), **{k: bool(v) for k, v in b["perms"].items() if k in PERMS}}.items() if not v}
         vals["perms"] = json.dumps(off)
@@ -410,7 +434,7 @@ def get_family():
     m = g.m
     places = db.many(select(db.places).where(db.places.c.family_id == m["family_id"]).order_by(db.places.c.id))
     return jsonify(family=family_view(m), me=m["id"], members=[member_view(x, m) for x in family_members(m["family_id"])],
-                   places=[{k: p[k] for k in ("id", "name", "emoji", "lat", "lng", "radius")} for p in places], ice_servers=ice_servers(), version_code=VERSION_CODE)
+                   places=[{**{k: p[k] for k in ("id", "name", "emoji", "lat", "lng", "radius")}, "pending": bool(p.get("pending"))} for p in places], ice_servers=ice_servers(), version_code=VERSION_CODE)
 
 
 @app.get("/api/config")
@@ -431,6 +455,8 @@ def say(fid, from_id, body, kind="system", lat=None, lng=None, to_id=0):
 
 def check_places(m, lat, lng, acc):
     for p in db.many(select(db.places).where(db.places.c.family_id == m["family_id"])):
+        if p.get("pending"):
+            continue
         st = db.one(select(db.place_state).where(db.place_state.c.member_id == m["id"], db.place_state.c.place_id == p["id"]))
         inside, d = bool(st and st["inside"]), metres(lat, lng, p["lat"], p["lng"])
         arrived, left = (not inside and d <= p["radius"]), (inside and d > p["radius"] + max(acc, 30))
@@ -456,10 +482,11 @@ def post_location():
     if not (-90 <= lat <= 90 and -180 <= lng <= 180):
         return err("That is not a real place.")
     state = sharing_state(m)
-    if state != "on":
-        return jsonify(ok=True, shared=False, share=state)
     now = time.time()
+    sos = (m.get("sos_until") or 0) > now
     battery = int(b["battery"]) if str(b.get("battery", "")).lstrip("-").isdigit() else -1
+    if state != "on" and not sos:
+        return jsonify(ok=True, shared=False, share=state, **send_every(battery, False))
     moved = metres(m["last_lat"], m["last_lng"], lat, lng) if m["last_lat"] is not None else 1e9
     db.run(insert(db.locations).values(member_id=m["id"], lat=lat, lng=lng, acc=acc, speed=float(b.get("speed") or 0), at=now))
     vals = dict(last_lat=lat, last_lng=lng, last_acc=acc, last_at=now, battery=battery)
@@ -470,12 +497,21 @@ def post_location():
         say(m["family_id"], m["id"], f"{m['name']}'s battery is low ({battery}%)")
         push_family(m["family_id"], "battery", {"member": m["id"], "name": m["name"], "battery": battery}, skip=m["id"])
     db.run(update(db.members).where(db.members.c.id == m["id"]).values(**vals))
-    if moved > 25 or now - (m["last_at"] or 0) > 60:
-        push_family(m["family_id"], "location", {"member": m["id"], "lat": lat, "lng": lng, "acc": acc, "at": now, "battery": battery}, skip=m["id"])
+    if sos or moved > 25 or now - (m["last_at"] or 0) > 60:
+        push_family(m["family_id"], "location", {"member": m["id"], "lat": lat, "lng": lng, "acc": acc, "at": now, "battery": battery, "sos": sos}, skip=m["id"])
     check_places(m, lat, lng, acc)
     if int(now) % 50 == 0:
         db.run(delete(db.locations).where(db.locations.c.at < now - KEEP_LOCATIONS_DAYS * 86400))
-    return jsonify(ok=True, shared=True)
+    return jsonify(ok=True, shared=True, **send_every(battery, sos))
+
+
+def send_every(battery, sos):
+    """How often the phone should send its location: every 10 seconds during an SOS, every 15 minutes when the battery is under 20%, otherwise every 2 minutes."""
+    if sos:
+        return {"interval": 10, "mode": "sos"}
+    if 0 <= battery < 20:
+        return {"interval": 900, "mode": "saver"}
+    return {"interval": 120, "mode": "normal"}
 
 
 @app.post("/api/sharing")
@@ -1456,8 +1492,18 @@ def send_message():
         return denied(same_family(to_id), "messages")
     if limited(f"msg:{m['id']}", 120):
         return err("Slow down a little.", 429)
-    lat = float(b["lat"]) if kind in ("checkin", "sos", "pickup") and b.get("lat") is not None else None
-    lng = float(b["lng"]) if kind in ("checkin", "sos", "pickup") and b.get("lng") is not None else None
+    lat = float(b["lat"]) if kind in ("checkin", "sos", "pickup", "late") and b.get("lat") is not None else None
+    lng = float(b["lng"]) if kind in ("checkin", "sos", "pickup", "late") and b.get("lng") is not None else None
+    if kind == "late":
+        body = late_with_eta(m, body, lat, lng)
+    if kind == "sos":
+        db.run(update(db.members).where(db.members.c.id == m["id"]).values(sos_until=time.time() + SOS_MINUTES * 60))
+    if kind == "checkin":                                              # "I'm OK" ends an SOS and answers a Critical Check-In
+        db.run(update(db.members).where(db.members.c.id == m["id"]).values(sos_until=0, critical_at=0))
+        if m.get("critical_at"):
+            for p in family_members(m["family_id"]):
+                if p["role"] == "parent":
+                    push(p["id"], "critical_ok", {"name": m["name"], "member": m["id"]})
     if kind == "sos":
         body = body or "I need help"
     if kind == "pickup":                                               # "come and get me": goes to the whole family, with where I am if I chose to send it
@@ -1465,13 +1511,166 @@ def send_message():
         to_id = 0
     mid = say(m["family_id"], m["id"], body, kind=kind, lat=lat, lng=lng, to_id=to_id)
     row = db.one(select(db.messages).where(db.messages.c.id == mid))
+    support = None
+    if kind == "text":
+        if to_id:
+            kids = [same_family(to_id)] if same_family(to_id) and same_family(to_id)["role"] == "child" else []
+        else:
+            kids = [x for x in family_members(m["family_id"]) if x["role"] == "child" and x["id"] != m["id"]]
+        support = risk_check(m, body, "the family chat" if not to_id else "a private message", kids)
     for x in family_members(m["family_id"]):
         if x["id"] == m["id"] or (to_id and x["id"] != to_id):
             continue
         if kind in ("text", "heart", "gif", "image") and not parent_may(m, x, "messages"):
             continue
         push(x["id"], "message", {**msg_view(row), "name": m["name"], "emoji": m["emoji"], "quiet": in_quiet(x) and kind not in ("sos", "pickup"), "urgent": kind == "sos"})
-    return jsonify(message=msg_view(row))
+    return jsonify(message=msg_view(row), support=support)
+
+
+# ---------------------------------------------------------------- "running late" works out how far from Home you are
+SOS_MINUTES = 30
+
+
+def late_with_eta(m, body, lat, lng):
+    """With a location, "late" says roughly how long until home: the distance to the Home place (with a bit added for roads) at walking pace, or at the speed the phone is moving."""
+    home = home_place(m["family_id"])
+    if lat is None or lng is None or not home:
+        return body or "Running late"
+    dist = metres(lat, lng, home["lat"], home["lng"])
+    last = db.one(select(db.locations).where(db.locations.c.member_id == m["id"], db.locations.c.at > time.time() - 300).order_by(db.locations.c.at.desc()).limit(1))
+    speed = last["speed"] if last and (last["speed"] or 0) >= 1.5 else 1.4                 # metres a second: walking unless the phone says it is moving faster
+    mins = max(1, math.ceil(dist * 1.3 / speed / 60)) if dist > (home["radius"] or 150) else 0
+    if not mins:
+        return body or "Running late, but almost home"
+    db.run(update(db.members).where(db.members.c.id == m["id"]).values(eta_min=mins, eta_until=time.time() + mins * 60 + 600))
+    push_family(m["family_id"], "member", {"id": m["id"]}, skip=m["id"])
+    where = f"about {mins} min from home ({dist / 1000:.1f} km)"
+    return f"{body} · {where}" if body else f"Running late · {where}"
+
+
+# ---------------------------------------------------------------- safety alerts: phrases that look like bullying, self-harm, adult content or grooming
+RISK_PATTERNS = {
+    "self_harm": r"\b(kill(ing)? myself|want(ed)? to die|end (it all|my life)|suicid\w*|self[- ]?harm\w*|cut(ting)? myself|hurt(ing)? myself|no reason to live|better off (dead|without me)|don'?t want to (live|be here))\b",
+    "bullying": r"\b(kill yourself|kys|go die|nobody (likes|wants) you|everyone hates you|you'?re (so )?(ugly|fat|worthless|pathetic|a loser|disgusting)|you should (die|disappear))\b",
+    "adult": r"\b(nudes?|send (me )?(nudes|pics of you|a pic of you)|sexy (pic|photo)s?|naked|porn\w*|onlyfans|sext\w*)\b",
+    "grooming": r"\b(don'?t tell (your )?(mum|mom|dad|parents|anyone)|(our|a) (little )?secret|delete (this|these|our|the) (chat|messages?|texts?)|are you (home )?alone|how old are you|meet (me )?(up )?(alone|in person|somewhere)|what'?s your (home )?address|i'?ll buy you|(add|move|switch|talk) (me )?(on|to) (snap(chat)?|whatsapp|insta(gram)?|telegram|discord|kik))\b",
+}
+RISK_NAMES = {"self_harm": "signs of self-harm", "bullying": "bullying", "adult": "adult content", "grooming": "grooming patterns"}
+SUPPORT = ("It sounds like things might be really hard right now. You are not alone. Please talk to a parent or another adult you trust. "
+           "If you are in danger right now, call your local emergency number. You can also call or text a free helpline (for example 988 in the US and Canada, or Childline 0800 1111 in the UK).")
+
+
+def risk_scan(text):
+    t = str(text or "").lower()
+    return [cat for cat, pat in RISK_PATTERNS.items() if re.search(pat, t)]
+
+
+def risk_check(sender, text, where, kids_involved):
+    """Tells a child's parents when a message to or from that child looks dangerous. Only the message that matched is shown to them, never a log of everything.
+    Returns a kind support note for a child who wrote something that sounds like self-harm."""
+    cats = risk_scan(text)
+    if not cats:
+        return None
+    now = time.time()
+    people = []
+    if sender["role"] == "child":
+        people.append((sender, "sent", ""))
+    for k in kids_involved:
+        if k and k["id"] != sender["id"] and k["role"] == "child":
+            people.append((k, "received", sender["name"]))
+    for kid, role, other in people:
+        for cat in cats:
+            if cat == "self_harm" and role != "sent":
+                continue                                               # someone else's worries are theirs; they are told by their own family
+            t = db.risk_alerts.c
+            recent = db.one(select(db.risk_alerts).where(t.member_id == kid["id"], t.cat == cat, t.created > now - 600))
+            aid = db.run(insert(db.risk_alerts).values(family_id=kid["family_id"], member_id=kid["id"], cat=cat, role=role, other=other[:40], where=where[:60],
+                                                       snippet=str(text)[:280], created=now))
+            if recent:
+                continue                                               # one alert at a time for the same thing
+            for p in family_members(kid["family_id"]):
+                if p["role"] == "parent":
+                    push(p["id"], "risk_alert", {"id": aid, "member": kid["id"], "name": kid["name"], "cat": cat, "what": RISK_NAMES[cat], "role": role, "other": other, "where": where})
+    return SUPPORT if sender["role"] == "child" and "self_harm" in cats else None
+
+
+@app.get("/api/risk")
+@parent_only
+def risk_list():
+    t = db.risk_alerts.c
+    rows = db.many(select(db.risk_alerts).where(t.family_id == g.m["family_id"]).order_by(t.id.desc()).limit(60))
+    names = {x["id"]: x["name"] for x in family_members(g.m["family_id"])}
+    return jsonify(alerts=[{"id": r["id"], "member": r["member_id"], "name": names.get(r["member_id"], ""), "cat": r["cat"], "what": RISK_NAMES.get(r["cat"], r["cat"]),
+                            "role": r["role"], "other": r["other"], "where": r["where"], "snippet": r["snippet"], "at": r["created"], "seen": bool(r["seen"])} for r in rows])
+
+
+@app.post("/api/risk/<int:aid>/seen")
+@parent_only
+def risk_seen(aid):
+    db.run(update(db.risk_alerts).where(db.risk_alerts.c.id == aid, db.risk_alerts.c.family_id == g.m["family_id"]).values(seen=True))
+    return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- Critical Check-In: a parent's request that rings through silent until the child taps "I'm OK"
+@app.post("/api/members/<int:mid>/critical")
+@parent_only
+def critical_checkin(mid):
+    kid = same_family(mid)
+    if not kid or kid["role"] != "child":
+        return err("Not found.", 404)
+    if not parent_may(g.m, kid, "critical"):
+        return denied(kid, "critical")
+    if limited(f"critical:{g.m['id']}", 6):
+        return err("Slow down a little.", 429)
+    db.run(update(db.members).where(db.members.c.id == mid).values(critical_at=time.time(), critical_by=g.m["id"]))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} sent {kid['name']} a Critical Check-In")
+    push(mid, "critical", {"name": g.m["name"], "by": g.m["id"]})
+    return jsonify(ok=True)
+
+
+@app.post("/api/critical/ack")
+@need
+def critical_ack():
+    m = g.m
+    if not m.get("critical_at"):
+        return jsonify(ok=True, was=False)
+    db.run(update(db.members).where(db.members.c.id == m["id"]).values(critical_at=0))
+    for p in family_members(m["family_id"]):
+        if p["role"] == "parent":
+            push(p["id"], "critical_ok", {"name": m["name"], "member": m["id"]})
+    return jsonify(ok=True, was=True)
+
+
+@app.post("/api/sos/clear")
+@need
+def sos_clear():
+    db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(sos_until=0))
+    push_family(g.m["family_id"], "member", {"id": g.m["id"]}, skip=g.m["id"])
+    return jsonify(ok=True)
+
+
+# ---------------------------------------------------------------- a phone that goes quiet: the parents are told once, and again when it is back
+OFFLINE_AFTER, _last_offline = 20 * 60, [0.0]
+
+
+def check_offline():
+    now = time.time()
+    if now - _last_offline[0] < 60:
+        return
+    _last_offline[0] = now
+    t = db.members.c
+    for kid in db.many(select(db.members).where(t.role == "child", t.app_version > 0)):
+        seen = kid["last_seen"] or 0
+        if not kid["offline_told"] and now - OFFLINE_AFTER > seen > now - 86400:
+            db.run(update(db.members).where(t.id == kid["id"]).values(offline_told=True))
+            for p in family_members(kid["family_id"]):
+                if p["role"] == "parent":
+                    push(p["id"], "offline", {"member": kid["id"], "name": kid["name"], "minutes": int((now - seen) // 60), "battery": kid["battery"]})
+        elif kid["offline_told"] and seen > now - 300:
+            db.run(update(db.members).where(t.id == kid["id"]).values(offline_told=False))
+            for p in family_members(kid["family_id"]):
+                if p["role"] == "parent":
+                    push(p["id"], "online", {"member": kid["id"], "name": kid["name"]})
 
 
 @app.get("/api/messages")
@@ -1579,7 +1778,7 @@ def answer_ping(pid):
 
 # ---------------------------------------------------------------- places (everyone sees them, and gets told when one is added)
 @app.post("/api/places")
-@parent_only
+@need
 def add_place():
     m, b = g.m, request.get_json(silent=True) or {}
     try:
@@ -1592,10 +1791,37 @@ def add_place():
     if db.many(select(db.places.c.id).where(db.places.c.family_id == m["family_id"])).__len__() >= 20:
         return err("That is plenty of places (20).")
     radius = max(50, min(1000, int(b["radius"]))) if str(b.get("radius", "")).isdigit() else 150
-    pid = db.run(insert(db.places).values(family_id=m["family_id"], name=name, emoji=clean(b.get("emoji"), 8) or "📍", lat=lat, lng=lng, radius=radius, created_by=m["id"], created=time.time()))
+    child = m["role"] != "parent"
+    pid = db.run(insert(db.places).values(family_id=m["family_id"], name=name, emoji=clean(b.get("emoji"), 8) or "📍", lat=lat, lng=lng, radius=radius, created_by=m["id"], created=time.time(),
+                                          pending=child))
+    if child:                                                          # a child asks; a parent says yes before anyone is told about arrivals there
+        for p in family_members(m["family_id"]):
+            if p["role"] == "parent":
+                push(p["id"], "zone_request", {"id": pid, "name": m["name"], "place": name})
+        push_family(m["family_id"], "places", {"id": pid, "pending": True})
+        return jsonify(id=pid, pending=True)
     say(m["family_id"], m["id"], f"{m['name']} added the place {name}. Everyone is told when someone arrives or leaves.")
     push_family(m["family_id"], "places", {"id": pid, "name": name, "by": m["name"]})
-    return jsonify(id=pid)
+    return jsonify(id=pid, pending=False)
+
+
+@app.post("/api/places/<int:pid>/approve")
+@parent_only
+def approve_place(pid):
+    p = db.one(select(db.places).where(db.places.c.id == pid, db.places.c.family_id == g.m["family_id"]))
+    if not p or not p["pending"]:
+        return err("Nothing to answer.", 404)
+    ok = bool((request.get_json(silent=True) or {}).get("ok", True))
+    asker = same_family(p["created_by"])
+    if ok:
+        db.run(update(db.places).where(db.places.c.id == pid).values(pending=False))
+        say(g.m["family_id"], g.m["id"], f"{g.m['name']} added the place {p['name']}" + (f" ({asker['name']} asked)" if asker else "") + ". Everyone is told when someone arrives or leaves.")
+    else:
+        db.run(delete(db.places).where(db.places.c.id == pid))
+    if asker:
+        push(asker["id"], "zone_ok", {"place": p["name"], "approved": ok, "name": g.m["name"]})
+    push_family(g.m["family_id"], "places", {"id": pid}, skip=g.m["id"])
+    return jsonify(ok=True, approved=ok)
 
 
 @app.post("/api/home")
@@ -2336,6 +2562,10 @@ def send_group_message(gid):
     mid = db.run(insert(db.friend_messages).values(group_id=gid, from_id=g.m["id"], kind=kind, body=body, original=original, flags=json.dumps(flags) if flags else "", created=now))
     grp = group_row(gid)
     people = group_people(gid)
+    support = None
+    if kind == "text":
+        members = [db.one(select(db.members).where(db.members.c.id == x["id"])) for x in people]
+        support = risk_check(g.m, original or body, f"the group {grp['name']}", [x for x in members if x])
     note = None
     if flags:
         top = worst(flags)
@@ -2360,7 +2590,7 @@ def send_group_message(gid):
     for x in people:
         if x["id"] != g.m["id"]:
             push(x["id"], "gmessage", event)
-    return jsonify(id=mid, body=body, flagged=bool(flags), note=note)
+    return jsonify(id=mid, body=body, flagged=bool(flags), note=note, support=support)
 
 
 # ---------------------------------------------------------------- the family meal plan, and apps (like Platter) that put recipes on it
@@ -2905,6 +3135,18 @@ def web_note(kind, p):
         return {"title": f"\U0001F4DE {name} is calling", "body": "Open Homebase to answer", "tag": f"call-{p.get('id')}", "urgent": True}
     if kind == "ping":
         return {"title": f"\U0001F4CD {name} asks where you are", "body": "Open Homebase to answer, or say not now.", "tag": f"ping-{p.get('id')}"}
+    if kind == "risk_alert":
+        return {"title": f"\u26a0\ufe0f Safety alert for {p.get('name')}", "body": f"A message looked like {p.get('what')}. Open Mellow to see it.", "tag": f"risk-{p.get('id')}", "urgent": True}
+    if kind == "zone_request":
+        return {"title": f"\U0001F4CD {name} asks for a zone", "body": p.get("place") or "", "tag": f"zone-{p.get('id')}"}
+    if kind == "offline":
+        return {"title": f"\U0001F4F5 {name}'s phone went offline", "body": f"Not heard from for {p.get('minutes')} minutes" + (f" (battery was {p.get('battery')}%)" if (p.get("battery") or -1) >= 0 else ""), "tag": f"off-{p.get('member')}"}
+    if kind == "online":
+        return {"title": f"\u2705 {name}'s phone is back online", "body": "", "tag": f"off-{p.get('member')}"}
+    if kind == "critical":
+        return {"title": f"\U0001F6A8 {name} needs you to check in", "body": "Open Mellow and tap I'm OK.", "tag": "critical", "urgent": True}
+    if kind == "critical_ok":
+        return {"title": f"\u2705 {name} is OK", "body": "They answered your Critical Check-In.", "tag": f"crit-{p.get('member')}"}
     if kind == "meal_suggest":
         return {"title": f"\U0001F4A1 {name} suggests a meal", "body": p.get("title") or "", "tag": f"meal-{p.get('id')}"}
     if kind == "plan_soon":
@@ -3145,6 +3387,7 @@ def event_stream():
         expire_calls()
         remind_plans()
         remind_birthdays()
+        check_offline()
         rows = db.many(select(db.events).where(db.events.c.member_id == m["id"], db.events.c.id > after).order_by(db.events.c.id).limit(100))
         if rows or time.time() >= deadline:
             break

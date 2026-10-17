@@ -70,5 +70,9 @@
             </intent-filter>
         </receiver>
         <receiver android:name=".ActionReceiver" android:exported="false" />
+        <receiver android:name=".SosWidget" android:exported="false" android:label="Mellow SOS">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/sos_widget_info" />
+        </receiver>
     </application>
 </manifest>

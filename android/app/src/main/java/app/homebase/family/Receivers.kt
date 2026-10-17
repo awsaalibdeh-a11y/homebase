@@ -22,6 +22,17 @@ class ActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.hb
         when (intent.action) {
+            "critical_ok" -> {
+                CriticalAlarm.stop(context)
+                val pending = goAsync()
+                app.scope.launch {
+                    val spot = LocationClient(context) {}.lastKnown()
+                    runCatching { app.api.send("checkin", "I'm OK", 0, spot?.latitude, spot?.longitude) }
+                    runCatching { app.api.criticalAck() }
+                    app.state.refreshFamily()
+                    pending.finish()
+                }
+            }
             "decline_call" -> { app.calls.decline(); NotificationManagerCompat.from(context).cancel(Notifications.ID_CALL) }
             "ping_share", "ping_decline" -> {
                 val id = intent.getIntExtra("ping", 0)

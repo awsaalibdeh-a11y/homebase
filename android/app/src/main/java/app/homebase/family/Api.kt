@@ -70,9 +70,8 @@ class Api(private val store: Store) {
     suspend fun leave() { raw("DELETE", "/api/me") }
 
     // location
-    suspend fun postLocation(lat: Double, lng: Double, acc: Float, speed: Float, battery: Int) {
-        raw("POST", "/api/location", obj { put("lat", lat); put("lng", lng); put("acc", acc.toDouble()); put("speed", speed.toDouble()); put("battery", battery) })
-    }
+    suspend fun postLocation(lat: Double, lng: Double, acc: Float, speed: Float, battery: Int): LocResp =
+        ask("POST", "/api/location", obj { put("lat", lat); put("lng", lng); put("acc", acc.toDouble()); put("speed", speed.toDouble()); put("battery", battery) })
     suspend fun sharing(state: String, minutes: Int = 60) { raw("POST", "/api/sharing", obj { put("state", state); put("minutes", minutes) }) }
     suspend fun postScreenTime(day: String, apps: kotlinx.serialization.json.JsonArray) { raw("POST", "/api/screentime", obj { put("day", day); put("apps", apps) }) }
     suspend fun screenTime(member: Int, days: Int = 7): ScreenResp = ask("GET", "/api/screentime?member=$member&days=$days")
@@ -114,6 +113,20 @@ class Api(private val store: Store) {
             put("kind", kind); put("body", body); put("to", to)
             if (lat != null && lng != null) { put("lat", lat); put("lng", lng) }
         }).message
+
+    suspend fun sendFull(kind: String, body: String, to: Int, lat: Double? = null, lng: Double? = null): SendResp =
+        ask("POST", "/api/messages", obj {
+            put("kind", kind); put("body", body); put("to", to)
+            if (lat != null && lng != null) { put("lat", lat); put("lng", lng) }
+        })
+
+    // safety
+    suspend fun risk(): List<RiskAlert> = ask<RiskResp>("GET", "/api/risk").alerts
+    suspend fun riskSeen(id: Int) { raw("POST", "/api/risk/$id/seen") }
+    suspend fun critical(member: Int) { raw("POST", "/api/members/$member/critical") }
+    suspend fun criticalAck() { raw("POST", "/api/critical/ack") }
+    suspend fun sosClear() { raw("POST", "/api/sos/clear") }
+    suspend fun approvePlace(id: Int, ok: Boolean) { raw("POST", "/api/places/$id/approve", obj { put("ok", ok) }) }
 
     suspend fun react(id: Int, emoji: String): Map<String, List<Int>> = ask<ReactResp>("POST", "/api/messages/$id/react", obj { put("emoji", emoji) }).reactions
 

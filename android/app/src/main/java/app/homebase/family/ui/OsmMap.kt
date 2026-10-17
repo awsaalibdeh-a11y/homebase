@@ -28,7 +28,7 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.views.overlay.Polyline
 
-private fun bubble(ctx: Context, emoji: String, name: String, mine: Boolean, stale: Boolean): BitmapDrawable {
+private fun bubble(ctx: Context, emoji: String, name: String, mine: Boolean, stale: Boolean, sos: Boolean = false): BitmapDrawable {
     val d = ctx.resources.displayMetrics.density
     val w = (96 * d).toInt()
     val h = (92 * d).toInt()
@@ -36,7 +36,7 @@ private fun bubble(ctx: Context, emoji: String, name: String, mine: Boolean, sta
     val c = Canvas(bmp)
     val p = Paint(Paint.ANTI_ALIAS_FLAG)
     val cx = w / 2f
-    p.color = if (mine) 0xFF18A46A.toInt() else 0xFFD9962B.toInt()
+    p.color = if (sos) 0xFFD4303A.toInt() else if (mine) 0xFF141414.toInt() else 0xFF5B5954.toInt()
     p.alpha = if (stale) 150 else 255
     c.drawCircle(cx, 34 * d, 30 * d, p)
     p.color = 0xFFFFFFFF.toInt()
@@ -72,9 +72,12 @@ fun OsmMap(
         Configuration.getInstance().userAgentValue = ctx.packageName
         Configuration.getInstance().load(ctx, ctx.getSharedPreferences("osm", Context.MODE_PRIVATE))
         MapView(ctx).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
-            // white like the rest of the app: the normal light tiles, with the colour muted a little so the family stands out
-            overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0.55f) }))
+            // CARTO's clean map style (Voyager by day, Dark Matter in the dark look), from OpenStreetMap data
+            val dark = Look.dark
+            setTileSource(org.osmdroid.tileprovider.tilesource.XYTileSource(if (dark) "CartoDark" else "CartoVoyager", 0, 20, 256, ".png",
+                arrayOf("a", "b", "c", "d").map { "https://$it.basemaps.cartocdn.com/" + (if (dark) "dark_all/" else "rastertiles/voyager/") }.toTypedArray(),
+                "© OpenStreetMap contributors © CARTO"))
+            overlays.add(org.osmdroid.views.overlay.CopyrightOverlay(ctx))
             overlayManager.tilesOverlay.loadingBackgroundColor = android.graphics.Color.parseColor("#F1F1F3")
             overlayManager.tilesOverlay.loadingLineColor = android.graphics.Color.parseColor("#E1E1E6")
             setMultiTouchControls(true)
@@ -91,7 +94,7 @@ fun OsmMap(
         focus?.let { map.controller.animateTo(GeoPoint(it.lat, it.lng), 17.0, 600L) }
     }
     AndroidView(factory = { map }, modifier = modifier, update = { m ->
-        m.overlays.clear()
+        m.overlays.removeAll { it !is org.osmdroid.views.overlay.CopyrightOverlay }
         if (pick != null) {
             m.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
                 override fun singleTapConfirmedHelper(p: GeoPoint): Boolean { pick(p.latitude, p.longitude); return true }
@@ -101,20 +104,21 @@ fun OsmMap(
         for (pl in places) {
             m.overlays.add(Polygon(m).apply {
                 points = Polygon.pointsAsCircle(GeoPoint(pl.lat, pl.lng), pl.radius.toDouble())
-                fillPaint.color = 0x33B8741A
-                outlinePaint.color = 0xFFB8741A.toInt()
-                outlinePaint.strokeWidth = 3f
+                fillPaint.color = if (pl.pending) 0x14000000 else 0x2A141414
+                outlinePaint.color = if (pl.pending) 0x88000000.toInt() else 0xFF141414.toInt()
+                outlinePaint.strokeWidth = 4f
+                if (pl.pending) outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(18f, 12f), 0f)
                 title = pl.name
             })
             m.overlays.add(Marker(m).apply {
                 position = GeoPoint(pl.lat, pl.lng); setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                icon = bubble(ctx, pl.emoji, pl.name, false, false); title = pl.name
+                icon = bubble(ctx, pl.emoji, pl.name, false, pl.pending); title = if (pl.pending) "${pl.name} (waiting for a parent)" else pl.name
             })
         }
         if (trail.size > 1) {
             m.overlays.add(Polyline(m).apply {
                 setPoints(trail.map { GeoPoint(it.lat, it.lng) })
-                outlinePaint.color = 0xAAB8741A.toInt(); outlinePaint.strokeWidth = 8f
+                outlinePaint.color = 0xCC141414.toInt(); outlinePaint.strokeWidth = 8f
             })
         }
         val pts = ArrayList<GeoPoint>()
@@ -124,8 +128,8 @@ fun OsmMap(
             pts.add(g)
             m.overlays.add(Marker(m).apply {
                 position = g; setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                icon = bubble(ctx, mem.emoji, mem.name, mem.id == myId, System.currentTimeMillis() / 1000.0 - l.at > 900)
-                title = "${mem.name} · ${timeAgo(l.at)}"
+                icon = bubble(ctx, mem.emoji, mem.name, mem.id == myId, System.currentTimeMillis() / 1000.0 - l.at > 900 && !mem.sos, mem.sos)
+                title = (if (mem.sos) "🚨 SOS · " else "") + "${mem.name} · ${timeAgo(l.at)}" + (mem.eta?.let { " · about ${it.min} min from home" } ?: "")
             })
         }
         picked?.let { (la, lo) ->

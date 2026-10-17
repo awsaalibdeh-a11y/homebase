@@ -103,7 +103,7 @@ fun MeTab(nav: Nav) {
             { BigButton("I'm home 🏠", color = Mint) { sendQuick(ctx, "checkin", "I'm home", 0, true, "Checked in") } })
         TwoUp({ SoftButton("Running late ⏰") { late = true } }, { SoftButton("Send love ❤️") { sendQuick(ctx, "heart", "", 0, false, "❤️ sent") } })
         TwoUp({ SoftButton("Pick me up 🚗") { sendQuick(ctx, "pickup", "Can someone pick me up?", 0, true, "Sent to the family") } }, { SoftButton("🎮 Family game") { startFamilyGame(ctx) } })
-        SosButton { sendQuick(ctx, "sos", "I need help", 0, true, "SOS sent to your family") }
+        SosButton { ctx.hb.state.sosAsk.value = true }
 
         SectionLabel("Quiet hours")
         SoftCard {
@@ -137,6 +137,8 @@ fun MeTab(nav: Nav) {
         if (!ctx.hb.store.isParent) SoftButton("What parents can do") { nav.go(Screen.Perms) }
         SoftButton("🎉 Fun: games for the family") { nav.go(Screen.Fun) }
         SoftButton("🆘 Emergency card (works offline)") { nav.go(Screen.Emergency) }
+        SoftButton("🛡️ Safe browsing") { nav.go(Screen.SafeBrowsing) }
+        if (ctx.hb.store.isParent) SoftButton("⚠️ Safety alerts") { nav.go(Screen.Safety) }
         SoftButton("🧰 Pocket: timer and private notes") { nav.go(Screen.Pocket) }
         SoftButton("🎓 Tutorial") { tutorial = true }
         SoftButton("Settings") { nav.go(Screen.Settings) }
@@ -147,5 +149,5 @@ fun MeTab(nav: Nav) {
     if (statusOpen) StatusDialog { statusOpen = false }
     if (birthdayOpen) BirthdayDialog(me?.birthday) { birthdayOpen = false }
     if (pause) PickDialog("Pause sharing for…", listOf("15 minutes" to 15, "1 hour" to 60, "3 hours" to 180, "Until tomorrow" to 720), { setSharing("paused", it) }, { pause = false })
-    if (late) PickDialog("How late will you be?", listOf("About 10 minutes" to 10, "About 20 minutes" to 20, "About 30 minutes" to 30, "About an hour" to 60), { sendQuick(ctx, "late", "Running about $it minutes late", 0, false, "Sent") }, { late = false })
+    if (late) PickDialog("How late will you be?", LATE_CHOICES, { lateSend(ctx, it) }, { late = false })
 }

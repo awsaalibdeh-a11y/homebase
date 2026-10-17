@@ -27,6 +27,8 @@ sealed interface Screen {
     data class Recipes(val surprise: Boolean = false) : Screen
     data object Fun : Screen
     data object Emergency : Screen
+    data object Safety : Screen
+    data object SafeBrowsing : Screen
     data object Pocket : Screen
     data class Camera(val purpose: String) : Screen
     data object Chores : Screen

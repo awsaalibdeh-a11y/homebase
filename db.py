@@ -34,7 +34,9 @@ members = Table("members", meta,
     Column("last_lat", Float), Column("last_lng", Float), Column("last_acc", Float), Column("last_at", Float, default=0),
     Column("avatar", Text, default=""), Column("avatar_at", Float, default=0),
     Column("status_emoji", String(8), default=""), Column("status_text", String(40), default=""), Column("status_until", Float, default=0),   # "what I am up to", set by the person, ends by itself
-    Column("birthday", String(5), default=""), Column("bday_year", Integer, default=0), Column("app_version", Integer, default=0))                     # "MM-DD" the person chose; the year we last said happy birthday
+    Column("birthday", String(5), default=""), Column("bday_year", Integer, default=0), Column("app_version", Integer, default=0),
+    Column("safe_dns", String(80), default=""), Column("safe_dns_at", Float, default=0), Column("eta_min", Integer, default=0), Column("eta_until", Float, default=0),
+    Column("sos_until", Float, default=0), Column("offline_told", Boolean, default=False), Column("critical_at", Float, default=0), Column("critical_by", Integer, default=0))                     # "MM-DD" the person chose; the year we last said happy birthday
 invites = Table("invites", meta,
     Column("code", String(12), primary_key=True), Column("family_id", Integer), Column("role", String(8)), Column("created_by", Integer),
     Column("expires", Float), Column("used", Boolean, default=False))
@@ -43,7 +45,8 @@ locations = Table("locations", meta,
     Column("acc", Float), Column("speed", Float), Column("at", Float, index=True))
 places = Table("places", meta,
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("name", String(40)), Column("emoji", String(8), default="📍"),
-    Column("lat", Float), Column("lng", Float), Column("radius", Integer, default=150), Column("created_by", Integer), Column("created", Float))
+    Column("lat", Float), Column("lng", Float), Column("radius", Integer, default=150), Column("created_by", Integer), Column("created", Float),
+    Column("pending", Boolean, default=False))                        # a child asked for this zone and a parent has not said yes yet
 place_state = Table("place_state", meta,
     Column("member_id", Integer, primary_key=True), Column("place_id", Integer, primary_key=True), Column("inside", Boolean, default=False))
 messages = Table("messages", meta,
@@ -145,6 +148,10 @@ friend_members = Table("friend_members", meta,
 friend_messages = Table("friend_messages", meta,
     Column("id", Integer, primary_key=True), Column("group_id", Integer, index=True), Column("from_id", Integer), Column("kind", String(6), default="text"),
     Column("body", Text), Column("original", Text, default=""), Column("flags", Text, default=""), Column("created", Float, index=True))
+risk_alerts = Table("risk_alerts", meta,                               # a message in Mellow that looked like bullying, self-harm, adult content or grooming
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True), Column("cat", String(20)),
+    Column("role", String(10)), Column("other", String(40), default=""), Column("where", String(60), default=""), Column("snippet", Text, default=""),
+    Column("created", Float, index=True), Column("seen", Boolean, default=False))
 message_images = Table("message_images", meta,                       # photos sent in family chats: a small JPEG or PNG, found by a long random token
     Column("id", Integer, primary_key=True), Column("token", String(40), unique=True, index=True), Column("family_id", Integer, index=True),
     Column("from_id", Integer), Column("mime", String(16)), Column("data", Text), Column("created", Float))
@@ -163,7 +170,11 @@ for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABL
             "ALTER TABLE members ADD COLUMN app_version INTEGER DEFAULT 0",
             "ALTER TABLE families ADD COLUMN notice VARCHAR(200) DEFAULT ''", "ALTER TABLE families ADD COLUMN notice_until FLOAT DEFAULT 0", "ALTER TABLE families ADD COLUMN notice_by INTEGER DEFAULT 0",
             "ALTER TABLE plans ADD COLUMN lat FLOAT", "ALTER TABLE plans ADD COLUMN lng FLOAT", "ALTER TABLE plans ADD COLUMN ext_id VARCHAR(80) DEFAULT ''",
-            "ALTER TABLE meals ADD COLUMN suggested BOOLEAN DEFAULT FALSE", "ALTER TABLE plans ADD COLUMN via VARCHAR(20) DEFAULT ''", "ALTER TABLE integrations ADD COLUMN scopes VARCHAR(60) DEFAULT 'meals'"):
+            "ALTER TABLE meals ADD COLUMN suggested BOOLEAN DEFAULT FALSE", "ALTER TABLE places ADD COLUMN pending BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE members ADD COLUMN safe_dns VARCHAR(80) DEFAULT ''", "ALTER TABLE members ADD COLUMN safe_dns_at FLOAT DEFAULT 0",
+            "ALTER TABLE members ADD COLUMN eta_min INTEGER DEFAULT 0", "ALTER TABLE members ADD COLUMN eta_until FLOAT DEFAULT 0",
+            "ALTER TABLE members ADD COLUMN sos_until FLOAT DEFAULT 0", "ALTER TABLE members ADD COLUMN offline_told BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE members ADD COLUMN critical_at FLOAT DEFAULT 0", "ALTER TABLE members ADD COLUMN critical_by INTEGER DEFAULT 0", "ALTER TABLE plans ADD COLUMN via VARCHAR(20) DEFAULT ''", "ALTER TABLE integrations ADD COLUMN scopes VARCHAR(60) DEFAULT 'meals'"):
     try:
         with engine.begin() as _c:
             _c.exec_driver_sql(_sql)

@@ -58,7 +58,9 @@ class AppState(val store: Store, val api: Api) {
     val openThread = MutableStateFlow<Int?>(null)
     val flash = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val showOnMap = MutableSharedFlow<Spot>(extraBufferCapacity = 4)
-    val openGroup = MutableStateFlow<Int?>(null)                     // the friend group on screen right now, so its messages do not also ping
+    val openGroup = MutableStateFlow<Int?>(null)
+    val support = MutableStateFlow<String?>(null)                      // a kind note for a child who wrote something that sounded like self-harm
+    val sosAsk = MutableStateFlow(false)                               // the SOS countdown (from the home-screen widget or the Home button)                     // the friend group on screen right now, so its messages do not also ping
 
     private inline fun <reified T> cached(key: String): List<T> = runCatching { cacheJson.decodeFromString<List<T>>(store.text(key)) }.getOrDefault(emptyList())
     private inline fun <reified T> keep(key: String, v: List<T>) { runCatching { store.saveText(key, cacheJson.encodeToString(v)) } }

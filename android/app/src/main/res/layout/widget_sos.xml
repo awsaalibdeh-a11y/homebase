@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/sos_widget"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center"
+    android:background="@drawable/widget_sos_bg" android:padding="8dp">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🚨" android:textSize="30sp" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SOS" android:textColor="#FFFFFFFF" android:textSize="22sp" android:textStyle="bold" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Mellow" android:textColor="#DDFFFFFF" android:textSize="11sp" />
+</LinearLayout>
