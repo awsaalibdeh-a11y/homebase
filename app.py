@@ -28,9 +28,14 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "14"))      # what Android compares (a plain counter)
-VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.0")           # what people see: a whole number is a big update, a decimal is a small one
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "15"))      # what Android compares (a plain counter)
+VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.1")           # what people see: a whole number is a big update, a decimal is a small one
 CHANGELOG = [                                                         # newest first; shown on the install and update page
+    {"v": "6.1", "date": "17 Oct 2026", "title": "The map works again", "items": [
+        "Fixed the map showing \"API key required\": the map style used since 4.0 started asking for a paid key, so Mellow is back on OpenStreetMap, with a night version for the dark look.",
+        "The share-my-trip page uses the same free map.",
+        "Fixed calls saying \"busy\" for ever after a call dropped: the phone now tells Mellow when a call drops, and an old stuck call is cleared when someone calls again.",
+    ]},
     {"v": "6.0", "date": "17 Oct 2026", "big": True, "title": "Calmer, tidier, and updates in one tap", "items": [
         "A calm new look with no busy lines, and Dark is now the main look (White is still in Settings).",
         "More is organised into four tabs: Me, Family, Safety and Settings, with tidy tiles instead of a long list.",
@@ -4184,9 +4189,31 @@ def my_call(cid):
     return c if c and g.m["id"] in (c["caller_id"], c["callee_id"]) else None
 
 
+STALE_CALL = 3 * 3600                                                 # an "active" call this old was never hung up properly
+
+
 def busy(member_id):
     live = db.many(select(db.calls).where(db.calls.c.status.in_(("ringing", "active")), (db.calls.c.caller_id == member_id) | (db.calls.c.callee_id == member_id)))
-    return any(c["status"] == "active" or c["created"] > time.time() - RING_SECONDS for c in live)
+    now = time.time()
+    return any((c["status"] == "active" and (c["answered"] or c["created"]) > now - STALE_CALL) or (c["status"] == "ringing" and c["created"] > now - RING_SECONDS) for c in live)
+
+
+def clear_stuck_calls(caller_id, callee_id):
+    """A call that dropped without anyone hanging up stays "active" and makes people look busy forever.
+    Starting a new call clears what cannot be real: the caller's own old calls (they are not on a call if they are placing a new one),
+    and any old call between the same two people."""
+    t = db.calls.c
+    now = time.time()
+    for c in db.many(select(db.calls).where(t.status.in_(("ringing", "active")), (t.caller_id == caller_id) | (t.callee_id == caller_id) | (t.caller_id == callee_id) | (t.callee_id == callee_id))):
+        pair = {c["caller_id"], c["callee_id"]} == {caller_id, callee_id}
+        mine = caller_id in (c["caller_id"], c["callee_id"])
+        if c["status"] == "ringing" and c["created"] > now - RING_SECONDS:
+            continue                                                  # a call that is really ringing right now is left alone
+        stale = c["status"] == "active" and (c["answered"] or c["created"]) < now - STALE_CALL
+        if pair or mine or stale:
+            db.run(update(db.calls).where(t.id == c["id"]).values(status="ended", ended=now))
+            for who in (c["caller_id"], c["callee_id"]):
+                push(who, "call_update", {"id": c["id"], "status": "ended"})
 
 
 @app.post("/api/calls")
@@ -4202,7 +4229,8 @@ def start_call():
     urgent = bool(b.get("urgent"))
     if in_quiet(callee) and not urgent:
         return err(f"{callee['name']} has quiet hours on right now. You can ring anyway if it is important.", 409, quiet=True)
-    if busy(callee["id"]) or busy(m["id"]):
+    clear_stuck_calls(m["id"], callee["id"])
+    if busy(callee["id"]):
         return err(f"{callee['name']} is on another call.", 409, busy=True)
     cid = db.run(insert(db.calls).values(family_id=m["family_id"], caller_id=m["id"], callee_id=callee["id"], status="ringing", urgent=urgent, created=time.time(), offer=offer))
     push(callee["id"], "call", {"id": cid, "from": m["id"], "name": m["name"], "emoji": m["emoji"], "offer": offer, "urgent": urgent})

@@ -11,8 +11,8 @@ android {
         applicationId = "app.homebase.family"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "6.0"
+        versionCode = 15
+        versionName = "6.1"
         ndk { abiFilters += (if (project.hasProperty("withX86")) listOf("x86_64") else listOf("arm64-v8a", "armeabi-v7a")) }
         buildConfigField("String", "DEFAULT_SERVER", "\"${project.findProperty("homebaseServer") ?: "https://homebase-family.onrender.com"}\"")
     }

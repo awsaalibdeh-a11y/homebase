@@ -72,12 +72,21 @@ fun OsmMap(
         Configuration.getInstance().userAgentValue = ctx.packageName
         Configuration.getInstance().load(ctx, ctx.getSharedPreferences("osm", Context.MODE_PRIVATE))
         MapView(ctx).apply {
-            // CARTO's clean map style (Voyager by day, Dark Matter in the dark look), from OpenStreetMap data
-            val dark = Look.dark
-            setTileSource(org.osmdroid.tileprovider.tilesource.XYTileSource(if (dark) "CartoDark" else "CartoVoyager", 0, 20, 256, ".png",
-                arrayOf("a", "b", "c", "d").map { "https://$it.basemaps.cartocdn.com/" + (if (dark) "dark_all/" else "rastertiles/voyager/") }.toTypedArray(),
-                "© OpenStreetMap contributors © CARTO"))
+            // OpenStreetMap's own tiles (free, no key; they ask apps to send their name, which osmdroid does). CARTO now wants a paid key.
+            // In the dark look the tiles are turned into a soft night map with a colour filter, so nothing extra is downloaded.
+            setTileSource(TileSourceFactory.MAPNIK)
             overlays.add(org.osmdroid.views.overlay.CopyrightOverlay(ctx))
+            if (Look.dark) {
+                val night = android.graphics.ColorMatrix(floatArrayOf(-0.85f, 0f, 0f, 0f, 235f, 0f, -0.85f, 0f, 0f, 235f, 0f, 0f, -0.85f, 0f, 240f, 0f, 0f, 0f, 1f, 0f))
+                night.postConcat(android.graphics.ColorMatrix().apply { setSaturation(0.25f) })
+                overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(night))
+                overlayManager.tilesOverlay.loadingBackgroundColor = android.graphics.Color.parseColor("#16161A")
+                overlayManager.tilesOverlay.loadingLineColor = android.graphics.Color.parseColor("#26262C")
+            } else {
+                overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0.6f) }))
+                overlayManager.tilesOverlay.loadingBackgroundColor = android.graphics.Color.parseColor("#F1F1F3")
+                overlayManager.tilesOverlay.loadingLineColor = android.graphics.Color.parseColor("#E1E1E6")
+            }
             overlayManager.tilesOverlay.loadingBackgroundColor = android.graphics.Color.parseColor("#F1F1F3")
             overlayManager.tilesOverlay.loadingLineColor = android.graphics.Color.parseColor("#E1E1E6")
             setMultiTouchControls(true)

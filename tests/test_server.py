@@ -2622,5 +2622,26 @@ class AgesV6(Base):
         self.assertEqual(kid["birthday"], "03-04", "a birthday without a year keeps the year already known")
 
 
+class StuckCalls(Base):
+    def test_a_call_that_dropped_without_hanging_up_does_not_make_anyone_busy(self):
+        cid = self.post(self.mum, "/api/calls", to=self.kid_id, offer="o").get_json()["id"]
+        self.post(self.kid, f"/api/calls/{cid}/answer", answer="a")
+        self.assertEqual(self.get(self.mum, f"/api/calls/{cid}").get_json()["status"], "active")
+        # the connection dropped and nobody hung up: calling again still works, and the old call is closed
+        r = self.post(self.kid, "/api/calls", to=self.mum_id, offer="o")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.get(self.mum, f"/api/calls/{cid}").get_json()["status"], "ended")
+
+    def test_an_old_active_call_with_someone_else_is_stale(self):
+        code = self.post(self.mum, "/api/invite", role="child").get_json()["code"]
+        z = self.c.post("/api/join", json={"code": code, "name": "Zoe"}).get_json()
+        zoe = {"Authorization": "Bearer " + z["token"]}
+        cid = self.post(self.kid, "/api/calls", to=z["me"]["id"], offer="o").get_json()["id"]
+        self.post(zoe, f"/api/calls/{cid}/answer", answer="a")
+        self.assertEqual(self.post(self.mum, "/api/calls", to=self.kid_id, offer="o").status_code, 409, "a real call in progress is busy")
+        db.run(db.update(db.calls).where(db.calls.c.id == cid).values(answered=time.time() - 4 * 3600, created=time.time() - 4 * 3600))
+        self.assertEqual(self.post(self.mum, "/api/calls", to=self.kid_id, offer="o").status_code, 200, "but not after hours with nobody hanging up")
+
+
 if __name__ == "__main__":
     unittest.main()

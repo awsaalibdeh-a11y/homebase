@@ -265,6 +265,8 @@ class CallManager(private val ctx: Context, private val api: Api, private val st
     }
 
     private fun finish(status: String, note: String = "") {
+        val dropped = state.call.value
+        if (status == "ended" && dropped != null && dropped.id != 0) scope.launch { runCatching { api.endCall(dropped.id) } }   // tell the server, or the family looks "busy" forever
         ringer.stop(); poller?.cancel(); timeout?.cancel()
         closePeer()
         val c = state.call.value ?: return
