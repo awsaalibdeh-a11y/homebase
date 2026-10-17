@@ -36,6 +36,7 @@ data class Member(
     val walk: WalkInfo? = null,                                       // a Safe Walk going on
     @SerialName("speed_limit") val speedLimit: Int = 0,               // a child's speed alert in km/h (0 = off)
     val bedtime: BedInfo? = null,
+    val age: Int? = null,                                             // from their birthday and year, if they shared the year
 ) {
     val isParent get() = role == "parent"
     /** Whether a parent may do [key] with this person. Everything is allowed until they turn it off. */

@@ -76,8 +76,9 @@ function loadSnap() {
 
 /* ---------- theme ---------- */
 /* the UI is white by default; anyone who had saved "dark" before is moved to white once, and can pick dark again from the menu */
+try { if (!localStorage.getItem("mellow_dark1")) { localStorage.setItem("hb_theme", "dark"); localStorage.setItem("mellow_dark1", "1"); localStorage.setItem("hb_white", "1"); } } catch (e) { /* private mode */ }
 try { if (!localStorage.getItem("hb_white")) { localStorage.setItem("hb_theme", "light"); localStorage.setItem("hb_map", "light"); localStorage.setItem("hb_white", "1"); } } catch (e) { /* private mode */ }
-function applyTheme() { document.documentElement.dataset.theme = localStorage.getItem("hb_theme") || "light"; }
+function applyTheme() { document.documentElement.dataset.theme = localStorage.getItem("hb_theme") || "dark"; }
 const mapDark = () => (localStorage.getItem("hb_map") || "light") === "dark";
 applyTheme();
 
@@ -228,7 +229,7 @@ function peopleHtml() {
   if (!S.openSet && isParent()) { const k = others.find(m => m.role === "child"); if (k) S.open = k.id; S.openSet = true; }      // a parent lands with the first child already open, so the controls are right there
   const rows = others.map(m => {
     const open = S.open === m.id, dot = m.share === "on" && m.location ? "on" : m.share === "paused" ? "paused" : "";
-    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>💬 Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>📞 Call</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>📍 Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>🧭 Trail</button>${isParent() ? `<button class="btn sm" data-act="updnudge" data-id="${m.id}" title="Sends one message with the download link">📲 Ask to update</button>` : ""}</div>${m.role === "child" && isParent() ? `<div class="ctlwrap">${kidTiles(m)}</div>` : (m.role === "child" ? `<div class="ctlwrap"><p class="tabhelp">${esc(screenLine(m).replace(/<[^>]+>/g, "")) || ""}</p></div>` : "")}` : "";
+    const acts = open ? `<div class="pacts"><button class="btn sm" data-act="msg" data-id="${m.id}" ${may(m, "messages") ? "" : "disabled"}>💬 Message</button><button class="btn sm" data-act="call" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>📞 Call</button><button class="btn sm" data-act="vcall" data-id="${m.id}" ${may(m, "calls") ? "" : "disabled"}>🎥 Video</button><button class="btn sm" data-act="ping" data-id="${m.id}" ${may(m, "ping") ? "" : "disabled"}>📍 Where?</button><button class="btn sm" data-act="trail" data-id="${m.id}" ${may(m, "trail") ? "" : "disabled"}>🧭 Trail</button>${isParent() ? `<button class="btn sm" data-act="updnudge" data-id="${m.id}" title="Sends one message with the download link">📲 Ask to update</button>` : ""}</div>${m.role === "child" && isParent() ? `<div class="ctlwrap">${kidTiles(m)}</div>` : (m.role === "child" ? `<div class="ctlwrap"><p class="tabhelp">${esc(screenLine(m).replace(/<[^>]+>/g, "")) || ""}</p></div>` : "")}` : "";
     const chip = m.lock ? `<span class="chip warn">🔒 until ${clock(m.lock.until)}</span>` : (m.blocks || []).length ? `<span class="chip warn">🚫 ${m.blocks.length} grounded</span>` : `<span class="chip">${m.role === "parent" ? "Parent" : "Child"}</span>`;
     return `<div class="person ${open ? "open" : ""}"><button class="prow" data-act="pick" data-id="${m.id}"><span class="ava ${dot}">${avaInner(m)}</span><span class="pinfo"><b>${esc(m.name)}</b>${statusChip(m)}<small>${esc(statusLine(m))}</small>${screenLine(m)}${deviceLine(m)}${oldAppLine(m)}</span>${chip}</button>${offTags(m)}${acts}</div>`;
   }).join("");
@@ -770,7 +771,7 @@ async function setSharing(state, minutes) {
 async function meDialog() {
   let q = { from: -1, to: -1 }; try { q = (await api("/api/me")).quiet; } catch (e) { /* offline */ }
   const m = me(), hm = v => v < 0 ? "" : String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
-  const theme = localStorage.getItem("hb_theme") || "light", layer = localStorage.getItem("hb_map") || "light";
+  const theme = localStorage.getItem("hb_theme") || "dark", layer = localStorage.getItem("hb_map") || "light";
   const perms = m.role === "child" ? `<div class="msec">What parents can do</div><div class="sub">You decide. Switch something off and Mellow stops it straight away. Your parents see that it is off.</div>` +
     PERMS.map(([k, t, why]) => `<div class="sw"><div><b>${t}</b><span>${why}</span></div><button class="tg ${m.perms[k] !== false ? "on" : ""}" data-perm="${k}" aria-label="${t}"></button></div>`).join("") : "";
   modal(`<h2>${esc(m.emoji)} ${esc(m.name)}</h2><div class="sub">${m.role === "parent" ? "Parent" : "Child"} · ${esc(S.family?.name || "")}</div>
@@ -934,6 +935,7 @@ function initChrome() {
     if (act === "pick") { S.open = S.open === id ? 0 : id; renderSide(); if (S.open) focusMember(id); }
     else if (act === "msg") { setChat(true); loadThread(id); }
     else if (act === "call") window.Calls && window.Calls.start(m);
+    else if (act === "vcall") window.Calls && window.Calls.startVideo(m);
     else if (act === "ping") askWhere(m);
     else if (act === "trail") showTrail(id);
     else if (act === "screen") screenDialog(id);

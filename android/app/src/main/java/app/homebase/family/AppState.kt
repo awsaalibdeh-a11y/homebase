@@ -61,6 +61,7 @@ class AppState(val store: Store, val api: Api) {
     val openGroup = MutableStateFlow<Int?>(null)
     val support = MutableStateFlow<String?>(null)                      // a kind note for a child who wrote something that sounded like self-harm
     val sosAsk = MutableStateFlow(false)
+    val moreTab = MutableStateFlow(0)                                 // More: 0 Me, 1 Family, 2 Safety, 3 Settings
     var onFamily: (() -> Unit)? = null                                // repaints the home-screen widget                               // the SOS countdown (from the home-screen widget or the Home button)                     // the friend group on screen right now, so its messages do not also ping
 
     private inline fun <reified T> cached(key: String): List<T> = runCatching { cacheJson.decodeFromString<List<T>>(store.text(key)) }.getOrDefault(emptyList())

@@ -31,7 +31,7 @@ import androidx.core.view.WindowCompat
 import app.homebase.family.R
 
 /** Mellow has two looks on the same contour-line background: White (the main one) and Dark. Flipping [dark] repaints everything. */
-object Look { var dark by mutableStateOf(false) }
+object Look { var dark by mutableStateOf(true) }
 
 private fun pick(light: Long, dark: Long): Color = Color(if (Look.dark) dark else light)
 

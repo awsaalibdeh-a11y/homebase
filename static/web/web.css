@@ -395,3 +395,10 @@ body { background: transparent; }
 #auth { background: transparent; }
 h1, h2, .authbox h1, .modal h2 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; letter-spacing: -.01em; }
 .btn { border-radius: 12px; } .field { border-radius: 12px; }
+
+/* video calls */
+#call .rvid { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; z-index: 0; }
+#call .lvid { position: fixed; top: 20px; right: 20px; width: 180px; height: 135px; object-fit: cover; border-radius: 16px; border: 2px solid rgba(255,255,255,.7); z-index: 2; transform: scaleX(-1); background: #111; }
+#call .callwrap.onvideo { background: transparent; position: relative; z-index: 1; }
+#call .callwrap.onvideo .avawrap { display: none; }
+#call .callwrap.onvideo h2, #call .callwrap.onvideo .who, #call .callwrap.onvideo .stt { color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,.6); }

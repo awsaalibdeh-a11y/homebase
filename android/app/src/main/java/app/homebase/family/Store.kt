@@ -40,8 +40,8 @@ class Store(context: Context) {
     var cursor: Int
         get() = p.getInt("cursor", -1)
         set(v) = p.edit().putInt("cursor", v).apply()
-    var darkLook: Boolean                                      // Mellow's Dark look; White is the main one
-        get() = p.getBoolean("darkLook", false)
+    var darkLook: Boolean                                      // Mellow's Dark look is the main one now; White is the other
+        get() = p.getBoolean("darkLook", true)
         set(v) = p.edit().putBoolean("darkLook", v).apply()
     var mellowWelcome: Boolean                                 // the one-time welcome popup has been seen
         get() = p.getBoolean("mellowWelcome", false)
@@ -49,6 +49,9 @@ class Store(context: Context) {
     var linkPrompt: Boolean                                    // the "link Platter and Scout" popup has been answered
         get() = p.getBoolean("linkPrompt", false)
         set(v) = p.edit().putBoolean("linkPrompt", v).apply()
+    var askedAge: Boolean                                      // the one-time "when is your birthday?" question was answered or skipped
+        get() = p.getBoolean("askedAge", false)
+        set(v) = p.edit().putBoolean("askedAge", v).apply()
     var tourDone: Boolean
         get() = p.getBoolean("tourDone", false)
         set(v) = p.edit().putBoolean("tourDone", v).apply()

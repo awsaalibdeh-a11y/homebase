@@ -154,7 +154,7 @@ class Api(private val store: Store) {
     // rewards (what chore points can buy) and the family board
     suspend fun rewards(): RewardsResp = ask<RewardsResp>("GET", "/api/rewards")
     suspend fun addReward(title: String, cost: Int, minutes: Int = 0) { raw("POST", "/api/rewards", obj { put("title", title); put("cost", cost); put("minutes", minutes) }) }
-    suspend fun setBirthday(month: Int, day: Int) { raw("POST", "/api/birthday", obj { put("month", month); put("day", day) }) }
+    suspend fun setBirthday(month: Int, day: Int, year: Int = 0) { raw("POST", "/api/birthday", obj { put("month", month); put("day", day); if (year > 0) put("year", year) }) }
     suspend fun dropReward(id: Int) { raw("DELETE", "/api/rewards/$id") }
     suspend fun redeem(id: Int) { raw("POST", "/api/rewards/$id/redeem") }
     suspend fun decide(id: Int, ok: Boolean) { raw("POST", "/api/redemptions/$id/decide", obj { put("ok", ok) }) }

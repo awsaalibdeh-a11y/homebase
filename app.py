@@ -28,9 +28,17 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "13"))      # what Android compares (a plain counter)
-VERSION_NAME = os.environ.get("APP_VERSION_NAME", "5.0")           # what people see: a whole number is a big update, a decimal is a small one
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "14"))      # what Android compares (a plain counter)
+VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.0")           # what people see: a whole number is a big update, a decimal is a small one
 CHANGELOG = [                                                         # newest first; shown on the install and update page
+    {"v": "6.0", "date": "17 Oct 2026", "big": True, "title": "Calmer, tidier, and updates in one tap", "items": [
+        "A calm new look with no busy lines, and Dark is now the main look (White is still in Settings).",
+        "More is organised into four tabs: Me, Family, Safety and Settings, with tidy tiles instead of a long list.",
+        "Updates download and install inside the app: tap Update now, then Install. No browser or Downloads folder.",
+        "Mellow asks for your birthday and year once, shows ages on family cards, and says how old someone is turning.",
+        "A smoother five-second opening animation.",
+        "On Windows: video calls in the web app, Pocket money, Album, Kudos, Homework, Moods, Countdowns, Weather, Safe Walk and Share my trip in the web app, a new Mellow icon, and the Windows tracker is now called Mellow (it updates itself).",
+    ]},
     {"v": "5.0", "date": "17 Oct 2026", "big": True, "title": "The biggest update yet: 20 new things", "items": [
         "Safe Walk: share live until you get there; the family is told if you stop moving or are late.",
         "Tell me when they get there: a parent is told when a child reaches a place, or if they have not by a time.",
@@ -227,7 +235,8 @@ def member_view(m, viewer=None):
     out = {"id": m["id"], "name": m["name"], "role": m["role"], "emoji": m["emoji"], "battery": m["battery"], "share": state,
            "paused_until": m["paused_until"] if state == "paused" else 0, "last_seen": m["last_seen"], "quiet": m["quiet_from"] >= 0,
            "location": None, "perms": perms, "lock": lock_view(m), "home": at_home(m), "blocks": block_views(m),
-           "avatar": (f"/api/avatar/{m['id']}?v={int(m['avatar_at'] or 0)}" if m["avatar"] else None), "status": status_view(m), "birthday": m["birthday"] or None, "app_version": m.get("app_version") or 0}
+           "avatar": (f"/api/avatar/{m['id']}?v={int(m['avatar_at'] or 0)}" if m["avatar"] else None), "status": status_view(m), "birthday": m["birthday"] or None, "app_version": m.get("app_version") or 0,
+           "age": age_of(m["birthday"], m.get("birth_year") or 0)}
     now = time.time()
     if (m.get("sos_until") or 0) > now:
         out["sos"] = True
@@ -4083,17 +4092,33 @@ def set_birthday():
     b = request.get_json(silent=True) or {}
     try:
         month, day = int(b.get("month") or 0), int(b.get("day") or 0)
+        year = int(b.get("year") or 0)
     except (TypeError, ValueError):
         return err("Pick a month and a day.")
+    this_year = datetime.date.today().year
+    if year and not (this_year - 110 <= year <= this_year):
+        return err("That year does not look right.")
     if month == 0 and day == 0:
         value = ""
     elif 1 <= month <= 12 and 1 <= day <= MONTH_DAYS[month - 1]:
         value = f"{month:02d}-{day:02d}"
     else:
         return err("That is not a real date.")
-    db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(birthday=value, bday_year=0))
+    vals = dict(birthday=value, bday_year=0)
+    if year or not value:
+        vals["birth_year"] = year if value else 0
+    db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(**vals))
     push_family(g.m["family_id"], "member", {"id": g.m["id"], "birthday": value or None}, skip=g.m["id"])
-    return jsonify(birthday=value or None)
+    return jsonify(birthday=value or None, age=age_of(value, vals.get("birth_year", g.m.get("birth_year") or 0)))
+
+
+def age_of(birthday, year):
+    """How old someone is today, from their birthday ("MM-DD") and birth year, or None if we do not know."""
+    if not birthday or not year:
+        return None
+    today = datetime.date.today()
+    month, day = int(birthday[:2]), int(birthday[3:])
+    return today.year - year - (1 if (today.month, today.day) < (month, day) else 0)
 
 
 def remind_birthdays():

@@ -39,7 +39,8 @@ members = Table("members", meta,
     Column("sos_until", Float, default=0), Column("offline_told", Boolean, default=False), Column("critical_at", Float, default=0), Column("critical_by", Integer, default=0),
     Column("walk_to", Integer, default=0), Column("walk_until", Float, default=0), Column("walk_started", Float, default=0), Column("walk_told", String(20), default=""),
     Column("speed_limit", Integer, default=0), Column("speed_strikes", Integer, default=0), Column("speed_told", Float, default=0),
-    Column("bed_from", Integer, default=-1), Column("bed_to", Integer, default=-1), Column("bed_told", String(10), default=""))                     # "MM-DD" the person chose; the year we last said happy birthday
+    Column("bed_from", Integer, default=-1), Column("bed_to", Integer, default=-1), Column("bed_told", String(10), default=""),
+    Column("birth_year", Integer, default=0))                     # "MM-DD" the person chose; the year we last said happy birthday
 invites = Table("invites", meta,
     Column("code", String(12), primary_key=True), Column("family_id", Integer), Column("role", String(8)), Column("created_by", Integer),
     Column("expires", Float), Column("used", Boolean, default=False))
@@ -210,7 +211,7 @@ for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABL
             "ALTER TABLE members ADD COLUMN walk_to INTEGER DEFAULT 0", "ALTER TABLE members ADD COLUMN walk_until FLOAT DEFAULT 0", "ALTER TABLE members ADD COLUMN walk_started FLOAT DEFAULT 0",
             "ALTER TABLE members ADD COLUMN walk_told VARCHAR(20) DEFAULT ''", "ALTER TABLE members ADD COLUMN speed_limit INTEGER DEFAULT 0", "ALTER TABLE members ADD COLUMN speed_strikes INTEGER DEFAULT 0",
             "ALTER TABLE members ADD COLUMN speed_told FLOAT DEFAULT 0", "ALTER TABLE members ADD COLUMN bed_from INTEGER DEFAULT -1", "ALTER TABLE members ADD COLUMN bed_to INTEGER DEFAULT -1",
-            "ALTER TABLE members ADD COLUMN bed_told VARCHAR(10) DEFAULT ''", "ALTER TABLE places ADD COLUMN pending BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE members ADD COLUMN bed_told VARCHAR(10) DEFAULT ''", "ALTER TABLE members ADD COLUMN birth_year INTEGER DEFAULT 0", "ALTER TABLE places ADD COLUMN pending BOOLEAN DEFAULT FALSE",
             "ALTER TABLE members ADD COLUMN safe_dns VARCHAR(80) DEFAULT ''", "ALTER TABLE members ADD COLUMN safe_dns_at FLOAT DEFAULT 0",
             "ALTER TABLE members ADD COLUMN eta_min INTEGER DEFAULT 0", "ALTER TABLE members ADD COLUMN eta_until FLOAT DEFAULT 0",
             "ALTER TABLE members ADD COLUMN sos_until FLOAT DEFAULT 0", "ALTER TABLE members ADD COLUMN offline_told BOOLEAN DEFAULT FALSE",

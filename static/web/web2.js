@@ -59,7 +59,7 @@ function quickActionsHtml() {
 function peopleStripHtml() {
   return `<div class="strip">${S.members.map(m => `<button type="button" class="sp" data-act="pickmap" data-id="${m.id}">${mavatar(m)}<small>${esc(m.id === S.me ? "You" : m.name)}</small></button>`).join("")}</div>`;
 }
-function homeHtml() { return setupCardHtml() + sosHtml() + requestsHtml() + zoneAsksHtml() + todayHtml() + peopleStripHtml() + kidToolsHtml() + tonightHtml() + quickActionsHtml() + plansHtml(); }
+function homeHtml() { return setupCardHtml() + sosHtml() + requestsHtml() + zoneAsksHtml() + todayHtml() + weatherHtml() + peopleStripHtml() + countdownsHtml() + tonightHtml() + quickActionsHtml() + plansHtml(); }
 
 /* ---------- 4.0 and 5.0 safety on the web: SOS, Critical Check-In, find my phone, zones, safety alerts ---------- */
 function sosHtml() {
@@ -296,17 +296,114 @@ const feedIcon = it => it.kind === "sos" ? "🚨" : it.kind === "late" ? "⏰" :
 function feedHtml() {
   return S.feed.length ? S.feed.slice(0, 40).map(it => `<div class="feed"><span>${feedIcon(it)}</span><div><b>${esc(it.body)}</b><small>${esc(ago(it.at))}</small></div></div>`).join("") : '<div class="empty">Nothing has happened yet.</div>';
 }
+const MORE_TABS = [["me", "Me"], ["family", "Family"], ["safety", "Safety"], ["settings", "Settings"]];
 function moreHtml() {
+  const tab = S.moreTab || (S.moreTab = (() => { try { return localStorage.getItem("hb_more") || "me"; } catch (e) { return "me"; } })());
+  const bar = `<div class="mtabs" style="display:flex;flex-wrap:nowrap;gap:4px;padding:4px;border-radius:14px;background:var(--surface2);margin-bottom:12px">${MORE_TABS.map(([k, n]) => `<button type="button" class="btn sm ${tab === k ? "solid" : ""}" style="flex:1 1 0;min-width:0;padding:8px 2px;font-size:13px" data-act="moretab" data-id="${k}">${n}</button>`).join("")}</div>`;
+  if (tab === "me") return bar + setupCardHtml() + youCard() + statusCardHtml() + moodCardHtml() + pickupCardHtml() + birthdayCardHtml() + myControlsHtml();
+  if (tab === "safety") return bar + safetyTabHtml();
+  if (tab === "settings") return bar + settingsTabHtml();
+  return bar + familyTabHtml();
+}
+function familyTabHtml() {
   const n = jobsAlert(), ra = rewardsAlert();
-  return setupCardHtml() + youCard() + statusCardHtml() + pickupCardHtml() + birthdayCardHtml() + myControlsHtml()
+  return accordion("wallet", "💰", "Pocket money", walletSub(), walletHtml())
+    + accordion("album", "📸", "Album", (S.album || []).length ? S.album.length + " photos" : "Family photos", albumHtml())
+    + accordion("kudos", "⭐", "Kudos and badges", S.kudos && S.kudos.star ? "Star of the week: " + S.kudos.star.name : "Say thanks", kudosHtml())
+    + accordion("homework", "📚", "Homework", (S.homework || []).filter(h => !h.done).length + " to do", homeworkHtml())
     + accordion("rewards", "🎁", "Rewards", isParent() ? (ra ? ra + " to answer" : "What points can buy") : myBal() + " points to spend", rewardsHtml(), ra)
     + accordion("jobs", "✅", "Jobs and list", n ? (isParent() ? n + " to approve" : n + " to do") : "Points and the family list", jobsHtml(), n)
     + accordion("board", "📌", "Family board", (S.board || []).length ? S.board.length + (S.board.length === 1 ? " note" : " notes") : "Wi-Fi, the doctor, who to call", boardHtml())
     + accordion("rules", "📋", "Family rules", "What the family agreed", `<p class="tabhelp">${isParent() ? "Write the house rules and set each child's daily limit." : "Read what your family agreed."}</p><button class="btn solid" data-act="rules" data-id="0">${isParent() ? "Edit the rules" : "Read the rules"}</button>`)
     + accordion("links", "🔗", "Linked apps", S.links.length ? S.links.length + " linked" : "Platter and more", linkedHtml())
-    + accordion("feed", "🕓", "Activity", "What has been happening", feedHtml())
-    + `<div class="morebtns"><button class="btn" data-act="search">🔎 Search</button><button class="btn" data-act="menu">⚙️ Settings</button>${isParent() ? '<button class="btn" data-act="invite">＋ Invite someone</button>' : ""}</div>`;
+    + accordion("feed", "🕓", "Activity", "What has been happening", feedHtml());
 }
+function settingsTabHtml() {
+  return `<section class="calcard"><h3>Mellow</h3><p class="tabhelp">The web version is always the newest: it updates by itself. On Android, the app offers updates and installs them in one tap.</p>
+    <div class="morebtns"><button class="btn" data-act="search">🔎 Search</button><button class="btn" data-act="menu">⚙️ Settings and look</button>${isParent() ? '<button class="btn" data-act="invite">＋ Invite someone</button>' : ""}<a class="btn" href="/update#log" target="_blank" rel="noopener">📜 Update log</a></div></section>`;
+}
+function safetyTabHtml() {
+  const t = (S.trusted || []).map(p => `<div class="item"><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(p.name)}</b><small>${esc([p.relation, p.phone].filter(Boolean).join(" · "))}</small></span><a class="btn sm" href="tel:${esc(p.phone)}">Call</a>${isParent() ? `<button class="btn sm" data-act="trustdel" data-id="${p.id}">✕</button>` : ""}</div>`).join("");
+  return `<section class="calcard"><h3>🛟 Safety</h3><div class="morebtns"><button class="btn" data-act="walk">🚶 Safe Walk</button><button class="btn" data-act="trip">🔗 Share my trip</button><button class="btn" data-act="ringme">📱 Find my phone</button></div></section>`
+    + kidToolsHtml()
+    + `<section class="calcard"><h3>🧑‍🤝‍🧑 Trusted adults</h3>${t || '<div class="empty">Nobody yet.</div>'}${isParent() ? '<button class="btn sm" data-act="trustadd" style="margin-top:8px">＋ Add someone</button>' : ""}</section>`;
+}
+
+/* ---------- 5.0 on the web: pocket money, album, kudos, homework, mood, countdowns, weather, safe walk, trip ---------- */
+async function refreshV5() {
+  const get = async (path, key, pick) => { try { const d = await api(path); S[key] = pick(d); } catch (e) { /* offline or not allowed */ } };
+  await Promise.all([get("/api/wallet", "wallet", d => d.wallets), get("/api/album", "album", d => d.photos), get("/api/kudos", "kudos", d => d),
+    get("/api/badges", "badges", d => d.badges), get("/api/homework", "homework", d => d.items), get("/api/trusted", "trusted", d => d.people),
+    get("/api/countdowns", "countdowns", d => d.countdowns), get("/api/weather", "weather", d => d)]);
+  renderSide();
+}
+const money = c => (c < 0 ? "-" : "") + (Math.abs(c) / 100).toLocaleString(undefined, { style: "currency", currency: "GBP" }).replace("£", "") ;
+function walletSub() { const w = S.wallet || []; if (!w.length) return "Wallets and goals"; return isParent() ? w.map(x => x.name + " " + money(x.balance)).join(" · ") : money(w[0].balance) + " to spend"; }
+function walletHtml() {
+  return (S.wallet || []).map(w => `<div class="item" style="display:block"><b style="font-weight:600">${esc(isParent() ? w.name : "My wallet")}: ${money(w.balance)}</b>
+    ${w.entries.filter(e => e.status === "pending").map(e => `<div class="pl-btns" style="margin-top:6px"><small style="flex:1">${e.cents < 0 ? "Wants to spend" : "Asks for"} ${money(Math.abs(e.cents))}${e.note ? " · " + esc(e.note) : ""}</small>${isParent() ? `<button class="btn sm" data-act="walletno" data-id="${e.id}">Not now</button><button class="btn sm solid" data-act="walletyes" data-id="${e.id}">Yes</button>` : "<small>waiting</small>"}</div>`).join("")}
+    ${w.goals.map(g => `<div style="margin-top:6px"><small>${esc(g.emoji)} ${esc(g.title)} · ${money(g.saved)} of ${money(g.target)}</small><div style="height:8px;border-radius:4px;background:var(--surface2)"><div style="height:8px;border-radius:4px;background:var(--accent);width:${Math.min(100, Math.round(g.saved * 100 / Math.max(1, g.target)))}%"></div></div></div>`).join("")}
+    ${isParent() ? `<div class="pl-btns" style="margin-top:8px"><button class="btn sm solid" data-act="walletadd" data-id="${w.member}">＋ Add money</button></div>` : '<div class="pl-btns" style="margin-top:8px"><button class="btn sm" data-act="walletask">Ask a parent</button></div>'}</div>`).join("") || '<div class="empty">Nothing yet.</div>';
+}
+function albumHtml() {
+  const a = S.album || [];
+  return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">${a.slice(0, 24).map(p => `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px"></a>`).join("")}</div>${a.length ? "" : '<div class="empty">No photos yet. Photos sent in the family chat land here.</div>'}
+    <label class="btn sm" style="margin-top:8px;cursor:pointer">＋ Add a photo<input type="file" accept="image/*" data-albumup hidden></label>`;
+}
+function kudosHtml() {
+  const k = S.kudos || {}, b = S.badges || [];
+  return `${k.star ? `<p class="tabhelp">⭐ Star of the week: <b>${esc(k.star.name)}</b> (${k.star.count} kudos)</p>` : ""}
+    <div class="pl-btns">${S.members.filter(m => m.id !== S.me).map(m => `<button class="btn sm" data-act="kudo" data-id="${m.id}">⭐ ${esc(m.name)}</button>`).join("")}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px">${b.map(x => `<div class="item" style="display:block;text-align:center;opacity:${x.earned ? 1 : .55}"><div style="font-size:24px">${x.earned ? x.emoji : "🔒"}</div><small>${esc(x.name)}<br>${x.earned ? "Earned" : x.have + "/" + x.goal}</small></div>`).join("")}</div>
+    ${(k.recent || []).slice(0, 5).map(r => `<small style="display:block">${esc(r.emoji)} ${esc(r.from)} → ${esc(r.to)}${r.reason ? ": " + esc(r.reason) : ""}</small>`).join("")}`;
+}
+function homeworkHtml() {
+  return (S.homework || []).map(h => `<div class="item"><input type="checkbox" ${h.done ? "checked" : ""} data-hw="${h.id}"><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(h.title)}</b><small>${esc([isParent() ? h.name : "", h.subject, "due " + dayLabel(h.due)].filter(Boolean).join(" · "))}</small></span></div>`).join("")
+    + `<button class="btn sm" data-act="hwadd" style="margin-top:6px">＋ Add homework</button>`;
+}
+const FACES = ["", "😢", "😕", "😐", "🙂", "😄"];
+function moodCardHtml() { return `<section class="calcard"><h3>How are you feeling?</h3><div class="pl-btns">${[1, 2, 3, 4, 5].map(v => `<button class="btn" style="font-size:22px" data-act="mood" data-id="${v}">${FACES[v]}</button>`).join("")}</div><small>Your family sees it, unless you keep it private in the app.</small></section>`; }
+function weatherHtml() {
+  const w = S.weather; if (!w) return "";
+  return `<section class="tonight"><span>${esc(w.icon)}</span><div><b>${w.temp}° · ${esc(w.words)}</b><small>At ${esc(w.where)} · ${w.days.slice(0, 3).map(d => esc(d.icon) + " " + d.max + "°/" + d.min + "°").join("  ")}</small></div></section>`;
+}
+function countdownsHtml() {
+  const c = S.countdowns || []; if (!c.length) return "";
+  return `<section class="calcard"><h3>⏳ Counting down</h3>${c.slice(0, 4).map(x => { const d = Math.ceil((x.at - Date.now() / 1000) / 86400); return `<div class="item"><span style="flex:1">${esc(x.emoji)} ${esc(x.title)}</span><b>${d <= 0 ? "Today!" : d === 1 ? "Tomorrow" : d + " days"}</b></div>`; }).join("")}</section>`;
+}
+async function v5Act(act, id, el) {
+  const ask = (q, d) => { const v = prompt(q, d || ""); return v === null ? null : v.trim(); };
+  const run = async (fn, done) => { try { await fn(); if (done) toast(done); refreshV5(); } catch (e) { toast(e.message); } };
+  if (act === "moretab") { S.moreTab = el.dataset.id; try { localStorage.setItem("hb_more", S.moreTab); } catch (e) { /* ignore */ } renderSide(); return true; }
+  if (act === "walletadd") { const v = ask("How much? (use a minus to take some off)"); if (v) await run(() => api("/api/wallet", "POST", { member: id, amount: parseFloat(v), note: ask("What for? (optional)") || "" }), "Saved"); return true; }
+  if (act === "walletask") { const v = ask("How much do you want to spend? (or put + in front to ask for money)"); if (v) await run(() => api("/api/wallet/request", "POST", { amount: v.startsWith("+") ? parseFloat(v) : -Math.abs(parseFloat(v)), note: ask("What for?") || "" }), "Asked"); return true; }
+  if (act === "walletyes" || act === "walletno") { await run(() => api(`/api/wallet/${id}/answer`, "POST", { ok: act === "walletyes" }), "Answered"); return true; }
+  if (act === "kudo") { const r = ask("What for? (optional)"); if (r !== null) await run(() => api("/api/kudos", "POST", { to: id, emoji: "⭐", reason: r }), "Kudos sent ⭐"); return true; }
+  if (act === "hwadd") { const t = ask("What is the homework?"); if (!t) return true; const due = ask("Due date (YYYY-MM-DD)", todayKey()); let member; if (isParent()) { const kids = S.members.filter(m => m.role === "child"); member = kids.length === 1 ? kids[0].id : (kids.find(k => k.name.toLowerCase() === (ask("For whom? " + kids.map(k => k.name).join(", ")) || "").toLowerCase()) || {}).id; }
+    await run(() => api("/api/homework", "POST", { title: t, due, member }), "Added"); return true; }
+  if (act === "mood") { await run(() => api("/api/mood", "POST", { mood: id, note: "" }), "Thanks for sharing 💛"); return true; }
+  if (act === "trustadd") { const n = ask("Name"); const p = n && ask("Phone number"); if (n && p) await run(() => api("/api/trusted", "POST", { name: n, phone: p, relation: ask("Who are they? (optional)") || "" }), "Added"); return true; }
+  if (act === "trustdel") { await run(() => api(`/api/trusted/${id}`, "DELETE"), "Removed"); return true; }
+  if (act === "ringme") { await run(() => api(`/api/members/${S.me}/ring`, "POST"), "Your phones will ring"); return true; }
+  if (act === "trip") { const h = ask("Share your live location for how many hours? (1 to 8)", "1"); if (!h) return true; try { const d = await api("/api/trip", "POST", { hours: parseInt(h, 10) || 1 }); prompt("Send this link. It stops working by itself:", d.url); } catch (e) { toast(e.message); } return true; }
+  if (act === "walk") {
+    const places = S.places.filter(p => !p.pending); if (!places.length) { toast("Add a zone first, like Home."); return true; }
+    const name = ask("Walking to? " + places.map(p => p.name).join(", "), (places.find(p => p.name === "Home") || places[0]).name); const p = places.find(x => x.name.toLowerCase() === (name || "").toLowerCase());
+    if (p) await run(() => api("/api/walk", "POST", { place: p.id, minutes: parseInt(ask("About how many minutes?", "20"), 10) || 20 }), "Safe Walk started. Keep this page open on your phone, or use the app."); return true;
+  }
+  return false;
+}
+document.addEventListener("change", async e => {
+  const t = e.target;
+  if (t && t.dataset && t.dataset.hw) { try { await api(`/api/homework/${t.dataset.hw}`, "POST", { done: t.checked }); refreshV5(); } catch (err) { toast(err.message); } }
+  if (t && t.matches && t.matches("[data-albumup]") && t.files && t.files[0]) {
+    try {
+      const f = t.files[0], img = await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = r.result; }; r.readAsDataURL(f); });
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement("canvas"); c.width = img.width * k; c.height = img.height * k; c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      const up = await api("/api/images", "POST", { image: c.toDataURL("image/jpeg", 0.82) }); await api("/api/album", "POST", { url: up.url, caption: "" }); toast("Added to the album"); refreshV5();
+    } catch (err) { toast(err.message || "Could not add it"); }
+  }
+});
 function searchDialog() {
   modal(`<h2>🔎 Search Mellow</h2><input class="field" id="sqIn" placeholder="People, plans, meals, notes, jobs, groups…" autocomplete="off"><div id="sqOut" class="sq-out"></div><div class="foot"><button class="btn" id="sqX" type="button">Close</button></div>`, root => {
     const out = root.querySelector("#sqOut"), go = (tab, fn) => () => { closeModal(); setTab(tab); if (fn) fn(); };
@@ -352,6 +449,7 @@ function recipeDialog(day) {
   });
 }
 async function hb2Act(act, id, el) {
+  if (await v5Act(act, id, el)) return;
   if (act === "imok") { try { await api("/api/messages", "POST", { kind: "checkin", body: "I'm OK", to: 0 }); await api("/api/critical/ack", "POST"); toast("Your family knows you are OK"); } catch (e) { toast(e.message); } return; }
   if (act === "crit") { try { await api(`/api/members/${id}/critical`, "POST"); toast("Their phone will ring until they tap I'm OK"); } catch (e) { toast(e.message); } return; }
   if (act === "ring") { try { await api(`/api/members/${id}/ring`, "POST"); toast("Ringing their phone"); } catch (e) { toast(e.message); } return; }
@@ -439,7 +537,7 @@ function mellowWelcome() {
   });
 }
 function hb2Boot() {
-  refreshRisk();
+  refreshRisk(); refreshV5();
   setTimeout(mellowWelcome, 600);
   setTimeout(() => { const o = $("#over"); if (!(o && o.classList.contains("on"))) linkPrompt(); }, 3500);
   refreshMeals(); refreshGroups(); refreshLinks(); refreshFeed(); loadStickers();

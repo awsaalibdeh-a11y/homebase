@@ -579,3 +579,28 @@ fun TrustedScreen(nav: Nav) {
             dismissButton = { TextButton({ adding = false }) { Text("Cancel") } })
     }
 }
+
+
+/** Asked once: your birthday, with the year. Your family sees your age and gets a birthday reminder. */
+@Composable
+fun AgeDialog(onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    var date by remember { mutableStateOf<LocalDate?>(null) }
+    AlertDialog(onDismissRequest = {}, containerColor = Surface, title = { Text("🎂 When is your birthday?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Mellow shows your age to your family, counts down to your birthday and makes sure nobody forgets it.", color = Muted, fontSize = 13.sp)
+                SoftButton(date?.let { "${it.dayOfMonth} ${it.month.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())} ${it.year}" } ?: "Pick the day") {
+                    val d = date ?: LocalDate.now().minusYears(12)
+                    DatePickerDialog(ctx, { _, y, m, dd -> date = LocalDate.of(y, m + 1, dd) }, d.year, d.monthValue - 1, d.dayOfMonth).apply { datePicker.maxDate = System.currentTimeMillis() }.show()
+                }
+                date?.let { d ->
+                    val now = LocalDate.now()
+                    val age = now.year - d.year - (if (now.dayOfYear < d.withYear(now.year).dayOfYear) 1 else 0)
+                    Text("You are $age.", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        },
+        confirmButton = { TextButton({ val d = date ?: return@TextButton; go(ctx, "Saved 🎂", { ctx.hb.api.setBirthday(d.monthValue, d.dayOfMonth, d.year) }) { ctx.hb.state.refreshFamily() }; onDone() }, enabled = date != null) { Text("Save") } },
+        dismissButton = { TextButton(onDone) { Text("Not now") } })
+}

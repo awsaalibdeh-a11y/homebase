@@ -2608,5 +2608,19 @@ class BiggestUpdateV5(Base):
         self.assertEqual(self.card(self.mum, self.kid_id)["bedtime"], {"from": 1260, "to": 420})
 
 
+class AgesV6(Base):
+    def test_birthday_with_a_year_gives_an_age(self):
+        import datetime as dt
+        today = dt.date.today()
+        r = self.post(self.kid, "/api/birthday", month=today.month, day=today.day, year=today.year - 12).get_json()
+        self.assertEqual(r["age"], 12)
+        kid = {m["id"]: m for m in self.get(self.mum, "/api/family").get_json()["members"]}[self.kid_id]
+        self.assertEqual(kid["age"], 12)
+        self.assertEqual(self.post(self.kid, "/api/birthday", month=1, day=1, year=1800).status_code, 400)
+        self.post(self.kid, "/api/birthday", month=3, day=4)
+        kid = {m["id"]: m for m in self.get(self.mum, "/api/family").get_json()["members"]}[self.kid_id]
+        self.assertEqual(kid["birthday"], "03-04", "a birthday without a year keeps the year already known")
+
+
 if __name__ == "__main__":
     unittest.main()

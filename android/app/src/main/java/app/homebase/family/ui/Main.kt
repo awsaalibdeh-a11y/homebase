@@ -66,9 +66,8 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
     val tab by state.tab.collectAsState()
     val owner = LocalLifecycleOwner.current
     val ctxU = LocalContext.current
-    var newApk by remember { mutableStateOf<String?>(null) }
-    var newNotes by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) { runCatching { ctxU.hb.api.config() }.onSuccess { c -> if (c.versionCode > app.homebase.family.BuildConfig.VERSION_CODE) { newApk = c.apkUrl; newNotes = "Mellow ${c.versionName}" + c.notes.joinToString("") { "\n• $it" } } } }
+    var newCfg by remember { mutableStateOf<app.homebase.family.FamilyConfig?>(null) }
+    LaunchedEffect(Unit) { runCatching { ctxU.hb.api.config() }.onSuccess { c -> if (c.versionCode > app.homebase.family.BuildConfig.VERSION_CODE) newCfg = c } }
     var welcome by remember { mutableStateOf(!ctxU.hb.store.mellowWelcome) }
     if (welcome) androidx.compose.material3.AlertDialog(onDismissRequest = {}, containerColor = Surface, title = { Text("Welcome to Mellow") },
         text = { Text("Homebase has a new name and a calmer look. Your family, messages and settings are all still here.\n\nNew: five tabs (Home, Map, Plan, Chat, More), meals, friend groups, stickers and GIFs, photos in chat, video calls, and a Dark look in Settings.") },
@@ -81,11 +80,10 @@ fun MainScreen(nav: Nav, initialTab: Int = 0) {
         }
     }
     if (linkOpen) LinkAppsDialog { linkOpen = false }
-    newApk?.let { url ->
-        androidx.compose.material3.AlertDialog(onDismissRequest = { newApk = null }, title = { Text("A new Mellow is ready") },
-            text = { Text(newNotes + "\n\nTap Update to see the install page and the full update log. Your family, places and settings stay as they are.", modifier = Modifier.verticalScroll(rememberScrollState())) },
-            confirmButton = { TextButton({ ctxU.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); newApk = null }) { Text("Update") } },
-            dismissButton = { TextButton({ newApk = null }) { Text("Later") } })
+    val famForAge by ctxU.hb.state.family.collectAsState()
+    val meForAge = famForAge?.members?.firstOrNull { it.id == ctxU.hb.store.myId }
+    if (!welcome && !ctxU.hb.store.askedAge && meForAge != null && meForAge.age == null) AgeDialog { ctxU.hb.store.askedAge = true }
+    newCfg?.let { c -> UpdateDialog(c) { newCfg = null }
     }
     // Keep the map fresh while the screen is visible; nothing runs in the background.
     LaunchedEffect(owner) {

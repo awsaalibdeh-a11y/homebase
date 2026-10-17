@@ -138,7 +138,7 @@ class RingWindow : Form
     {
         AutoScaleDimensions = new SizeF(96f, 96f); AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = true; TopMost = true; StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Color.White; ForeColor = Color.FromArgb(23, 23, 26); Width = 420; Height = 330; Text = "Homebase call";
+        BackColor = Color.White; ForeColor = Color.FromArgb(23, 23, 26); Width = 420; Height = 330; Text = "Mellow call";
         Label top = new Label { Text = urgent ? "URGENT HOMEBASE CALL" : "HOMEBASE CALL", Left = 0, Top = 22, Width = 420, Height = 22, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.FromArgb(110, 110, 120), Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
         Label who = new Label { Text = name, Left = 10, Top = 100, Width = 400, Height = 48, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI Emoji", 22f, FontStyle.Bold) };
         Label sub = new Label { Text = "is calling you…", Left = 0, Top = 150, Width = 420, Height = 26, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.FromArgb(98, 98, 107), Font = new Font("Segoe UI", 11f) };
@@ -189,7 +189,7 @@ static class Native
 
 class App : ApplicationContext
 {
-    public const int Build = 22;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
+    public const int Build = 23;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -252,8 +252,8 @@ class App : ApplicationContext
         if (args.Length > 0 && args[0] == "--popuptest")                                // shows the pop-ups for a few seconds so they can be seen
         {
             Toast.Show("🚫 Roblox is grounded", "Closed because it is grounded until 8:51 PM.", 9, null, null);
-            Toast.Show("📞 Mum is calling", "Homebase call", 9, "Answer in Homebase", delegate { });
-            Toast.Show("Homebase is on", "Counting only playing and watching.", 9, null, null);
+            Toast.Show("📞 Mum is calling", "Mellow call", 9, "Answer in Mellow", delegate { });
+            Toast.Show("Mellow is on", "Counting only playing and watching.", 9, null, null);
             System.Windows.Forms.Timer snap = new System.Windows.Forms.Timer { Interval = 1500 }; snap.Tick += delegate { snap.Stop(); Toast.Snapshots(Environment.GetEnvironmentVariable("HB_SNAP") ?? Path.GetTempPath()); }; snap.Start();
             System.Windows.Forms.Timer t = new System.Windows.Forms.Timer { Interval = 11000 }; t.Tick += delegate { Application.Exit(); }; t.Start();
             Application.Run(); return;
@@ -269,10 +269,10 @@ class App : ApplicationContext
                     foreach (Process other in Process.GetProcessesByName("HomebaseTracker"))
                         if (other.Id != Process.GetCurrentProcess().Id) { try { other.Kill(); other.WaitForExit(4000); } catch { } }
                 try { created = mx.WaitOne(8000); } catch (AbandonedMutexException) { created = true; }
-                if (!created) { if (args.Length == 0) MessageBox.Show("Homebase screen time is already running. Look for its icon near the clock.", "Homebase"); return; }
+                if (!created) { if (args.Length == 0) MessageBox.Show("Mellow screen time is already running. Look for its icon near the clock.", "Mellow"); return; }
             }
             try { Application.Run(new App(args)); }
-            catch (Exception e) { Log("fatal: " + e); MessageBox.Show("Something went wrong:\n\n" + e.Message + "\n\nDetails are in " + LogFile, "Homebase screen time"); }
+            catch (Exception e) { Log("fatal: " + e); MessageBox.Show("Something went wrong:\n\n" + e.Message + "\n\nDetails are in " + LogFile, "Mellow screen time"); }
         }
     }
 
@@ -293,19 +293,19 @@ class App : ApplicationContext
             if (code == null) code = AskForCode();
             if (code == null) Environment.Exit(0);
             string err = Claim(code);
-            if (err != null) { MessageBox.Show(err, "Homebase screen time"); Environment.Exit(1); }
+            if (err != null) { MessageBox.Show(err, "Mellow screen time"); Environment.Exit(1); }
             Install();
         }
         else if (code != null)
         {
             string err = Claim(code);                                          // running it again with a code adds another person
-            if (err != null) MessageBox.Show(err, "Homebase screen time"); else { Install(); }
+            if (err != null) MessageBox.Show(err, "Mellow screen time"); else { Install(); }
         }
         sync = new Control(); sync.CreateControl(); IntPtr force = sync.Handle;
         if (profiles.Count > 1) PickPerson(false);                              // two kids, one laptop: ask who is sitting down
         LoadToday(); LoadCustom();
         MakeTray();
-        if (LastShownBuild() != Build) { SetShownBuild(Build); Say("Homebase is on", (cur == null ? "" : cur.Name + ": ") + "counting only playing and watching. Right-click the icon near the clock to see what it counts.", 10, null, null); }
+        if (LastShownBuild() != Build) { SetShownBuild(Build); Say("Mellow is on", (cur == null ? "" : cur.Name + ": ") + "counting only playing and watching. Right-click the icon near the clock to see what it counts.", 10, null, null); }
         new Thread(Loop) { IsBackground = true }.Start();
     }
 
@@ -321,7 +321,7 @@ class App : ApplicationContext
         Toast.Choose("Who is using this computer?", "So the right person is counted and locked.", 30, names.ToArray(), delegate (int i)
         {
             if (i < profiles.Count) { if (profiles[i] != cur) Switch(profiles[i]); return; }
-            string c = AskForCode(); if (c != null) { string err = Claim(c); if (err != null) MessageBox.Show(err, "Homebase screen time"); else PickPerson(false); }
+            string c = AskForCode(); if (c != null) { string err = Claim(c); if (err != null) MessageBox.Show(err, "Mellow screen time"); else PickPerson(false); }
         });
     }
 
@@ -329,15 +329,15 @@ class App : ApplicationContext
     {
         lock (apps) { if (dirty) { Send(); } SaveToday(); cur = p; apps.Clear(); dirty = false; cursor = -1; told.Clear(); pointsText = ""; nextText = ""; lastFamily = DateTime.MinValue; LoadToday(); }
         SaveConfig();
-        Say("Homebase", p.Name + " is using this computer.", 4, null, null);
+        Say("Mellow", p.Name + " is using this computer.", 4, null, null);
     }
 
     // ---------- the window that asks for the code
     string AskForCode()
     {
-        Form f = new Form { Text = "Homebase screen time", Width = 420, Height = 290, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterScreen, MaximizeBox = false, MinimizeBox = false, BackColor = Color.FromArgb(18, 18, 20), ForeColor = Color.FromArgb(236, 236, 240), Font = new Font("Segoe UI", 10f) };
-        Label title = new Label { Text = "Link this computer to Homebase", Font = new Font("Segoe UI", 14f, FontStyle.Bold), Left = 24, Top = 18, Width = 360, Height = 30 };
-        Label help = new Label { Text = "In Homebase open Menu, then Screen time, then \"Get the Windows tracker\". Type the 6 digits you see there.", Left = 24, Top = 56, Width = 360, Height = 50, ForeColor = Color.FromArgb(160, 160, 170) };
+        Form f = new Form { Text = "Mellow screen time", Width = 420, Height = 290, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterScreen, MaximizeBox = false, MinimizeBox = false, BackColor = Color.FromArgb(18, 18, 20), ForeColor = Color.FromArgb(236, 236, 240), Font = new Font("Segoe UI", 10f) };
+        Label title = new Label { Text = "Link this computer to Mellow", Font = new Font("Segoe UI", 14f, FontStyle.Bold), Left = 24, Top = 18, Width = 360, Height = 30 };
+        Label help = new Label { Text = "In Mellow open Menu, then Screen time, then \"Get the Windows tracker\". Type the 6 digits you see there.", Left = 24, Top = 56, Width = 360, Height = 50, ForeColor = Color.FromArgb(160, 160, 170) };
         TextBox box = new TextBox { Left = 24, Top = 112, Width = 360, MaxLength = 6, Font = new Font("Consolas", 22f, FontStyle.Bold), TextAlign = HorizontalAlignment.Center, BackColor = Color.FromArgb(10, 10, 11), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
         Label note = new Label { Text = "It counts only time spent playing or watching, and your family can see exactly the same numbers.", Left = 24, Top = 160, Width = 360, Height = 40, ForeColor = Color.FromArgb(130, 130, 140), Font = new Font("Segoe UI", 8.5f) };
         Button ok = new Button { Text = "Link this computer", Left = 24, Top = 208, Width = 360, Height = 36, BackColor = Color.FromArgb(230, 184, 102), ForeColor = Color.FromArgb(27, 19, 6), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold), DialogResult = DialogResult.OK };
@@ -364,14 +364,14 @@ class App : ApplicationContext
         {
             int st; string txt = Http("POST", "/api/devices/claim", new Dictionary<string, object> { { "code", code }, { "name", Environment.MachineName }, { "kind", "windows" } }, out st);
             Dictionary<string, object> d = Json.Deserialize<Dictionary<string, object>>(txt);
-            if (st != 200) return d.ContainsKey("error") ? d["error"].ToString() : "That did not work. Make a new code in Homebase.";
+            if (st != 200) return d.ContainsKey("error") ? d["error"].ToString() : "That did not work. Make a new code in Mellow.";
             var mem = d.ContainsKey("member") ? d["member"] as Dictionary<string, object> : null;
             string name = mem != null && mem.ContainsKey("name") ? mem["name"].ToString() : "Me";
             Profile existing = profiles.FirstOrDefault(p => p.Name == name);
             if (existing != null) existing.Token = d["token"].ToString(); else { existing = new Profile { Name = name, Token = d["token"].ToString() }; profiles.Add(existing); }
             cur = existing; SaveConfig(); return null;
         }
-        catch (Exception e) { Log("claim: " + e.Message); return "Could not reach Homebase. Check the internet and try again. (The first try can take a minute while it wakes up.)"; }
+        catch (Exception e) { Log("claim: " + e.Message); return "Could not reach Mellow. Check the internet and try again. (The first try can take a minute while it wakes up.)"; }
     }
 
     // ---------- saving things
@@ -435,17 +435,17 @@ class App : ApplicationContext
     }
     static void Remove(bool ask)
     {
-        if (ask && MessageBox.Show("Take Homebase screen time off this computer?", "Homebase", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+        if (ask && MessageBox.Show("Take Mellow screen time off this computer?", "Mellow", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
         try { using (RegistryKey k = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run", true)) if (k != null) k.DeleteValue("HomebaseTracker", false); } catch { }
         try { File.Delete(ConfigFile); foreach (string f in Directory.GetFiles(Dir, "today_*.txt")) File.Delete(f); } catch { }
-        if (ask) MessageBox.Show("Done. Homebase screen time is removed from this computer.", "Homebase");
+        if (ask) MessageBox.Show("Done. Mellow screen time is removed from this computer.", "Mellow");
     }
 
     // ---------- the icon near the clock (always visible: nothing is hidden)
     void MakeTray()
     {
         ContextMenuStrip m = new ContextMenuStrip();
-        ToolStripMenuItem who = new ToolStripMenuItem("Homebase screen time is on"); who.Enabled = false; m.Items.Add(who);
+        ToolStripMenuItem who = new ToolStripMenuItem("Mellow screen time is on"); who.Enabled = false; m.Items.Add(who);
         ToolStripMenuItem pts = new ToolStripMenuItem(""); pts.Enabled = false; pts.Visible = false; m.Items.Add(pts);
         ToolStripMenuItem nextp = new ToolStripMenuItem(""); nextp.Enabled = false; nextp.Visible = false; m.Items.Add(nextp);
         ToolStripMenuItem today = new ToolStripMenuItem("Today: counting...");
@@ -464,12 +464,12 @@ class App : ApplicationContext
         doing.Click += delegate { Say("Right now", nowDoing, 8, null, null); };
         m.Items.Add(doing);
         m.Items.Add("Who is using this computer...", null, delegate { sync.BeginInvoke(new Action(delegate { PickPerson(true); })); });
-        m.Items.Add("Open Homebase", null, delegate { try { Process.Start(server + "/app"); } catch { } });
+        m.Items.Add("Open Mellow", null, delegate { try { Process.Start(server + "/app"); } catch { } });
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add("Remove from this computer", null, delegate { Remove(true); Quit(); });
-        m.Opening += delegate { quiet.Text = DateTime.Now < quietUntil ? "Turn pop-ups back on" : "Pause everyday pop-ups for 1 hour"; grounded.Text = groundedNow.Count == 0 ? "Grounded apps: none" : "Grounded: " + string.Join(", ", groundedNow.ToArray()); who.Text = cur == null ? "Homebase screen time is on" : "Counting for " + cur.Name; pts.Text = pointsText; pts.Visible = pointsText != ""; nextp.Text = nextText; nextp.Visible = nextText != ""; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
-        tray = new NotifyIcon { Icon = SystemIcons.Information, Text = "Homebase", Visible = true, ContextMenuStrip = m };
-        tray.DoubleClick += delegate { Say("Homebase" + (cur == null ? "" : " - " + cur.Name), nowDoing + "\nToday: " + Duration(Total()) + " playing or watching", 9, "Open Homebase", delegate { Open("/app"); }); };
+        m.Opening += delegate { quiet.Text = DateTime.Now < quietUntil ? "Turn pop-ups back on" : "Pause everyday pop-ups for 1 hour"; grounded.Text = groundedNow.Count == 0 ? "Grounded apps: none" : "Grounded: " + string.Join(", ", groundedNow.ToArray()); who.Text = cur == null ? "Mellow screen time is on" : "Counting for " + cur.Name; pts.Text = pointsText; pts.Visible = pointsText != ""; nextp.Text = nextText; nextp.Visible = nextText != ""; today.Text = "Today: " + Duration(Total()) + " playing or watching"; };
+        tray = new NotifyIcon { Icon = MellowIcon(), Text = "Mellow", Visible = true, ContextMenuStrip = m };
+        tray.DoubleClick += delegate { Say("Mellow" + (cur == null ? "" : " - " + cur.Name), nowDoing + "\nToday: " + Duration(Total()) + " playing or watching", 9, "Open Mellow", delegate { Open("/app"); }); };
         tray.BalloonTipClicked += delegate { Open(pendingOpen ?? "/app"); pendingOpen = null; };
     }
     // what the tray menu shows besides screen time: my points to spend and the next family plan (refreshed every few minutes, never blocks the loop)
@@ -541,7 +541,7 @@ class App : ApplicationContext
         try { if (File.Exists(Installed)) File.Move(Installed, Installed + ".old"); } catch (Exception e) { Log("update rename: " + e.Message); }
         File.Move(tmp, Installed);
         Log("updated from build " + Build + " to " + d["build"]);
-        Say("Homebase updated", "Now on the newest version.", 6, null, null);
+        Say("Mellow updated", "Now on the newest version.", 6, null, null);
         Process.Start(Installed);                                                          // the new copy takes over from this one
         stopping = true; Thread.Sleep(600); Quit();
     }
@@ -551,7 +551,7 @@ class App : ApplicationContext
     void AddCustom(string cat)
     {
         string n = (lastFgName ?? "").ToLower();
-        if (n == "" || n == "homebasetracker" || n == "explorer") { Say("Homebase", "Open the game or video first, then pick this from the tray menu.", 8, null, null); return; }
+        if (n == "" || n == "homebasetracker" || n == "explorer") { Say("Mellow", "Open the game or video first, then pick this from the tray menu.", 8, null, null); return; }
         CustomPicks[n] = new[] { lastFgName, cat };
         try { File.WriteAllLines(CustomFile, CustomPicks.Select(kv => kv.Key + "|" + kv.Value[0] + "|" + kv.Value[1]).ToArray()); } catch { }
         Say("Got it", lastFgName + " will now count as " + (cat == "play" ? "playing" : "watching") + " on this computer.", 8, null, null);
@@ -595,9 +595,33 @@ class App : ApplicationContext
     }
 
     // is a browser window titled "Homebase" open? Then the page itself is ringing and a second ring would double up.
+    // the tray icon: Mellow's white wave lines on a black rounded square, drawn here so there is no file to ship
+    static Icon MellowIcon()
+    {
+        try
+        {
+            Bitmap b = new Bitmap(32, 32);
+            using (Graphics g = Graphics.FromImage(b))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (System.Drawing.Drawing2D.GraphicsPath r = new System.Drawing.Drawing2D.GraphicsPath())
+                {
+                    r.AddArc(0, 0, 12, 12, 180, 90); r.AddArc(19, 0, 12, 12, 270, 90); r.AddArc(19, 19, 12, 12, 0, 90); r.AddArc(0, 19, 12, 12, 90, 90); r.CloseFigure();
+                    using (SolidBrush bg = new SolidBrush(Color.FromArgb(17, 17, 17))) g.FillPath(bg, r);
+                }
+                int[] alpha = { 255, 200, 150 };
+                for (int k = 0; k < 3; k++)
+                    using (Pen pen = new Pen(Color.FromArgb(alpha[k], 244, 244, 241), 2.4f))
+                        g.DrawBezier(pen, 6, 11 + k * 6, 12, 6 + k * 6, 18, 16 + k * 6, 26, 10 + k * 6);
+            }
+            return Icon.FromHandle(b.GetHicon());
+        }
+        catch { return SystemIcons.Information; }
+    }
+
     static bool BrowserHasHomebaseOpen()
     {
-        try { foreach (Process p in Process.GetProcesses()) { try { if (Array.IndexOf(Browsers, p.ProcessName.ToLower()) >= 0) { string t = (p.MainWindowTitle ?? "").Trim(); if (t == "Homebase" || t.StartsWith("Homebase - ")) return true; } } catch { } } } catch { }
+        try { foreach (Process p in Process.GetProcesses()) { try { if (Array.IndexOf(Browsers, p.ProcessName.ToLower()) >= 0) { string t = (p.MainWindowTitle ?? "").Trim(); if (t == "Mellow" || t.StartsWith("Mellow - ")) return true; } } catch { } } } catch { }
         return false;
     }
 
@@ -618,9 +642,9 @@ class App : ApplicationContext
     {
         if (cur == null) return;
         string gone = cur.Name; profiles.Remove(cur);
-        if (profiles.Count == 0) { Say("Homebase", "This computer was removed from Homebase."); Remove(false); Quit(); return; }
+        if (profiles.Count == 0) { Say("Mellow", "This computer was removed from Mellow."); Remove(false); Quit(); return; }
         cur = profiles[0]; apps.Clear(); dirty = false; cursor = -1; pointsText = ""; nextText = ""; lastFamily = DateTime.MinValue; LoadToday(); SaveConfig();
-        Say("Homebase", gone + " was removed from this computer. Now counting for " + cur.Name + ".");
+        Say("Mellow", gone + " was removed from this computer. Now counting for " + cur.Name + ".");
     }
 
     // ---------- the loop: lock, nudges, grounded apps, counting
@@ -676,7 +700,7 @@ class App : ApplicationContext
                             {
                                 if (kind == "sos") { Important("\U0001F6A8 " + from + " needs help", body, 20); try { SystemSounds.Hand.Play(); } catch { } }
                                 else if (kind == "pickup") { Important("\U0001F697 " + from + " needs a pickup", body, 20); try { SystemSounds.Exclamation.Play(); } catch { } }
-                                else if (from == "Homebase") Important("\U0001F4E2 Announcement", body, 12);
+                                else if (from == "Mellow" || from == "Homebase") Important("\U0001F4E2 Announcement", body, 12);
                                 else { Say(from, body); try { SystemSounds.Asterisk.Play(); } catch { } }
                             }
                         }

@@ -50,7 +50,7 @@ fun PersonCard(nav: Nav, m: Member, onFocus: (app.homebase.family.Spot) -> Unit)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MemberAvatar(m, 52, if (m.isParent) SunSoft else AccentSoft)
             Column(Modifier.weight(1f)) {
-                Text(if (m.id == me.myId) "${m.name} (you)" else m.name, style = MaterialTheme.typography.titleMedium)
+                Text((if (m.id == me.myId) "${m.name} (you)" else m.name) + (m.age?.let { " · $it" } ?: ""), style = MaterialTheme.typography.titleMedium)
                 Text(memberLine(m), style = MaterialTheme.typography.bodyMedium, color = Muted)
                 Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Chip(if (m.isParent) "Parent" else "Child")
@@ -151,7 +151,7 @@ fun HomeTab(nav: Nav) {
             Text(listOfNotNull("${all.size} people", if (live > 0) "$live live on the map" else "nobody live right now", if (home > 0) "$home at home" else null).joinToString(" · "), color = Muted, style = MaterialTheme.typography.bodyMedium)
             plans.firstOrNull()?.let { p -> Text("Next: ${p.emoji} ${p.title} · ${planWhen(p.start)}", Modifier.padding(top = 4.dp), color = Ink, style = MaterialTheme.typography.bodyMedium) }
             all.mapNotNull { b -> b.birthday?.let { b to daysToBirthday(it) } }.filter { it.second <= 30 }.minByOrNull { it.second }?.let { (b, days) ->
-                Text("🎂 " + (if (days == 0) "It's ${b.name}'s birthday today!" else "${b.name}'s birthday is ${if (days == 1) "tomorrow" else "in $days days"}"), Modifier.padding(top = 4.dp), color = Ink, style = MaterialTheme.typography.bodyMedium)
+                Text("🎂 " + (if (days == 0) "It's ${b.name}'s birthday today!" + (b.age?.let { " $it today 🎉" } ?: "") else "${b.name}" + (b.age?.let { " turns ${it + 1}" } ?: "'s birthday is") + " ${if (days == 1) "tomorrow" else "in $days days"}"), Modifier.padding(top = 4.dp), color = Ink, style = MaterialTheme.typography.bodyMedium)
             }
             SoftButton(if (mine != null) "${mine.emoji} ${mine.text}".trim() else "🙂 What I'm up to", Modifier.padding(top = 10.dp)) { statusOpen = true }
             if (me.isParent) SoftButton("📢 Announce to the family", Modifier.padding(top = 8.dp)) { announceOpen = true }
