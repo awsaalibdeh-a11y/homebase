@@ -193,6 +193,9 @@ fun CameraScreen(nav: Nav, purpose: String) {
                 runCatching { ctx.hb.api.setAvatar(jpegDataUrl(Bitmap.createScaledBitmap(r.photo, 256, 256, true), 85)) }
                     .onSuccess { ctx.hb.state.refreshFamily(); Avatars.cache.clear(); toast(ctx, "Profile picture saved"); nav.back() }
                     .onFailure { problem = it.message ?: "Could not save it."; shot = null }
+            } else if (purpose == "album") {
+                runCatching { ctx.hb.api.addToAlbum(ctx.hb.api.uploadImage(jpegDataUrl(fit(b, 1600), 82)), "") }
+                    .onSuccess { toast(ctx, "Added to the album"); nav.back() }.onFailure { problem = it.message ?: "Could not add it."; shot = null }
             } else {
                 sendPhoto(ctx, b, purpose.removePrefix("chat:").toIntOrNull() ?: 0)
                 nav.back()

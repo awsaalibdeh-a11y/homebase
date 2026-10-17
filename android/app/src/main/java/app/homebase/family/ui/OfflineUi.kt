@@ -85,6 +85,12 @@ fun EmergencyScreen(nav: Nav) {
                 }
             }
             SoftButton("Edit the card") { draft = data; editing = true }
+            val askSms = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok -> toast(ctx, if (ok) "SOS will be texted to your contacts when there is no internet" else "Texting stays off") }
+            SoftCard {
+                Text("📵 SOS with no internet", style = MaterialTheme.typography.titleMedium)
+                Text(if (app.homebase.family.OfflineSos.allowed(ctx)) "On. If an SOS cannot reach the internet, Mellow texts your location to the emergency contacts above and the trusted adults." else "Let Mellow text your location to the emergency contacts above if you send an SOS with no internet. Normal text charges apply.", color = Muted)
+                if (!app.homebase.family.OfflineSos.allowed(ctx)) TextButton({ askSms.launch(android.Manifest.permission.SEND_SMS) }) { Text("Allow texting an SOS") }
+            }
         }
     }
 }

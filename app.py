@@ -28,9 +28,23 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "12"))      # what Android compares (a plain counter)
-VERSION_NAME = os.environ.get("APP_VERSION_NAME", "4.0")           # what people see: a whole number is a big update, a decimal is a small one
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "13"))      # what Android compares (a plain counter)
+VERSION_NAME = os.environ.get("APP_VERSION_NAME", "5.0")           # what people see: a whole number is a big update, a decimal is a small one
 CHANGELOG = [                                                         # newest first; shown on the install and update page
+    {"v": "5.0", "date": "17 Oct 2026", "big": True, "title": "The biggest update yet: 20 new things", "items": [
+        "Safe Walk: share live until you get there; the family is told if you stop moving or are late.",
+        "Tell me when they get there: a parent is told when a child reaches a place, or if they have not by a time.",
+        "Speed alerts for new drivers, with the limit shown to the child.",
+        "Find my phone: make your phone (or your child's) ring loudly, even on silent.",
+        "Share my trip: a live-location link for someone outside the family that runs out by itself.",
+        "Day timeline: where someone arrived and left today.",
+        "Pocket money wallet with requests, and savings goals.",
+        "Mood check-ins, with a private option; parents hear if a child is having a hard day.",
+        "Kudos and the star of the week, plus badges you earn from what you already do.",
+        "Family photo album (photos from the family chat go in by themselves) and voice notes in chat.",
+        "Homework tracker with reminders, family countdowns, a trusted adults list, and bedtime wind-down reminders.",
+        "Weather for Home on the Home tab, a home-screen family widget, and SOS, Critical Check-In, zone answers and safety alerts in the web app too.",
+    ]},
     {"v": "4.0", "date": "17 Oct 2026", "big": True, "title": "The humongous update: safety, zones, a new look and a welcome animation", "items": [
         "SOS: a big button on Home and a home-screen widget. It sounds a loud alarm on parents' phones and sends live location every 10 seconds for 30 minutes, even if sharing was paused. \"I'm OK\" ends it.",
         "Critical Check-In: a parent can make a child's phone ring through silent until they tap I'm OK. The child can switch this off in What parents can do, and parents see that.",
@@ -221,6 +235,12 @@ def member_view(m, viewer=None):
         out["eta"] = {"min": m["eta_min"], "until": m["eta_until"]}
     if m["role"] == "child" and viewer and (viewer["id"] == m["id"] or viewer["role"] == "parent"):
         out["safe_dns"] = m.get("safe_dns") or ""
+        out["speed_limit"] = m.get("speed_limit") or 0
+        out["bedtime"] = {"from": m.get("bed_from", -1) if m.get("bed_from") is not None else -1, "to": m.get("bed_to", -1) if m.get("bed_to") is not None else -1}
+    if m.get("walk_to") and (m.get("walk_until") or 0) > now - 3 * 3600:
+        wp = db.one(select(db.places).where(db.places.c.id == m["walk_to"]))
+        if wp:
+            out["walk"] = {"place": wp["name"], "emoji": wp["emoji"], "until": m["walk_until"], "started": m.get("walk_started") or 0}
     if viewer and viewer["id"] == m["id"] and (m.get("critical_at") or 0) > now - 3600:
         by = db.one(select(db.members).where(db.members.c.id == m["critical_by"])) if m.get("critical_by") else None
         out["critical"] = {"at": m["critical_at"], "by": by["name"] if by else "A parent"}
@@ -467,6 +487,9 @@ def check_places(m, lat, lng, acc):
         else:
             db.run(insert(db.place_state).values(member_id=m["id"], place_id=p["id"], inside=arrived))
         verb = "arrived at" if arrived else "left"
+        db.run(insert(db.visits).values(family_id=m["family_id"], member_id=m["id"], place=p["name"], emoji=p["emoji"], kind="arrive" if arrived else "leave", at=time.time()))
+        if arrived:
+            place_reached(m, p)
         say(m["family_id"], m["id"], f"{m['name']} {verb} {p['name']}")
         push_family(m["family_id"], "place", {"member": m["id"], "name": m["name"], "place": p["name"], "emoji": p["emoji"], "kind": "arrive" if arrived else "leave"})
 
@@ -502,13 +525,16 @@ def post_location():
     check_places(m, lat, lng, acc)
     if int(now) % 50 == 0:
         db.run(delete(db.locations).where(db.locations.c.at < now - KEEP_LOCATIONS_DAYS * 86400))
-    return jsonify(ok=True, shared=True, **send_every(battery, sos))
+    check_speed(m, float(b.get("speed") or 0))
+    return jsonify(ok=True, shared=True, **send_every(battery, sos, bool(m.get("walk_to"))))
 
 
-def send_every(battery, sos):
+def send_every(battery, sos, walking=False):
     """How often the phone should send its location: every 10 seconds during an SOS, every 15 minutes when the battery is under 20%, otherwise every 2 minutes."""
     if sos:
         return {"interval": 10, "mode": "sos"}
+    if walking:
+        return {"interval": 15, "mode": "sos"}
     if 0 <= battery < 20:
         return {"interval": 900, "mode": "saver"}
     return {"interval": 120, "mode": "normal"}
@@ -613,7 +639,7 @@ def get_avatar(member_id):
 
 
 # ---------------------------------------------------------------- photos in the family chat
-IMAGE_LIMIT, IMAGES_PER_FAMILY = 900 * 1024, 300                      # the phone shrinks a photo to about 200 KB first; this is the ceiling
+IMAGE_LIMIT, IMAGES_PER_FAMILY = 900 * 1024, 600                      # the phone shrinks a photo to about 200 KB first; this is the ceiling
 IMAGE_MAGIC = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png"}
 
 
@@ -1448,7 +1474,7 @@ def delete_screentime():
 
 
 # ---------------------------------------------------------------- messages: texts, check-ins, running late, SOS, hearts
-KINDS = ("text", "checkin", "late", "sos", "heart", "pickup", "gif", "image")
+KINDS = ("text", "checkin", "late", "sos", "heart", "pickup", "gif", "image", "voice")
 
 
 REACTIONS = ("👍", "❤️", "😂", "😮", "🙏", "🎉")
@@ -1488,7 +1514,13 @@ def send_message():
         if not token or not db.one(select(db.message_images.c.id).where(db.message_images.c.token == token, db.message_images.c.family_id == m["family_id"])):
             return err("That photo is not available. Send it again.")
         body = f"/api/img/{token}"
-    if to_id and kind in ("text", "heart", "gif", "image") and not parent_may(m, same_family(to_id), "messages"):
+    if kind == "voice":                                                # a voice note uploaded to /api/audio by someone in this family
+        token = body.rsplit("/", 1)[-1] if body.startswith("/api/img/") else ""
+        row_ = db.one(select(db.message_images).where(db.message_images.c.token == token, db.message_images.c.family_id == m["family_id"])) if token else None
+        if not row_ or not str(row_["mime"]).startswith("audio/"):
+            return err("That voice note is not available. Record it again.")
+        body = f"/api/img/{token}"
+    if to_id and kind in ("text", "heart", "gif", "image", "voice") and not parent_may(m, same_family(to_id), "messages"):
         return denied(same_family(to_id), "messages")
     if limited(f"msg:{m['id']}", 120):
         return err("Slow down a little.", 429)
@@ -1511,6 +1543,8 @@ def send_message():
         to_id = 0
     mid = say(m["family_id"], m["id"], body, kind=kind, lat=lat, lng=lng, to_id=to_id)
     row = db.one(select(db.messages).where(db.messages.c.id == mid))
+    if kind == "image" and not to_id:                                 # family-chat photos go into the album by themselves (private ones do not)
+        db.run(insert(db.album).values(family_id=m["family_id"], token=body.rsplit("/", 1)[-1], by=m["id"], caption="", created=time.time()))
     support = None
     if kind == "text":
         if to_id:
@@ -1521,7 +1555,7 @@ def send_message():
     for x in family_members(m["family_id"]):
         if x["id"] == m["id"] or (to_id and x["id"] != to_id):
             continue
-        if kind in ("text", "heart", "gif", "image") and not parent_may(m, x, "messages"):
+        if kind in ("text", "heart", "gif", "image", "voice") and not parent_may(m, x, "messages"):
             continue
         push(x["id"], "message", {**msg_view(row), "name": m["name"], "emoji": m["emoji"], "quiet": in_quiet(x) and kind not in ("sos", "pickup"), "urgent": kind == "sos"})
     return jsonify(message=msg_view(row), support=support)
@@ -3084,6 +3118,709 @@ def ext_game_started():
     return jsonify(ok=True)
 
 
+# ======================================================================= Mellow 5.0
+def kids_of(m):
+    return [k for k in family_members(m["family_id"]) if k["role"] == "child"]
+
+
+def parents_of(fid):
+    return [p for p in family_members(fid) if p["role"] == "parent"]
+
+
+def tell_parents_of(member, kind, title, text, **extra):
+    for p in parents_of(member["family_id"]):
+        if p["id"] != member["id"]:
+            push(p["id"], kind, {"member": member["id"], "name": member["name"], "title": title, "text": text, **extra})
+
+
+def local_now(m):
+    """The person's own clock: (YYYY-MM-DD, minutes since midnight)."""
+    t = time.time() - (m.get("tz_offset") or 0) * 60
+    return time.strftime("%Y-%m-%d", time.gmtime(t)), int((t % 86400) // 60)
+
+
+def money(c):
+    return f"{'-' if c < 0 else ''}{abs(c) // 100}.{abs(c) % 100:02d}"
+
+
+# ---- photo album
+@app.get("/api/album")
+@need
+def get_album():
+    t, im = db.album.c, db.message_images.c
+    rows = db.many(select(db.album).where(t.family_id == g.m["family_id"]).order_by(t.id.desc()).limit(200))
+    have = {r["token"] for r in db.many(select(im.token).where(im.family_id == g.m["family_id"]))}
+    names = {x["id"]: x["name"] for x in family_members(g.m["family_id"])}
+    return jsonify(photos=[{"id": r["id"], "url": f"/api/img/{r['token']}", "by": r["by"], "name": names.get(r["by"], ""), "caption": r["caption"], "at": r["created"]}
+                           for r in rows if r["token"] in have])
+
+
+@app.post("/api/album")
+@need
+def add_album():
+    b = request.get_json(silent=True) or {}
+    url = str(b.get("url") or "")
+    token = url.rsplit("/", 1)[-1] if url.startswith("/api/img/") else ""
+    img = db.one(select(db.message_images).where(db.message_images.c.token == token, db.message_images.c.family_id == g.m["family_id"])) if token else None
+    if not img or not str(img["mime"]).startswith("image/"):
+        return err("Upload the photo first.")
+    pid = db.run(insert(db.album).values(family_id=g.m["family_id"], token=token, by=g.m["id"], caption=clean(b.get("caption"), 120), created=time.time()))
+    push_family(g.m["family_id"], "album", {"id": pid, "name": g.m["name"]}, skip=g.m["id"])
+    return jsonify(id=pid)
+
+
+@app.delete("/api/album/<int:pid>")
+@need
+def drop_album(pid):
+    r = db.one(select(db.album).where(db.album.c.id == pid, db.album.c.family_id == g.m["family_id"]))
+    if not r or not (r["by"] == g.m["id"] or g.m["role"] == "parent"):
+        return err("Not found.", 404)
+    db.run(delete(db.album).where(db.album.c.id == pid))
+    return jsonify(ok=True)
+
+
+# ---- voice notes (stored like photos, under a long random address)
+AUDIO_LIMIT = 1024 * 1024
+
+
+@app.post("/api/audio")
+@need
+def upload_audio():
+    if limited(f"aud:{g.m['id']}", 40):
+        return err("Slow down a little.", 429)
+    raw = str((request.get_json(silent=True) or {}).get("audio") or "")
+    try:
+        blob = _b64.b64decode(raw.split(",", 1)[-1], validate=True)
+    except Exception:
+        return err("That voice note did not come through.")
+    if not blob or len(blob) > AUDIO_LIMIT:
+        return err("That voice note is too long. Keep it under a minute.")
+    mime = "audio/mp4" if blob[4:8] == b"ftyp" else "audio/ogg" if blob.startswith(b"OggS") else "audio/amr" if blob.startswith(b"#!AMR") else None
+    if not mime:
+        return err("That is not a voice note Mellow can play.")
+    token = secrets.token_urlsafe(16)
+    db.run(insert(db.message_images).values(token=token, family_id=g.m["family_id"], from_id=g.m["id"], mime=mime, data=_b64.b64encode(blob).decode(), created=time.time()))
+    return jsonify(url=f"/api/img/{token}")
+
+
+# ---- pocket money and savings goals
+def balance(member_id):
+    t = db.wallet.c
+    return sum(r["cents"] for r in db.many(select(t.cents).where(t.member_id == member_id, t.status == "done")))
+
+
+@app.get("/api/wallet")
+@need
+def get_wallet():
+    m = g.m
+    ids = [x["id"] for x in kids_of(m)] if m["role"] == "parent" else [m["id"]]
+    t, gt = db.wallet.c, db.goals.c
+    names = {x["id"]: x["name"] for x in family_members(m["family_id"])}
+    out = []
+    for mid in ids:
+        rows = db.many(select(db.wallet).where(t.member_id == mid).order_by(t.id.desc()).limit(40))
+        out.append({"member": mid, "name": names.get(mid, ""), "balance": balance(mid),
+                    "entries": [{"id": r["id"], "cents": r["cents"], "note": r["note"], "status": r["status"], "by": names.get(r["by"], ""), "at": r["created"]} for r in rows],
+                    "goals": [{"id": x["id"], "title": x["title"], "emoji": x["emoji"], "target": x["target"], "saved": x["saved"]}
+                              for x in db.many(select(db.goals).where(gt.member_id == mid).order_by(gt.id))]})
+    return jsonify(wallets=out)
+
+
+def cents_of(v):
+    try:
+        return int(round(float(v) * 100))
+    except (TypeError, ValueError):
+        return None
+
+
+@app.post("/api/wallet")
+@parent_only
+def wallet_add():
+    """A parent adds pocket money (or takes some off, with a minus)."""
+    b = request.get_json(silent=True) or {}
+    kid = same_family(b.get("member"))
+    c = cents_of(b.get("amount"))
+    if not kid or kid["role"] != "child":
+        return err("Pick a child.")
+    if not c or abs(c) > 100000:
+        return err("Pick an amount.")
+    db.run(insert(db.wallet).values(family_id=g.m["family_id"], member_id=kid["id"], cents=c, note=clean(b.get("note"), 80) or ("Pocket money" if c > 0 else "Spent"), by=g.m["id"], status="done", created=time.time()))
+    push(kid["id"], "wallet", {"title": f"\U0001F4B0 {g.m['name']} {'added' if c > 0 else 'took off'} {money(abs(c))}", "text": clean(b.get("note"), 80)})
+    return jsonify(ok=True, balance=balance(kid["id"]))
+
+
+@app.post("/api/wallet/request")
+@need
+def wallet_request():
+    """A child asks to spend some of their money (or asks for some). It waits for a parent."""
+    b = request.get_json(silent=True) or {}
+    c = cents_of(b.get("amount"))
+    if g.m["role"] == "parent" or not c or abs(c) > 100000:
+        return err("Pick an amount.")
+    wid = db.run(insert(db.wallet).values(family_id=g.m["family_id"], member_id=g.m["id"], cents=c, note=clean(b.get("note"), 80) or ("Spend" if c < 0 else "Asked for"), by=g.m["id"], status="pending", created=time.time()))
+    tell_parents_of(g.m, "wallet_request", f"\U0001F4B0 {g.m['name']} asks: {money(c)}", clean(b.get("note"), 80), id=wid)
+    return jsonify(id=wid)
+
+
+@app.post("/api/wallet/<int:wid>/answer")
+@parent_only
+def wallet_answer(wid):
+    r = db.one(select(db.wallet).where(db.wallet.c.id == wid, db.wallet.c.family_id == g.m["family_id"]))
+    if not r or r["status"] != "pending":
+        return err("Nothing to answer.", 404)
+    ok = bool((request.get_json(silent=True) or {}).get("ok", True))
+    if ok and r["cents"] < 0 and balance(r["member_id"]) + r["cents"] < 0:
+        return err("There is not enough money in the wallet for that.")
+    db.run(update(db.wallet).where(db.wallet.c.id == wid).values(status="done" if ok else "declined"))
+    push(r["member_id"], "wallet", {"title": f"\U0001F4B0 {g.m['name']} said {'yes' if ok else 'not now'}", "text": r["note"]})
+    return jsonify(ok=True, balance=balance(r["member_id"]))
+
+
+@app.post("/api/goals")
+@need
+def add_goal():
+    b = request.get_json(silent=True) or {}
+    title, c = clean(b.get("title"), 60), cents_of(b.get("target"))
+    if not title or not c or c <= 0:
+        return err("Name the goal and how much it costs.")
+    gid = db.run(insert(db.goals).values(family_id=g.m["family_id"], member_id=g.m["id"], title=title, emoji=clean(b.get("emoji"), 8) or "\U0001F3AF", target=c, created=time.time()))
+    return jsonify(id=gid)
+
+
+@app.post("/api/goals/<int:gid>/save")
+@need
+def save_to_goal(gid):
+    """Moves money from your wallet into a goal (or back out, with a minus)."""
+    r = db.one(select(db.goals).where(db.goals.c.id == gid, db.goals.c.member_id == g.m["id"]))
+    c = cents_of((request.get_json(silent=True) or {}).get("amount"))
+    if not r or not c:
+        return err("Not found.", 404)
+    if c > 0 and balance(g.m["id"]) < c:
+        return err("There is not enough in your wallet.")
+    if c < 0 and r["saved"] + c < 0:
+        return err("There is not that much saved.")
+    db.run(update(db.goals).where(db.goals.c.id == gid).values(saved=r["saved"] + c))
+    db.run(insert(db.wallet).values(family_id=g.m["family_id"], member_id=g.m["id"], cents=-c, note=("Saved for " if c > 0 else "Took back from ") + r["title"], by=g.m["id"], status="done", created=time.time()))
+    if c > 0 and r["saved"] < r["target"] <= r["saved"] + c:
+        tell_parents_of(g.m, "kudos", f"\U0001F3AF {g.m['name']} reached a goal", r["title"])
+    return jsonify(ok=True, saved=r["saved"] + c, balance=balance(g.m["id"]))
+
+
+@app.delete("/api/goals/<int:gid>")
+@need
+def drop_goal(gid):
+    r = db.one(select(db.goals).where(db.goals.c.id == gid, db.goals.c.member_id == g.m["id"]))
+    if not r:
+        return err("Not found.", 404)
+    if r["saved"]:
+        db.run(insert(db.wallet).values(family_id=g.m["family_id"], member_id=g.m["id"], cents=r["saved"], note="Back from " + r["title"], by=g.m["id"], status="done", created=time.time()))
+    db.run(delete(db.goals).where(db.goals.c.id == gid))
+    return jsonify(ok=True)
+
+
+# ---- mood check-ins
+MOOD_FACES = {1: "\U0001F622", 2: "\U0001F615", 3: "\U0001F610", 4: "\U0001F642", 5: "\U0001F604"}
+
+
+@app.post("/api/mood")
+@need
+def post_mood():
+    b = request.get_json(silent=True) or {}
+    mood = int(b["mood"]) if str(b.get("mood", "")).isdigit() and 1 <= int(b["mood"]) <= 5 else 0
+    if not mood:
+        return err("Pick how you feel.")
+    day, _ = local_now(g.m)
+    t = db.moods.c
+    db.run(delete(db.moods).where(t.member_id == g.m["id"], t.day == day))
+    db.run(insert(db.moods).values(family_id=g.m["family_id"], member_id=g.m["id"], day=day, mood=mood, note=clean(b.get("note"), 200), private=bool(b.get("private")), created=time.time()))
+    if mood <= 2 and not b.get("private") and g.m["role"] == "child":
+        tell_parents_of(g.m, "kudos", f"{MOOD_FACES[mood]} {g.m['name']} is having a hard day", "Maybe check in with them.")
+    return jsonify(ok=True)
+
+
+@app.get("/api/moods")
+@need
+def get_moods():
+    """The last two weeks. A private day shows that they checked in, never how they felt."""
+    m = g.m
+    who = same_family(request.args.get("member")) if request.args.get("member") else m
+    if not who or (who["id"] != m["id"] and m["role"] != "parent"):
+        return err("Not found.", 404)
+    t = db.moods.c
+    rows = db.many(select(db.moods).where(t.member_id == who["id"]).order_by(t.day.desc()).limit(14))
+    mine = who["id"] == m["id"]
+    return jsonify(name=who["name"], days=[{"day": r["day"], "mood": r["mood"] if (mine or not r["private"]) else 0, "note": r["note"] if (mine or not r["private"]) else "",
+                                            "private": bool(r["private"])} for r in rows])
+
+
+# ---- safe walk: live until you get there
+@app.post("/api/walk")
+@need
+def start_walk():
+    b = request.get_json(silent=True) or {}
+    p = db.one(select(db.places).where(db.places.c.id == b.get("place"), db.places.c.family_id == g.m["family_id"])) if str(b.get("place", "")).isdigit() else None
+    minutes = max(5, min(240, int(b["minutes"]))) if str(b.get("minutes", "")).isdigit() else 20
+    if not p:
+        return err("Pick where you are going.")
+    now = time.time()
+    db.run(update(db.members).where(db.members.c.id == g.m["id"]).values(walk_to=p["id"], walk_until=now + minutes * 60, walk_started=now, walk_told=""))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} started a safe walk to {p['name']} (about {minutes} min). The family can follow it live.")
+    push_family(g.m["family_id"], "walk", {"member": g.m["id"], "name": g.m["name"], "title": f"\U0001F6B6 {g.m['name']} is walking to {p['name']}", "text": f"About {minutes} minutes. Follow it on the map."}, skip=g.m["id"])
+    return jsonify(ok=True, until=now + minutes * 60)
+
+
+@app.post("/api/walk/stop")
+@need
+def stop_walk():
+    end_walk(g.m, "stopped")
+    return jsonify(ok=True)
+
+
+def end_walk(m, how, place=None):
+    if not m.get("walk_to"):
+        return
+    db.run(update(db.members).where(db.members.c.id == m["id"]).values(walk_to=0, walk_until=0, walk_told=""))
+    text = f"{m['name']} got to {place['name']} safely" if how == "arrived" and place else f"{m['name']} ended their safe walk"
+    say(m["family_id"], m["id"], text)
+    push_family(m["family_id"], "walk_done", {"member": m["id"], "name": m["name"], "title": "\u2705 " + text, "text": ""}, skip=m["id"])
+
+
+def place_reached(m, p):
+    if m.get("walk_to") == p["id"]:
+        end_walk(m, "arrived", p)
+    t = db.expects.c
+    for e in db.many(select(db.expects).where(t.member_id == m["id"], t.place_id == p["id"], t.done == False)):  # noqa: E712
+        db.run(update(db.expects).where(t.id == e["id"]).values(done=True))
+        push(e["set_by"], "expect_ok", {"member": m["id"], "name": m["name"], "title": f"\u2705 {m['name']} got to {p['name']}", "text": "Just now, " + (
+            "on time" if time.time() <= e["by_at"] else "a little late")})
+
+
+# ---- "tell me when they get there"
+@app.post("/api/expect")
+@parent_only
+def expect():
+    b = request.get_json(silent=True) or {}
+    kid = same_family(b.get("member"))
+    p = db.one(select(db.places).where(db.places.c.id == b.get("place"), db.places.c.family_id == g.m["family_id"])) if str(b.get("place", "")).isdigit() else None
+    minutes = max(5, min(720, int(b["minutes"]))) if str(b.get("minutes", "")).isdigit() else 30
+    if not kid or not p:
+        return err("Pick who and where.")
+    if not parent_may(g.m, kid, "location"):
+        return denied(kid, "location")
+    eid = db.run(insert(db.expects).values(family_id=g.m["family_id"], member_id=kid["id"], place_id=p["id"], by_at=time.time() + minutes * 60, set_by=g.m["id"], created=time.time()))
+    push(kid["id"], "kudos", {"title": f"\U0001F4CD {g.m['name']} will be told when you get to {p['name']}", "text": f"Expected within {minutes} minutes."})
+    return jsonify(id=eid)
+
+
+# ---- speed alerts for a new driver (a parent sets a limit; the child sees it)
+@app.post("/api/members/<int:mid>/speed")
+@parent_only
+def set_speed_limit(mid):
+    kid = same_family(mid)
+    if not kid or kid["role"] != "child":
+        return err("Not found.", 404)
+    v = (request.get_json(silent=True) or {}).get("limit")
+    limit = max(0, min(200, int(v))) if str(v or "0").isdigit() else 0
+    db.run(update(db.members).where(db.members.c.id == mid).values(speed_limit=limit, speed_strikes=0))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} set a speed alert for {kid['name']} at {limit} km/h" if limit else f"{g.m['name']} turned off {kid['name']}'s speed alert")
+    push_family(g.m["family_id"], "member", {"id": mid})
+    return jsonify(ok=True, limit=limit)
+
+
+def check_speed(m, speed_ms):
+    limit = m.get("speed_limit") or 0
+    if not limit:
+        return
+    kmh = speed_ms * 3.6
+    strikes = (m.get("speed_strikes") or 0) + 1 if kmh > limit else 0
+    db.run(update(db.members).where(db.members.c.id == m["id"]).values(speed_strikes=strikes))
+    if strikes >= 2 and time.time() - (m.get("speed_told") or 0) > 600:            # two readings in a row, then at most every 10 minutes
+        db.run(update(db.members).where(db.members.c.id == m["id"]).values(speed_told=time.time()))
+        tell_parents_of(m, "speeding", f"\U0001F697 {m['name']} is going {int(kmh)} km/h", f"Over the {limit} km/h alert.")
+
+
+# ---- find my phone: make a phone ring loudly (your own, or your child's)
+@app.post("/api/members/<int:mid>/ring")
+@need
+def ring_phone(mid):
+    who = same_family(mid)
+    if not who:
+        return err("Not found.", 404)
+    if who["id"] != g.m["id"] and not (g.m["role"] == "parent" and who["role"] == "child" and parent_may(g.m, who, "critical")) and not (g.m["role"] == "parent" and who["role"] == "parent"):
+        return err("You can ring your own phone, or your child's.", 403)
+    if limited(f"ring:{g.m['id']}", 8):
+        return err("Slow down a little.", 429)
+    push(mid, "ring", {"member": mid, "name": g.m["name"], "title": "\U0001F4F1 Find my phone", "text": f"{g.m['name']} is looking for this phone. Tap Found it to stop."})
+    return jsonify(ok=True)
+
+
+# ---- weather for the family's Home (Open-Meteo: free, no key, no account)
+_weather = {}
+
+
+def fetch_weather(lat, lng):
+    import urllib.request
+    url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat:.3f}&longitude={lng:.3f}&current=temperature_2m,weather_code,wind_speed_10m"
+           "&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max&forecast_days=3&timezone=auto")
+    with urllib.request.urlopen(url, timeout=6) as r:
+        return json.loads(r.read().decode())
+
+
+def weather_words(code):
+    c = int(code or 0)
+    return ("\u2600\ufe0f", "Clear") if c == 0 else ("\U0001F324\ufe0f", "Mostly sunny") if c in (1, 2) else ("\u2601\ufe0f", "Cloudy") if c == 3 else ("\U0001F32B\ufe0f", "Fog") if c in (45, 48) \
+        else ("\U0001F326\ufe0f", "Drizzle") if 51 <= c <= 57 else ("\U0001F327\ufe0f", "Rain") if 61 <= c <= 67 or 80 <= c <= 82 else ("\u2744\ufe0f", "Snow") if 71 <= c <= 77 or c in (85, 86) \
+        else ("\u26c8\ufe0f", "Thunderstorm") if c >= 95 else ("\U0001F324\ufe0f", "Mixed")
+
+
+@app.get("/api/weather")
+@need
+def get_weather():
+    h = home_place(g.m["family_id"])
+    lat, lng = (h["lat"], h["lng"]) if h else (g.m["last_lat"], g.m["last_lng"])
+    if lat is None:
+        return err("Set a Home place to see the weather.", 404)
+    key = f"{lat:.2f},{lng:.2f}"
+    hit = _weather.get(key)
+    if not hit or time.time() - hit[0] > 1200:
+        try:
+            hit = (time.time(), fetch_weather(lat, lng))
+        except Exception:
+            if not hit:
+                return err("The weather is not available right now.", 503)
+        _weather[key] = hit
+    d = hit[1]
+    cur, daily = d.get("current") or {}, d.get("daily") or {}
+    icon, words = weather_words(cur.get("weather_code"))
+    days = []
+    for i, day in enumerate(daily.get("time") or []):
+        di, dw = weather_words((daily.get("weather_code") or [0])[i])
+        days.append({"day": day, "icon": di, "words": dw, "max": round((daily.get("temperature_2m_max") or [0])[i]), "min": round((daily.get("temperature_2m_min") or [0])[i]),
+                     "rain": (daily.get("precipitation_probability_max") or [0])[i]})
+    return jsonify(where="Home" if h else "Here", temp=round(cur.get("temperature_2m") or 0), icon=icon, words=words, wind=round(cur.get("wind_speed_10m") or 0), days=days)
+
+
+# ---- the day timeline: where someone arrived and left
+@app.get("/api/timeline")
+@need
+def timeline():
+    who = same_family(request.args.get("member")) if request.args.get("member") else g.m
+    if not who:
+        return err("Not found.", 404)
+    if who["id"] != g.m["id"] and not parent_may(g.m, who, "trail"):
+        return denied(who, "trail")
+    t = db.visits.c
+    rows = db.many(select(db.visits).where(t.member_id == who["id"], t.at > time.time() - 86400).order_by(t.at))
+    return jsonify(name=who["name"], items=[{"place": r["place"], "emoji": r["emoji"], "kind": r["kind"], "at": r["at"]} for r in rows])
+
+
+# ---- a trail recorded with no internet: the phone keeps its positions and sends them when it is back online
+@app.post("/api/locations")
+@need
+def post_locations():
+    m = g.m
+    if sharing_state(m) != "on" and not ((m.get("sos_until") or 0) > time.time()):
+        return jsonify(ok=True, saved=0)
+    now, saved, latest = time.time(), 0, None
+    for pt in ((request.get_json(silent=True) or {}).get("points") or [])[:500]:
+        try:
+            lat, lng, at = float(pt["lat"]), float(pt["lng"]), float(pt["at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180 and now - 86400 < at <= now + 60):
+            continue
+        db.run(insert(db.locations).values(member_id=m["id"], lat=lat, lng=lng, acc=float(pt.get("acc") or 0), speed=float(pt.get("speed") or 0), at=min(at, now)))
+        saved += 1
+        if latest is None or at > latest[2]:
+            latest = (lat, lng, at)
+    if latest and latest[2] > (m["last_at"] or 0):
+        db.run(update(db.members).where(db.members.c.id == m["id"]).values(last_lat=latest[0], last_lng=latest[1], last_at=min(latest[2], now)))
+        push_family(m["family_id"], "location", {"member": m["id"], "lat": latest[0], "lng": latest[1], "acc": 0, "at": min(latest[2], now), "battery": m["battery"]}, skip=m["id"])
+    return jsonify(ok=True, saved=saved)
+
+
+# ---- share my trip with someone outside the family: a link that runs out
+@app.post("/api/trip")
+@need
+def make_trip():
+    hours = max(1, min(8, int((request.get_json(silent=True) or {}).get("hours") or 1)))
+    token = "trip_" + secrets.token_urlsafe(18)
+    db.run(delete(db.trips).where(db.trips.c.member_id == g.m["id"]))
+    db.run(insert(db.trips).values(family_id=g.m["family_id"], member_id=g.m["id"], token_hash=db.hash_token(token), expires=time.time() + hours * 3600, created=time.time()))
+    say(g.m["family_id"], g.m["id"], f"{g.m['name']} shared a live-location link for {hours} h with someone outside the family")
+    return jsonify(url=f"{site_origin()}/trip/{token}", expires=time.time() + hours * 3600)
+
+
+@app.delete("/api/trip")
+@need
+def stop_trip():
+    db.run(delete(db.trips).where(db.trips.c.member_id == g.m["id"]))
+    return jsonify(ok=True)
+
+
+def trip_member(token):
+    r = db.one(select(db.trips).where(db.trips.c.token_hash == db.hash_token(token)))
+    if not r or r["expires"] < time.time():
+        return None, None
+    return r, db.one(select(db.members).where(db.members.c.id == r["member_id"]))
+
+
+@app.get("/trip/<token>")
+def trip_page(token):
+    r, m = trip_member(token)
+    return render_template("trip.html", ok=bool(m), name=m["name"] if m else "", token=token)
+
+
+@app.get("/api/trip/<token>")
+def trip_data(token):
+    r, m = trip_member(token)
+    if not m:
+        return err("This link has run out.", 404)
+    live = (sharing_state(m) == "on" or (m.get("sos_until") or 0) > time.time()) and m["last_lat"] is not None
+    return jsonify(name=m["name"], expires=r["expires"], lat=m["last_lat"] if live else None, lng=m["last_lng"] if live else None, at=m["last_at"] if live else None)
+
+
+# ---- kudos and the star of the week
+@app.post("/api/kudos")
+@need
+def give_kudos():
+    b = request.get_json(silent=True) or {}
+    to = same_family(b.get("to"))
+    if not to or to["id"] == g.m["id"]:
+        return err("Pick someone to thank.")
+    if limited(f"kudos:{g.m['id']}", 20):
+        return err("Slow down a little.", 429)
+    reason = clean(b.get("reason"), 120)
+    emoji = clean(b.get("emoji"), 8) or "\u2b50"
+    db.run(insert(db.kudos).values(family_id=g.m["family_id"], from_id=g.m["id"], to_id=to["id"], emoji=emoji, reason=reason, created=time.time()))
+    push(to["id"], "kudos", {"title": f"{emoji} Kudos from {g.m['name']}", "text": reason})
+    say(g.m["family_id"], g.m["id"], f"{emoji} {g.m['name']} gave {to['name']} kudos" + (f": {reason}" if reason else ""))
+    return jsonify(ok=True)
+
+
+@app.get("/api/kudos")
+@need
+def list_kudos():
+    t = db.kudos.c
+    week = time.time() - 7 * 86400
+    rows = db.many(select(db.kudos).where(t.family_id == g.m["family_id"]).order_by(t.id.desc()).limit(40))
+    names = {x["id"]: x["name"] for x in family_members(g.m["family_id"])}
+    counts = {}
+    for r in db.many(select(db.kudos).where(t.family_id == g.m["family_id"], t.created > week)):
+        counts[r["to_id"]] = counts.get(r["to_id"], 0) + 1
+    star = max(counts, key=counts.get) if counts else 0
+    return jsonify(star={"member": star, "name": names.get(star, ""), "count": counts.get(star, 0)} if star else None, week={str(k): v for k, v in counts.items()},
+                   recent=[{"from": names.get(r["from_id"], ""), "to": names.get(r["to_id"], ""), "emoji": r["emoji"], "reason": r["reason"], "at": r["created"]} for r in rows])
+
+
+# ---- badges: earned from what people already do
+@app.get("/api/badges")
+@need
+def badges():
+    who = same_family(request.args.get("member")) if request.args.get("member") else g.m
+    if not who:
+        return err("Not found.", 404)
+    mid = who["id"]
+    def n(table, *cond):
+        return len(db.many(select(table.c.id).where(*cond)))
+    chores_done = n(db.chores, db.chores.c.done_by == mid, db.chores.c.status == "approved") if hasattr(db, "chores") else 0
+    checkins = n(db.messages, db.messages.c.from_id == mid, db.messages.c.kind == "checkin")
+    kudos_got = n(db.kudos, db.kudos.c.to_id == mid)
+    kudos_gave = n(db.kudos, db.kudos.c.from_id == mid)
+    moods = n(db.moods, db.moods.c.member_id == mid)
+    goals_done = len([x for x in db.many(select(db.goals).where(db.goals.c.member_id == mid)) if x["saved"] >= x["target"]])
+    walks = n(db.messages, db.messages.c.from_id == mid, db.messages.c.kind == "system", db.messages.c.body.like("%got to % safely%"))
+    meals = n(db.meals, db.meals.c.added_by == mid)
+    hw = n(db.homework, db.homework.c.member_id == mid, db.homework.c.done == True)  # noqa: E712
+    list_ = [("helper", "\U0001F9F9", "Helper", "Finish 10 jobs", chores_done, 10), ("touch", "\U0001F4AC", "Always in touch", "Check in 20 times", checkins, 20),
+             ("favourite", "\u2b50", "Family favourite", "Get 5 kudos", kudos_got, 5), ("kind", "\U0001F49B", "Kind heart", "Give 5 kudos", kudos_gave, 5),
+             ("feelings", "\U0001F308", "Feelings friend", "Share your mood 7 times", moods, 7), ("saver", "\U0001F437", "Super saver", "Reach a savings goal", goals_done, 1),
+             ("walker", "\U0001F6B6", "Safe walker", "Finish 3 safe walks", walks, 3), ("chef", "\U0001F468\u200d\U0001F373", "Chef in training", "Plan or suggest 5 meals", meals, 5),
+             ("scholar", "\U0001F4DA", "Homework hero", "Finish 10 homework tasks", hw, 10)]
+    return jsonify(name=who["name"], badges=[{"id": i, "emoji": e, "name": nm, "how": how, "have": min(v, goal), "goal": goal, "earned": v >= goal} for i, e, nm, how, v, goal in list_])
+
+
+# ---- countdowns
+@app.get("/api/countdowns")
+@need
+def get_countdowns():
+    t = db.countdowns.c
+    db.run(delete(db.countdowns).where(t.family_id == g.m["family_id"], t.at < time.time() - 86400))
+    return jsonify(countdowns=[{"id": r["id"], "title": r["title"], "emoji": r["emoji"], "at": r["at"], "by": r["by"]}
+                               for r in db.many(select(db.countdowns).where(t.family_id == g.m["family_id"]).order_by(t.at).limit(30))])
+
+
+@app.post("/api/countdowns")
+@need
+def add_countdown():
+    b = request.get_json(silent=True) or {}
+    title = clean(b.get("title"), 60)
+    try:
+        at = float(b.get("at"))
+    except (TypeError, ValueError):
+        at = 0
+    if not title or not (time.time() < at < time.time() + 3 * 365 * 86400):
+        return err("Name it and pick a day in the future.")
+    cid = db.run(insert(db.countdowns).values(family_id=g.m["family_id"], title=title, emoji=clean(b.get("emoji"), 8) or "\u23f3", at=at, by=g.m["id"], created=time.time()))
+    push_family(g.m["family_id"], "countdowns", {"id": cid}, skip=g.m["id"])
+    return jsonify(id=cid)
+
+
+@app.delete("/api/countdowns/<int:cid>")
+@need
+def drop_countdown(cid):
+    r = db.one(select(db.countdowns).where(db.countdowns.c.id == cid, db.countdowns.c.family_id == g.m["family_id"]))
+    if not r or not (r["by"] == g.m["id"] or g.m["role"] == "parent"):
+        return err("Not found.", 404)
+    db.run(delete(db.countdowns).where(db.countdowns.c.id == cid))
+    return jsonify(ok=True)
+
+
+# ---- trusted adults
+@app.get("/api/trusted")
+@need
+def get_trusted():
+    return jsonify(people=[{"id": r["id"], "name": r["name"], "phone": r["phone"], "relation": r["relation"]}
+                           for r in db.many(select(db.trusted).where(db.trusted.c.family_id == g.m["family_id"]).order_by(db.trusted.c.id))])
+
+
+@app.post("/api/trusted")
+@parent_only
+def add_trusted():
+    b = request.get_json(silent=True) or {}
+    name, phone = clean(b.get("name"), 40), re.sub(r"[^0-9+ ()-]", "", str(b.get("phone") or ""))[:30]
+    if not name or len(re.sub(r"\D", "", phone)) < 3:
+        return err("Add a name and a phone number.")
+    if len(db.many(select(db.trusted.c.id).where(db.trusted.c.family_id == g.m["family_id"]))) >= 10:
+        return err("That is plenty (10).")
+    tid = db.run(insert(db.trusted).values(family_id=g.m["family_id"], name=name, phone=phone, relation=clean(b.get("relation"), 30), by=g.m["id"], created=time.time()))
+    push_family(g.m["family_id"], "trusted", {"id": tid}, skip=g.m["id"])
+    return jsonify(id=tid)
+
+
+@app.delete("/api/trusted/<int:tid>")
+@parent_only
+def drop_trusted(tid):
+    db.run(delete(db.trusted).where(db.trusted.c.id == tid, db.trusted.c.family_id == g.m["family_id"]))
+    return jsonify(ok=True)
+
+
+# ---- homework
+@app.get("/api/homework")
+@need
+def get_homework():
+    m = g.m
+    ids = [x["id"] for x in kids_of(m)] if m["role"] == "parent" else [m["id"]]
+    t = db.homework.c
+    names = {x["id"]: x["name"] for x in family_members(m["family_id"])}
+    rows = db.many(select(db.homework).where(t.member_id.in_(ids), (t.done == False) | (t.created > time.time() - 7 * 86400)).order_by(t.due, t.id)) if ids else []  # noqa: E712
+    return jsonify(items=[{"id": r["id"], "member": r["member_id"], "name": names.get(r["member_id"], ""), "subject": r["subject"], "title": r["title"], "due": r["due"], "done": bool(r["done"])} for r in rows])
+
+
+@app.post("/api/homework")
+@need
+def add_homework():
+    b = request.get_json(silent=True) or {}
+    who = same_family(b.get("member")) if g.m["role"] == "parent" and b.get("member") else g.m
+    title, due = clean(b.get("title"), 120), clean_day(b.get("due"))
+    if not who or who["role"] != "child":
+        return err("Homework is for a child.")
+    if not title or not due:
+        return err("What is it, and when is it due?")
+    hid = db.run(insert(db.homework).values(family_id=g.m["family_id"], member_id=who["id"], subject=clean(b.get("subject"), 30), title=title, due=due, by=g.m["id"], created=time.time()))
+    if who["id"] != g.m["id"]:
+        push(who["id"], "homework_due", {"title": f"\U0001F4DA {g.m['name']} added homework", "text": f"{title} · due {due}"})
+    return jsonify(id=hid)
+
+
+@app.post("/api/homework/<int:hid>")
+@need
+def tick_homework(hid):
+    r = db.one(select(db.homework).where(db.homework.c.id == hid, db.homework.c.family_id == g.m["family_id"]))
+    if not r or not (r["member_id"] == g.m["id"] or g.m["role"] == "parent"):
+        return err("Not found.", 404)
+    done = bool((request.get_json(silent=True) or {}).get("done", True))
+    db.run(update(db.homework).where(db.homework.c.id == hid).values(done=done))
+    if done and r["member_id"] == g.m["id"]:
+        tell_parents_of(g.m, "kudos", f"\U0001F4DA {g.m['name']} finished homework", r["title"])
+    return jsonify(ok=True)
+
+
+@app.delete("/api/homework/<int:hid>")
+@need
+def drop_homework(hid):
+    r = db.one(select(db.homework).where(db.homework.c.id == hid, db.homework.c.family_id == g.m["family_id"]))
+    if not r or not (r["member_id"] == g.m["id"] or g.m["role"] == "parent"):
+        return err("Not found.", 404)
+    db.run(delete(db.homework).where(db.homework.c.id == hid))
+    return jsonify(ok=True)
+
+
+# ---- bedtime wind-down (a reminder, never a lock)
+@app.post("/api/members/<int:mid>/bedtime")
+@need
+def set_bedtime(mid):
+    who = same_family(mid)
+    if not who or not (who["id"] == g.m["id"] or (g.m["role"] == "parent" and who["role"] == "child")):
+        return err("Not found.", 404)
+    b = request.get_json(silent=True) or {}
+    f = int(b["from"]) if str(b.get("from", "")).lstrip("-").isdigit() else -1
+    t_ = int(b["to"]) if str(b.get("to", "")).lstrip("-").isdigit() else -1
+    f, t_ = (max(-1, min(1439, f)), max(-1, min(1439, t_)))
+    db.run(update(db.members).where(db.members.c.id == mid).values(bed_from=f, bed_to=t_, bed_told=""))
+    if who["id"] != g.m["id"]:
+        push(mid, "bedtime", {"title": "\U0001F319 Bedtime set", "text": f"{g.m['name']} set a wind-down reminder for you."})
+    push_family(g.m["family_id"], "member", {"id": mid})
+    return jsonify(ok=True)
+
+
+# ---- the checks that run from the event stream (at most once a minute)
+_last_watch = [0.0]
+
+
+def check_watchers():
+    now = time.time()
+    if now - _last_watch[0] < 60:
+        return
+    _last_watch[0] = now
+    t = db.members.c
+    # safe walks that are late, or have stopped moving
+    for m in db.many(select(db.members).where(t.walk_to > 0)):
+        p = db.one(select(db.places).where(db.places.c.id == m["walk_to"]))
+        if not p:
+            continue
+        told = m["walk_told"] or ""
+        if now > (m["walk_until"] or 0) + 300 and "late" not in told:
+            db.run(update(db.members).where(t.id == m["id"]).values(walk_told=told + "late"))
+            tell_parents_of(m, "walk_late", f"\u26a0\ufe0f {m['name']} has not got to {p['name']} yet", "Their safe walk is taking longer than expected. Check the map or call them.")
+        recent = db.many(select(db.locations).where(db.locations.c.member_id == m["id"], db.locations.c.at > now - 600).order_by(db.locations.c.at))
+        if len(recent) >= 3 and now - (m["walk_started"] or now) > 600 and "still" not in told:
+            spread = max(metres(recent[0]["lat"], recent[0]["lng"], r["lat"], r["lng"]) for r in recent)
+            if spread < 40:
+                db.run(update(db.members).where(t.id == m["id"]).values(walk_told=told + "still"))
+                tell_parents_of(m, "walk_still", f"\u26a0\ufe0f {m['name']} has stopped moving", f"On their safe walk to {p['name']}, for 10 minutes.")
+    # expected arrivals that did not happen
+    e = db.expects.c
+    for x in db.many(select(db.expects).where(e.done == False, e.told == False, e.by_at < now)):  # noqa: E712
+        db.run(update(db.expects).where(e.id == x["id"]).values(told=True))
+        kid = db.one(select(db.members).where(t.id == x["member_id"]))
+        p = db.one(select(db.places).where(db.places.c.id == x["place_id"]))
+        if kid and p:
+            push(x["set_by"], "expect_late", {"member": kid["id"], "name": kid["name"], "title": f"\u26a0\ufe0f {kid['name']} is not at {p['name']} yet", "text": "You asked to be told. Check the map or call them."})
+    # bedtime reminders, in each child's own time
+    for m in db.many(select(db.members).where(t.bed_from >= 0)):
+        day, minute = local_now(m)
+        if 0 <= minute - m["bed_from"] < 10 and (m["bed_told"] or "") != day:
+            db.run(update(db.members).where(t.id == m["id"]).values(bed_told=day))
+            push(m["id"], "bedtime", {"title": "\U0001F319 Time to wind down", "text": "Screens away soon. Sleep well."})
+    # homework due tomorrow
+    h = db.homework.c
+    tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+    for x in db.many(select(db.homework).where(h.done == False, h.reminded == False, h.due <= tomorrow)):  # noqa: E712
+        db.run(update(db.homework).where(h.id == x["id"]).values(reminded=True))
+        push(x["member_id"], "homework_due", {"title": "\U0001F4DA Homework due soon", "text": f"{x['title']} · due {x['due']}"})
+
+
 # ---------------------------------------------------------------- web push: alerts on an iPhone (or any browser) while the app is closed
 PUSH_SUB = os.environ.get("VAPID_SUB", "https://homebase-family.onrender.com")
 PUSH_SYNC = False                                                       # tests send straight away instead of on a thread
@@ -3126,6 +3863,8 @@ def web_note(kind, p):
             return {"title": f"\u2764\ufe0f {name}", "body": "is thinking of you", "tag": f"msg-{p.get('from')}"}
         if mk == "gif":
             return {"title": name, "body": "\U0001F39E\ufe0f sent a GIF", "tag": f"msg-{p.get('from')}"}
+        if mk == "voice":
+            return {"title": name, "body": "\U0001F3A4 sent a voice note", "tag": f"msg-{p.get('from')}"}
         if mk == "image":
             return {"title": name, "body": "\U0001F4F7 sent a photo", "tag": f"msg-{p.get('from')}"}
         if mk == "game":
@@ -3135,6 +3874,8 @@ def web_note(kind, p):
         return {"title": f"\U0001F4DE {name} is calling", "body": "Open Homebase to answer", "tag": f"call-{p.get('id')}", "urgent": True}
     if kind == "ping":
         return {"title": f"\U0001F4CD {name} asks where you are", "body": "Open Homebase to answer, or say not now.", "tag": f"ping-{p.get('id')}"}
+    if kind in ("walk_late", "walk_still", "expect_late", "speeding", "ring", "walk", "walk_done", "expect_ok", "kudos", "bedtime", "homework_due", "wallet_request"):
+        return {"title": p.get("title") or name, "body": p.get("text") or "", "tag": f"{kind}-{p.get('member') or p.get('id') or ''}", "urgent": kind in ("walk_late", "walk_still", "expect_late", "speeding", "ring")}
     if kind == "risk_alert":
         return {"title": f"\u26a0\ufe0f Safety alert for {p.get('name')}", "body": f"A message looked like {p.get('what')}. Open Mellow to see it.", "tag": f"risk-{p.get('id')}", "urgent": True}
     if kind == "zone_request":
@@ -3388,6 +4129,7 @@ def event_stream():
         remind_plans()
         remind_birthdays()
         check_offline()
+        check_watchers()
         rows = db.many(select(db.events).where(db.events.c.member_id == m["id"], db.events.c.id > after).order_by(db.events.c.id).limit(100))
         if rows or time.time() >= deadline:
             break

@@ -198,6 +198,45 @@ class Api(private val store: Store) {
     /** Makes a private key for Platter or Scout; it goes in the link that connects the app. */
     suspend fun linkApp(name: String): String =
         Net.parseToJsonElement(raw("POST", "/api/integrations", obj { put("name", name) })).jsonObject["key"]?.jsonPrimitive?.contentOrNull ?: error("Could not make the link.")
+    // ---- Mellow 5.0
+    suspend fun album(): List<AlbumPhoto> = ask<AlbumResp>("GET", "/api/album").photos
+    suspend fun addToAlbum(url: String, caption: String) { raw("POST", "/api/album", obj { put("url", url); put("caption", caption) }) }
+    suspend fun dropPhoto(id: Int) { raw("DELETE", "/api/album/$id") }
+    suspend fun uploadAudio(dataUrl: String): String = ask<UrlResp>("POST", "/api/audio", obj { put("audio", dataUrl) }).url
+    suspend fun wallet(): List<WalletInfo> = ask<WalletResp>("GET", "/api/wallet").wallets
+    suspend fun walletAdd(member: Int, amount: Double, note: String) { raw("POST", "/api/wallet", obj { put("member", member); put("amount", amount); put("note", note) }) }
+    suspend fun walletRequest(amount: Double, note: String) { raw("POST", "/api/wallet/request", obj { put("amount", amount); put("note", note) }) }
+    suspend fun walletAnswer(id: Int, ok: Boolean) { raw("POST", "/api/wallet/$id/answer", obj { put("ok", ok) }) }
+    suspend fun addGoal(title: String, emoji: String, target: Double) { raw("POST", "/api/goals", obj { put("title", title); put("emoji", emoji); put("target", target) }) }
+    suspend fun saveToGoal(id: Int, amount: Double) { raw("POST", "/api/goals/$id/save", obj { put("amount", amount) }) }
+    suspend fun dropGoal(id: Int) { raw("DELETE", "/api/goals/$id") }
+    suspend fun postMood(mood: Int, note: String, private: Boolean) { raw("POST", "/api/mood", obj { put("mood", mood); put("note", note); put("private", private) }) }
+    suspend fun moods(member: Int? = null): MoodsResp = ask("GET", "/api/moods" + (if (member != null) "?member=$member" else ""))
+    suspend fun startWalk(place: Int, minutes: Int) { raw("POST", "/api/walk", obj { put("place", place); put("minutes", minutes) }) }
+    suspend fun stopWalk() { raw("POST", "/api/walk/stop") }
+    suspend fun expect(member: Int, place: Int, minutes: Int) { raw("POST", "/api/expect", obj { put("member", member); put("place", place); put("minutes", minutes) }) }
+    suspend fun speedLimit(member: Int, limit: Int) { raw("POST", "/api/members/$member/speed", obj { put("limit", limit) }) }
+    suspend fun ring(member: Int) { raw("POST", "/api/members/$member/ring") }
+    suspend fun weather(): WeatherResp = ask("GET", "/api/weather")
+    suspend fun timeline(member: Int): TimelineResp = ask("GET", "/api/timeline?member=$member")
+    suspend fun makeTrip(hours: Int): String = ask<UrlResp>("POST", "/api/trip", obj { put("hours", hours) }).url
+    suspend fun stopTrip() { raw("DELETE", "/api/trip") }
+    suspend fun giveKudos(to: Int, emoji: String, reason: String) { raw("POST", "/api/kudos", obj { put("to", to); put("emoji", emoji); put("reason", reason) }) }
+    suspend fun kudos(): KudosResp = ask("GET", "/api/kudos")
+    suspend fun badges(member: Int? = null): BadgesResp = ask("GET", "/api/badges" + (if (member != null) "?member=$member" else ""))
+    suspend fun countdowns(): List<Countdown> = ask<CountdownsResp>("GET", "/api/countdowns").countdowns
+    suspend fun addCountdown(title: String, emoji: String, at: Double) { raw("POST", "/api/countdowns", obj { put("title", title); put("emoji", emoji); put("at", at) }) }
+    suspend fun dropCountdown(id: Int) { raw("DELETE", "/api/countdowns/$id") }
+    suspend fun trusted(): List<Trusted> = ask<TrustedResp>("GET", "/api/trusted").people
+    suspend fun addTrusted(name: String, phone: String, relation: String) { raw("POST", "/api/trusted", obj { put("name", name); put("phone", phone); put("relation", relation) }) }
+    suspend fun dropTrusted(id: Int) { raw("DELETE", "/api/trusted/$id") }
+    suspend fun homework(): List<Homework> = ask<HomeworkResp>("GET", "/api/homework").items
+    suspend fun addHomework(title: String, subject: String, due: String, member: Int? = null) { raw("POST", "/api/homework", obj { put("title", title); put("subject", subject); put("due", due); if (member != null) put("member", member) }) }
+    suspend fun tickHomework(id: Int, done: Boolean) { raw("POST", "/api/homework/$id", obj { put("done", done) }) }
+    suspend fun dropHomework(id: Int) { raw("DELETE", "/api/homework/$id") }
+    suspend fun setBedtime(member: Int, from: Int, to: Int) { raw("POST", "/api/members/$member/bedtime", obj { put("from", from); put("to", to) }) }
+    suspend fun postLocations(points: kotlinx.serialization.json.JsonArray) { raw("POST", "/api/locations", obj { put("points", points) }) }
+
     suspend fun stickers(): List<Sticker> = ask<StickersResp>("GET", "/api/stickers").stickers
     suspend fun feed(): List<FeedItem> = ask<FeedResp>("GET", "/api/feed").items
     suspend fun startGame(game: String): GameStartResp = ask("POST", "/api/games/start", obj { put("game", game) })

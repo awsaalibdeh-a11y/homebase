@@ -36,7 +36,10 @@ members = Table("members", meta,
     Column("status_emoji", String(8), default=""), Column("status_text", String(40), default=""), Column("status_until", Float, default=0),   # "what I am up to", set by the person, ends by itself
     Column("birthday", String(5), default=""), Column("bday_year", Integer, default=0), Column("app_version", Integer, default=0),
     Column("safe_dns", String(80), default=""), Column("safe_dns_at", Float, default=0), Column("eta_min", Integer, default=0), Column("eta_until", Float, default=0),
-    Column("sos_until", Float, default=0), Column("offline_told", Boolean, default=False), Column("critical_at", Float, default=0), Column("critical_by", Integer, default=0))                     # "MM-DD" the person chose; the year we last said happy birthday
+    Column("sos_until", Float, default=0), Column("offline_told", Boolean, default=False), Column("critical_at", Float, default=0), Column("critical_by", Integer, default=0),
+    Column("walk_to", Integer, default=0), Column("walk_until", Float, default=0), Column("walk_started", Float, default=0), Column("walk_told", String(20), default=""),
+    Column("speed_limit", Integer, default=0), Column("speed_strikes", Integer, default=0), Column("speed_told", Float, default=0),
+    Column("bed_from", Integer, default=-1), Column("bed_to", Integer, default=-1), Column("bed_told", String(10), default=""))                     # "MM-DD" the person chose; the year we last said happy birthday
 invites = Table("invites", meta,
     Column("code", String(12), primary_key=True), Column("family_id", Integer), Column("role", String(8)), Column("created_by", Integer),
     Column("expires", Float), Column("used", Boolean, default=False))
@@ -152,6 +155,39 @@ risk_alerts = Table("risk_alerts", meta,                               # a messa
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True), Column("cat", String(20)),
     Column("role", String(10)), Column("other", String(40), default=""), Column("where", String(60), default=""), Column("snippet", Text, default=""),
     Column("created", Float, index=True), Column("seen", Boolean, default=False))
+album = Table("album", meta,                                         # the family photo album: photos from the chat land here, and anyone can add more
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("token", String(40)), Column("by", Integer), Column("caption", String(120), default=""),
+    Column("created", Float))
+wallet = Table("wallet", meta,                                       # pocket money: a ledger in cents; a child's request waits as "pending"
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True), Column("cents", Integer),
+    Column("note", String(80), default=""), Column("by", Integer), Column("status", String(10), default="done"), Column("created", Float))
+goals = Table("goals", meta,
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True), Column("title", String(60)),
+    Column("emoji", String(8), default="🎯"), Column("target", Integer), Column("saved", Integer, default=0), Column("created", Float))
+moods = Table("moods", meta,
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True), Column("day", String(10)),
+    Column("mood", Integer), Column("note", String(200), default=""), Column("private", Boolean, default=False), Column("created", Float))
+expects = Table("expects", meta,                                     # "tell me when they get there"
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True), Column("place_id", Integer),
+    Column("by_at", Float), Column("set_by", Integer), Column("done", Boolean, default=False), Column("told", Boolean, default=False), Column("created", Float))
+visits = Table("visits", meta,                                       # arrivals and departures, for the day timeline
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True), Column("place", String(40)),
+    Column("emoji", String(8), default="📍"), Column("kind", String(6)), Column("at", Float, index=True))
+trips = Table("trips", meta,                                         # a live-location link for someone outside the family; it runs out
+    Column("id", Integer, primary_key=True), Column("family_id", Integer), Column("member_id", Integer, index=True), Column("token_hash", String(64), index=True),
+    Column("expires", Float), Column("created", Float))
+kudos = Table("kudos", meta,
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("from_id", Integer), Column("to_id", Integer, index=True),
+    Column("emoji", String(8), default="⭐"), Column("reason", String(120), default=""), Column("created", Float, index=True))
+countdowns = Table("countdowns", meta,
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("title", String(60)), Column("emoji", String(8), default="⏳"),
+    Column("at", Float), Column("by", Integer), Column("created", Float))
+trusted = Table("trusted", meta,                                     # grown-ups a child can call if they cannot reach a parent
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("name", String(40)), Column("phone", String(30)),
+    Column("relation", String(30), default=""), Column("by", Integer), Column("created", Float))
+homework = Table("homework", meta,
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer, index=True), Column("subject", String(30), default=""),
+    Column("title", String(120)), Column("due", String(10)), Column("done", Boolean, default=False), Column("reminded", Boolean, default=False), Column("by", Integer), Column("created", Float))
 message_images = Table("message_images", meta,                       # photos sent in family chats: a small JPEG or PNG, found by a long random token
     Column("id", Integer, primary_key=True), Column("token", String(40), unique=True, index=True), Column("family_id", Integer, index=True),
     Column("from_id", Integer), Column("mime", String(16)), Column("data", Text), Column("created", Float))
@@ -170,7 +206,11 @@ for _sql in ("ALTER TABLE members ADD COLUMN rules TEXT DEFAULT ''", "ALTER TABL
             "ALTER TABLE members ADD COLUMN app_version INTEGER DEFAULT 0",
             "ALTER TABLE families ADD COLUMN notice VARCHAR(200) DEFAULT ''", "ALTER TABLE families ADD COLUMN notice_until FLOAT DEFAULT 0", "ALTER TABLE families ADD COLUMN notice_by INTEGER DEFAULT 0",
             "ALTER TABLE plans ADD COLUMN lat FLOAT", "ALTER TABLE plans ADD COLUMN lng FLOAT", "ALTER TABLE plans ADD COLUMN ext_id VARCHAR(80) DEFAULT ''",
-            "ALTER TABLE meals ADD COLUMN suggested BOOLEAN DEFAULT FALSE", "ALTER TABLE places ADD COLUMN pending BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE meals ADD COLUMN suggested BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE members ADD COLUMN walk_to INTEGER DEFAULT 0", "ALTER TABLE members ADD COLUMN walk_until FLOAT DEFAULT 0", "ALTER TABLE members ADD COLUMN walk_started FLOAT DEFAULT 0",
+            "ALTER TABLE members ADD COLUMN walk_told VARCHAR(20) DEFAULT ''", "ALTER TABLE members ADD COLUMN speed_limit INTEGER DEFAULT 0", "ALTER TABLE members ADD COLUMN speed_strikes INTEGER DEFAULT 0",
+            "ALTER TABLE members ADD COLUMN speed_told FLOAT DEFAULT 0", "ALTER TABLE members ADD COLUMN bed_from INTEGER DEFAULT -1", "ALTER TABLE members ADD COLUMN bed_to INTEGER DEFAULT -1",
+            "ALTER TABLE members ADD COLUMN bed_told VARCHAR(10) DEFAULT ''", "ALTER TABLE places ADD COLUMN pending BOOLEAN DEFAULT FALSE",
             "ALTER TABLE members ADD COLUMN safe_dns VARCHAR(80) DEFAULT ''", "ALTER TABLE members ADD COLUMN safe_dns_at FLOAT DEFAULT 0",
             "ALTER TABLE members ADD COLUMN eta_min INTEGER DEFAULT 0", "ALTER TABLE members ADD COLUMN eta_until FLOAT DEFAULT 0",
             "ALTER TABLE members ADD COLUMN sos_until FLOAT DEFAULT 0", "ALTER TABLE members ADD COLUMN offline_told BOOLEAN DEFAULT FALSE",

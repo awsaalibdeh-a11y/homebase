@@ -1,6 +1,6 @@
 /* Mellow 2: five sections (Home, Map, Plan, Chat, More), the meal plan, friend groups, stickers and GIFs, linked apps like Platter, the activity feed and search.
    It loads after web.js and builds on it: the same state (S), the same helpers (api, modal, toast, esc, ...). */
-Object.assign(S, { meals: [], groups: [], requests: [], links: [], feed: [], stickers: null, cal: null, gdlg: null, gtimer: 0 });
+Object.assign(S, { meals: [], groups: [], requests: [], links: [], feed: [], stickers: null, cal: null, gdlg: null, gtimer: 0, risk: [] });
 const PLATTER_URL = localStorage.getItem("hb_platter") || "https://platter-87b0.onrender.com";
 const SCOUT_URL = localStorage.getItem("hb_scout") || "https://scout-15t6.onrender.com";
 const ALIBI_URL = localStorage.getItem("hb_alibi") || "https://alibi-d9tn.onrender.com";
@@ -59,7 +59,31 @@ function quickActionsHtml() {
 function peopleStripHtml() {
   return `<div class="strip">${S.members.map(m => `<button type="button" class="sp" data-act="pickmap" data-id="${m.id}">${mavatar(m)}<small>${esc(m.id === S.me ? "You" : m.name)}</small></button>`).join("")}</div>`;
 }
-function homeHtml() { return setupCardHtml() + requestsHtml() + todayHtml() + peopleStripHtml() + tonightHtml() + quickActionsHtml() + plansHtml(); }
+function homeHtml() { return setupCardHtml() + sosHtml() + requestsHtml() + zoneAsksHtml() + todayHtml() + peopleStripHtml() + kidToolsHtml() + tonightHtml() + quickActionsHtml() + plansHtml(); }
+
+/* ---------- 4.0 and 5.0 safety on the web: SOS, Critical Check-In, find my phone, zones, safety alerts ---------- */
+function sosHtml() {
+  const me = member(S.me) || {}, out = [];
+  if (me.critical) out.push(`<section class="tonight" style="border-color:var(--bad)"><span>🚨</span><div><b>${esc(me.critical.by)} needs you to check in</b><small>Tap I'm OK so they know.</small></div><button class="btn sm solid" data-act="imok">I'm OK</button></section>`);
+  S.members.filter(m => m.sos && m.id !== S.me).forEach(m => out.push(`<section class="tonight" style="background:var(--bad);color:#fff"><span>🚨</span><div><b>${esc(m.name)} sent an SOS</b><small style="color:#fff">${m.location ? "Live location · " + esc(ago(m.location.at)) : "Waiting for a location…"}</small></div><button class="btn sm" data-act="pickmap" data-id="${m.id}">Show on map</button></section>`));
+  if (me.sos) out.push(`<section class="tonight"><span>🚨</span><div><b>Your SOS is on</b><small>Your family sees you live.</small></div><button class="btn sm solid" data-act="imok">I'm safe now</button></section>`);
+  S.members.filter(m => m.walk && m.id !== S.me).forEach(m => out.push(`<section class="tonight"><span>🚶</span><div><b>${esc(m.name)} is on a Safe Walk to ${esc(m.walk.place)}</b><small>Live until they get there.</small></div><button class="btn sm" data-act="pickmap" data-id="${m.id}">Follow</button></section>`));
+  return out.join("");
+}
+function zoneAsksHtml() {
+  if (!isParent()) return "";
+  return S.places.filter(p => p.pending).map(p => `<div class="req"><span class="pl-e">${esc(p.emoji)}</span><div class="pl-m"><b>A zone was asked for: ${esc(p.name)}</b><small>${p.radius} m around</small></div><div class="pl-btns"><button class="btn sm" data-act="zoneno" data-id="${p.id}">Not now</button><button class="btn sm solid" data-act="zoneyes" data-id="${p.id}">Yes</button></div></div>`).join("");
+}
+function kidToolsHtml() {
+  if (!isParent()) return "";
+  const kids = S.members.filter(m => m.role === "child");
+  if (!kids.length) return "";
+  const dns = v => !v ? "Safe browsing: not reported" : v === "off" || v === "automatic" ? "Safe browsing: off" : /cleanbrowsing|family/.test(v) ? "🛡️ Safe browsing on" : "Another filter";
+  return `<section class="calcard"><h3 style="margin-bottom:8px">🛡️ Safety tools</h3>${kids.map(k => `<div class="item" style="flex-wrap:wrap;gap:6px"><span style="flex:1;min-width:160px"><b style="display:block;font-weight:600">${esc(k.name)}</b><small>${esc(dns(k.safe_dns))}${k.eta ? " · 🏃 about " + k.eta.min + " min from home" : ""}${k.speed_limit ? " · 🚗 alert above " + k.speed_limit + " km/h" : ""}</small></span>
+    <button class="btn sm" data-act="crit" data-id="${k.id}" ${k.perms && k.perms.critical === false ? "disabled title=\"They switched this off\"" : ""}>🚨 Critical Check-In</button><button class="btn sm" data-act="ring" data-id="${k.id}">📱 Ring</button></div>`).join("")}
+    ${S.risk.length ? `<div class="msec" style="margin-top:10px">Safety alerts</div>${S.risk.slice(0, 6).map(a => `<div class="item" style="${a.seen ? "" : "background:color-mix(in srgb,var(--bad) 10%,var(--surface))"}"><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">⚠️ ${esc(a.name)}: ${esc(a.what)}</b><small>${a.role === "sent" ? "Sent by " + esc(a.name) : "Sent to " + esc(a.name) + " by " + esc(a.other)} in ${esc(a.where)} · ${esc(ago(a.at))}</small><small style="display:block;color:var(--ink)">“${esc(a.snippet)}”</small></span>${a.seen ? "" : `<button class="btn sm" data-act="riskseen" data-id="${a.id}">Seen</button>`}</div>`).join("")}` : '<p class="tabhelp">No safety alerts. Mellow checks messages in Mellow for bullying, self-harm, adult content and grooming, and shows only the message that matched.</p>'}</section>`;
+}
+async function refreshRisk() { if (!isParent()) return; try { S.risk = (await api("/api/risk")).alerts; renderSide(); } catch (e) { /* offline */ } }
 function mapSectionHtml() {
   const hasHome = S.places.some(p => p.name === "Home");
   return peopleHtml() + (isParent() ? `<button class="btn" data-act="invite">＋ Invite someone</button>` : "")
@@ -328,6 +352,11 @@ function recipeDialog(day) {
   });
 }
 async function hb2Act(act, id, el) {
+  if (act === "imok") { try { await api("/api/messages", "POST", { kind: "checkin", body: "I'm OK", to: 0 }); await api("/api/critical/ack", "POST"); toast("Your family knows you are OK"); } catch (e) { toast(e.message); } return; }
+  if (act === "crit") { try { await api(`/api/members/${id}/critical`, "POST"); toast("Their phone will ring until they tap I'm OK"); } catch (e) { toast(e.message); } return; }
+  if (act === "ring") { try { await api(`/api/members/${id}/ring`, "POST"); toast("Ringing their phone"); } catch (e) { toast(e.message); } return; }
+  if (act === "zoneyes" || act === "zoneno") { try { await api(`/api/places/${id}/approve`, "POST", { ok: act === "zoneyes" }); toast(act === "zoneyes" ? "Zone added" : "Answered"); } catch (e) { toast(e.message); } return; }
+  if (act === "riskseen") { try { await api(`/api/risk/${id}/seen`, "POST"); refreshRisk(); } catch (e) { toast(e.message); } return; }
   if (act === "recipes") return recipeDialog();
   if (act === "mealyes" || act === "mealno") { try { await api(`/api/meals/${id}/approve`, "POST", { ok: act === "mealyes" }); refreshMeals(); loadCal(); } catch (e) { toast(e.message); } return; }
   if (act === "qok") return checkIn();
@@ -364,6 +393,14 @@ async function downloadIcs() {
   } catch (e) { toast(e.message); }
 }
 function hb2Event(type, p) {
+  if (type === "risk_alert") { refreshRisk(); toast(`⚠️ Safety alert for ${p.name}: ${p.what}`, 10000); notify("⚠️ Safety alert for " + p.name, "A message looked like " + p.what + ".", { tag: "risk-" + p.id, force: true }); return; }
+  if (type === "zone_request") { toast(`📍 ${p.name} asks for a zone: ${p.place}`, 8000); return; }
+  if (type === "critical") { toast(`🚨 ${p.name} needs you to check in. Tap I'm OK on Home.`, 15000); notify("🚨 " + p.name + " needs you to check in", "Open Mellow and tap I'm OK.", { tag: "critical", force: true }); return; }
+  if (["critical_ok", "offline", "online", "walk", "walk_done", "walk_late", "walk_still", "expect_ok", "expect_late", "speeding", "kudos", "wallet", "wallet_request", "homework_due", "bedtime"].includes(type)) {
+    const title = p.title || (type === "critical_ok" ? `✅ ${p.name} is OK` : type === "offline" ? `📵 ${p.name}'s phone went offline` : type === "online" ? `✅ ${p.name}'s phone is back` : "");
+    if (title) { toast(title + (p.text ? " · " + p.text : ""), 8000); notify(title, p.text || "", { tag: type + "-" + (p.member || ""), force: /late|still|speeding|offline/.test(type) }); }
+    return;
+  }
   if (type === "meals") { refreshMeals(); loadCal(); return; }
   if (type === "meal_suggest") { refreshMeals(); toast(`💡 ${p.name} suggests ${p.title}`, 7000); return; }
   if (type === "meal_ok") { refreshMeals(); toast(p.approved ? `✅ ${p.name} said yes to ${p.title}` : `${p.name} said not now to ${p.title}`, 6000); return; }
@@ -402,6 +439,7 @@ function mellowWelcome() {
   });
 }
 function hb2Boot() {
+  refreshRisk();
   setTimeout(mellowWelcome, 600);
   setTimeout(() => { const o = $("#over"); if (!(o && o.classList.contains("on"))) linkPrompt(); }, 3500);
   refreshMeals(); refreshGroups(); refreshLinks(); refreshFeed(); loadStickers();

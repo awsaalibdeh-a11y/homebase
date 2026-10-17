@@ -28,6 +28,13 @@ sealed interface Screen {
     data object Fun : Screen
     data object Emergency : Screen
     data object Safety : Screen
+    data object Wallet : Screen
+    data class Mood(val member: Int = 0) : Screen
+    data object Album : Screen
+    data object Kudos : Screen
+    data object Homework : Screen
+    data object Trusted : Screen
+    data class Timeline(val member: Int) : Screen
     data object SafeBrowsing : Screen
     data object Pocket : Screen
     data class Camera(val purpose: String) : Screen

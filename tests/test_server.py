@@ -2457,5 +2457,156 @@ class SafetyV4(Base):
         self.assertEqual([e["payload"]["name"] for e in self.events(self.mum) if e["type"] == "online"], ["Sam"])
 
 
+class BiggestUpdateV5(Base):
+    def card(self, who, mid):
+        return {m["id"]: m for m in self.get(who, "/api/family").get_json()["members"]}[mid]
+
+    def home(self):
+        self.post(self.mum, "/api/home", lat=51.5, lng=-0.12, radius=150)
+        return [p for p in self.get(self.mum, "/api/family").get_json()["places"] if p["name"] == "Home"][0]["id"]
+
+    def test_album_takes_family_photos_and_uploads(self):
+        import base64
+        up = self.post(self.kid, "/api/images", image="data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8\xff\xe0album").decode()).get_json()["url"]
+        self.post(self.kid, "/api/messages", kind="image", body=up, to=0)
+        up2 = self.post(self.mum, "/api/images", image="data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8\xff\xe0two").decode()).get_json()["url"]
+        self.assertEqual(self.post(self.mum, "/api/album", url=up2, caption="Beach").status_code, 200)
+        photos = self.get(self.kid, "/api/album").get_json()["photos"]
+        self.assertEqual([x["caption"] for x in photos], ["Beach", ""])
+        self.assertEqual(self.post(self.mum, "/api/album", url="/api/img/nope").status_code, 400)
+
+    def test_voice_notes(self):
+        import base64
+        m4a = b"\x00\x00\x00\x18ftypM4A " + b"x" * 200
+        url = self.post(self.kid, "/api/audio", audio="data:audio/mp4;base64," + base64.b64encode(m4a).decode()).get_json()["url"]
+        r = self.post(self.kid, "/api/messages", kind="voice", body=url, to=0)
+        self.assertEqual(r.get_json()["message"]["kind"], "voice")
+        got = self.c.get(url); self.assertEqual(got.mimetype, "audio/mp4"); got.close()
+        self.assertEqual(self.post(self.kid, "/api/audio", audio=base64.b64encode(b"not audio").decode()).status_code, 400)
+        img = self.post(self.kid, "/api/images", image=base64.b64encode(b"\xff\xd8\xff\xe0x").decode()).get_json()["url"]
+        self.assertEqual(self.post(self.kid, "/api/messages", kind="voice", body=img, to=0).status_code, 400, "a photo is not a voice note")
+
+    def test_wallet_requests_and_goals(self):
+        self.assertEqual(self.post(self.mum, "/api/wallet", member=self.kid_id, amount=10, note="Pocket money").get_json()["balance"], 1000)
+        self.assertEqual(self.post(self.kid, "/api/wallet", member=self.kid_id, amount=5).status_code, 403)
+        wid = self.post(self.kid, "/api/wallet/request", amount=-3.5, note="Comic").get_json()["id"]
+        self.assertTrue([e for e in self.events(self.mum) if e["type"] == "wallet_request"])
+        self.assertEqual(self.post(self.mum, f"/api/wallet/{wid}/answer", ok=True).get_json()["balance"], 650)
+        gid = self.post(self.kid, "/api/goals", title="New game", target=8).get_json()["id"]
+        self.assertEqual(self.post(self.kid, f"/api/goals/{gid}/save", amount=10).status_code, 400, "not more than you have")
+        r = self.post(self.kid, f"/api/goals/{gid}/save", amount=6).get_json()
+        self.assertEqual((r["saved"], r["balance"]), (600, 50))
+        w = self.get(self.mum, "/api/wallet").get_json()["wallets"][0]
+        self.assertEqual((w["balance"], w["goals"][0]["saved"]), (50, 600))
+        self.c.delete(f"/api/goals/{gid}", headers=self.kid)
+        self.assertEqual(self.get(self.kid, "/api/wallet").get_json()["wallets"][0]["balance"], 650, "deleting a goal puts the money back")
+
+    def test_moods_private_and_hard_days(self):
+        self.post(self.kid, "/api/mood", mood=2, note="tired")
+        self.assertTrue([e for e in self.events(self.mum) if "hard day" in e["payload"].get("title", "")])
+        self.assertEqual(self.get(self.mum, f"/api/moods?member={self.kid_id}").get_json()["days"][0]["mood"], 2)
+        self.post(self.kid, "/api/mood", mood=1, note="secret", private=True)
+        day = self.get(self.mum, f"/api/moods?member={self.kid_id}").get_json()["days"][0]
+        self.assertEqual((day["mood"], day["note"], day["private"]), (0, "", True))
+        self.assertEqual(self.get(self.kid, "/api/moods").get_json()["days"][0]["note"], "secret")
+
+    def test_safe_walk_ends_on_arrival_and_alerts_when_late(self):
+        home = self.home()
+        self.post(self.kid, "/api/walk", place=home, minutes=15)
+        self.assertEqual(self.card(self.mum, self.kid_id)["walk"]["place"], "Home")
+        self.assertEqual(self.where(self.kid, 51.52, -0.12).get_json()["interval"], 15)
+        self.where(self.kid, 51.5, -0.12)
+        self.assertNotIn("walk", self.card(self.mum, self.kid_id))
+        self.assertTrue([e for e in self.events(self.mum) if e["type"] == "walk_done"])
+        self.post(self.kid, "/api/walk", place=home, minutes=5)
+        db.run(db.update(db.members).where(db.members.c.id == self.kid_id).values(walk_until=time.time() - 400))
+        server._last_watch[0] = 0
+        server.check_watchers()
+        self.assertTrue([e for e in self.events(self.mum) if e["type"] == "walk_late"])
+
+    def test_expected_arrival(self):
+        home = self.home()
+        self.where(self.kid, 51.6, -0.12)
+        self.post(self.mum, "/api/expect", member=self.kid_id, place=home, minutes=30)
+        self.where(self.kid, 51.5, -0.12)
+        self.assertTrue([e for e in self.events(self.mum) if e["type"] == "expect_ok"])
+        self.post(self.mum, "/api/expect", member=self.kid_id, place=home, minutes=30)
+        db.run(db.update(db.expects).values(by_at=time.time() - 5).where(db.expects.c.done == False))  # noqa: E712
+        server._last_watch[0] = 0
+        server.check_watchers()
+        self.assertTrue([e for e in self.events(self.mum) if e["type"] == "expect_late"])
+
+    def test_speed_alerts_after_two_readings(self):
+        self.post(self.mum, f"/api/members/{self.kid_id}/speed", limit=50)
+        self.assertEqual(self.card(self.kid, self.kid_id)["speed_limit"], 50, "the child sees the limit")
+        self.where(self.kid, 51.5, -0.1, speed=20)
+        self.assertFalse([e for e in self.events(self.mum) if e["type"] == "speeding"])
+        self.where(self.kid, 51.51, -0.1, speed=21)
+        self.assertTrue([e for e in self.events(self.mum) if e["type"] == "speeding"])
+
+    def test_find_my_phone(self):
+        self.assertEqual(self.post(self.mum, f"/api/members/{self.kid_id}/ring").status_code, 200)
+        self.assertTrue([e for e in self.events(self.kid) if e["type"] == "ring"])
+        self.assertEqual(self.post(self.kid, f"/api/members/{self.mum_id}/ring").status_code, 403)
+        self.assertEqual(self.post(self.kid, f"/api/members/{self.kid_id}/ring").status_code, 200, "your own phone")
+
+    def test_weather_uses_home(self):
+        self.home()
+        old = server.fetch_weather
+        server.fetch_weather = lambda lat, lng: {"current": {"temperature_2m": 17.4, "weather_code": 61, "wind_speed_10m": 12},
+                                                 "daily": {"time": ["2026-10-17"], "temperature_2m_max": [19], "temperature_2m_min": [10], "weather_code": [3], "precipitation_probability_max": [40]}}
+        server._weather.clear()
+        try:
+            w = self.get(self.kid, "/api/weather").get_json()
+        finally:
+            server.fetch_weather = old
+        self.assertEqual((w["temp"], w["words"], w["days"][0]["words"], w["where"]), (17, "Rain", "Cloudy", "Home"))
+
+    def test_timeline_and_trip_link(self):
+        home = self.home()
+        self.where(self.kid, 51.6, -0.12); self.where(self.kid, 51.5, -0.12); self.where(self.kid, 51.6, -0.12)
+        items = self.get(self.mum, f"/api/timeline?member={self.kid_id}").get_json()["items"]
+        self.assertEqual([i["kind"] for i in items], ["arrive", "leave"])
+        url = self.post(self.kid, "/api/trip", hours=2).get_json()["url"]
+        token = url.rsplit("/", 1)[-1]
+        d = self.c.get(f"/api/trip/{token}").get_json()
+        self.assertEqual((d["name"], round(d["lat"], 1)), ("Sam", 51.6))
+        page = self.c.get(f"/trip/{token}"); self.assertIn(b"Sam", page.data); page.close()
+        self.c.delete("/api/trip", headers=self.kid)
+        self.assertEqual(self.c.get(f"/api/trip/{token}").status_code, 404)
+
+    def test_offline_trail_upload(self):
+        now = time.time()
+        r = self.post(self.kid, "/api/locations", points=[{"lat": 51.1, "lng": -0.1, "at": now - 600}, {"lat": 51.2, "lng": -0.1, "at": now - 60}, {"lat": 99, "lng": 0, "at": now}]).get_json()
+        self.assertEqual(r["saved"], 2)
+        self.assertAlmostEqual(self.card(self.mum, self.kid_id)["location"]["lat"], 51.2)
+
+    def test_kudos_star_and_badges(self):
+        self.post(self.mum, "/api/kudos", to=self.kid_id, reason="Helped with dinner")
+        self.post(self.mum, "/api/kudos", to=self.kid_id)
+        k = self.get(self.kid, "/api/kudos").get_json()
+        self.assertEqual((k["star"]["name"], k["star"]["count"]), ("Sam", 2))
+        self.assertEqual(self.post(self.kid, "/api/kudos", to=self.kid_id).status_code, 400)
+        b = {x["id"]: x for x in self.get(self.kid, "/api/badges").get_json()["badges"]}
+        self.assertEqual((b["favourite"]["have"], b["favourite"]["earned"]), (2, False))
+
+    def test_countdowns_trusted_homework_bedtime(self):
+        self.assertEqual(self.post(self.kid, "/api/countdowns", title="Holiday", at=time.time() + 86400 * 10).status_code, 200)
+        self.assertEqual(self.get(self.mum, "/api/countdowns").get_json()["countdowns"][0]["title"], "Holiday")
+        self.assertEqual(self.post(self.kid, "/api/trusted", name="Auntie", phone="07700 900000").status_code, 403)
+        self.post(self.mum, "/api/trusted", name="Auntie", phone="07700 900000", relation="Aunt")
+        self.assertEqual(self.get(self.kid, "/api/trusted").get_json()["people"][0]["name"], "Auntie")
+        tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        hid = self.post(self.kid, "/api/homework", title="Maths sheet", due=tomorrow, subject="Maths").get_json()["id"]
+        self.assertEqual(self.get(self.mum, "/api/homework").get_json()["items"][0]["title"], "Maths sheet")
+        server._last_watch[0] = 0
+        server.check_watchers()
+        self.assertTrue([e for e in self.events(self.kid) if e["type"] == "homework_due"])
+        self.post(self.kid, f"/api/homework/{hid}", done=True)
+        self.assertTrue(self.get(self.kid, "/api/homework").get_json()["items"][0]["done"])
+        self.post(self.mum, f"/api/members/{self.kid_id}/bedtime", **{"from": 1260, "to": 420})
+        self.assertEqual(self.card(self.mum, self.kid_id)["bedtime"], {"from": 1260, "to": 420})
+
+
 if __name__ == "__main__":
     unittest.main()

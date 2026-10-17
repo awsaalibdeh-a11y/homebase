@@ -49,6 +49,8 @@ fun MeTab(nav: Nav) {
     var birthdayOpen by remember { mutableStateOf(false) }
     var tutorial by remember { mutableStateOf(false) }
     var linkApps by remember { mutableStateOf(false) }
+    var tripOpen by remember { mutableStateOf(false) }
+    var walkOpen by remember { mutableStateOf(false) }
     var quietFrom by remember { mutableIntStateOf(-1) }
     var quietTo by remember { mutableIntStateOf(-1) }
     LaunchedEffect(Unit) {
@@ -129,6 +131,9 @@ fun MeTab(nav: Nav) {
         TwoUp({ SoftButton("✅ Jobs and points") { nav.go(Screen.Chores) } }, { SoftButton("🎁 Rewards") { nav.go(Screen.Rewards) } })
         TwoUp({ SoftButton("📌 Family board") { nav.go(Screen.Board) } }, { SoftButton("🛒 Family list") { nav.go(Screen.Lists) } })
         TwoUp({ SoftButton("📍 Saved places") { nav.go(Screen.Places) } }, { SoftButton("🕓 Activity") { nav.go(Screen.Feed) } })
+        TwoUp({ SoftButton("💰 Pocket money") { nav.go(Screen.Wallet) } }, { SoftButton("📸 Album") { nav.go(Screen.Album) } })
+        TwoUp({ SoftButton("⭐ Kudos, badges") { nav.go(Screen.Kudos) } }, { SoftButton("📚 Homework") { nav.go(Screen.Homework) } })
+        TwoUp({ SoftButton("🧑‍🤝‍🧑 Trusted adults") { nav.go(Screen.Trusted) } }, { SoftButton("😊 How I feel") { nav.go(Screen.Mood()) } })
         if (ctx.hb.store.isParent) SoftButton("🔗 Link Platter and Scout") { linkApps = true }
         if (ctx.hb.store.isParent) TwoUp({ SoftButton("📋 Rules") { nav.go(Screen.Rules) } }, { SoftButton("＋ Invite") { nav.go(Screen.Invite) } })
 
@@ -138,6 +143,8 @@ fun MeTab(nav: Nav) {
         SoftButton("🎉 Fun: games for the family") { nav.go(Screen.Fun) }
         SoftButton("🆘 Emergency card (works offline)") { nav.go(Screen.Emergency) }
         SoftButton("🛡️ Safe browsing") { nav.go(Screen.SafeBrowsing) }
+        TwoUp({ SoftButton("🔗 Share my trip") { tripOpen = true } }, { SoftButton("🚶 Safe Walk") { walkOpen = true } })
+        if (!ctx.hb.store.isParent) SoftButton("🌙 My bedtime reminder") { pickBedtime(ctx, ctx.hb.store.myId) }
         if (ctx.hb.store.isParent) SoftButton("⚠️ Safety alerts") { nav.go(Screen.Safety) }
         SoftButton("🧰 Pocket: timer and private notes") { nav.go(Screen.Pocket) }
         SoftButton("🎓 Tutorial") { tutorial = true }
@@ -146,6 +153,8 @@ fun MeTab(nav: Nav) {
     }
     if (tutorial) TutorialDialog { tutorial = false }
     if (linkApps) LinkAppsDialog { linkApps = false }
+    if (tripOpen) TripDialog { tripOpen = false }
+    if (walkOpen) WalkDialog { walkOpen = false }
     if (statusOpen) StatusDialog { statusOpen = false }
     if (birthdayOpen) BirthdayDialog(me?.birthday) { birthdayOpen = false }
     if (pause) PickDialog("Pause sharing for…", listOf("15 minutes" to 15, "1 hour" to 60, "3 hours" to 180, "Until tomorrow" to 720), { setSharing("paused", it) }, { pause = false })

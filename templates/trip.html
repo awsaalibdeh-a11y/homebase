@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{% if ok %}{{ name }} on Mellow{% else %}Link ended{% endif %}</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <style>
+    html, body { margin:0; height:100%; font:16px/1.45 Inter,system-ui,"Segoe UI",Roboto,sans-serif; background:#fbfbf9; color:#121212; }
+    #map { position:absolute; inset:0; }
+    .card { position:absolute; left:12px; right:12px; bottom:16px; max-width:420px; margin:0 auto; background:#fff; border:1px solid rgba(0,0,0,.12); border-radius:16px; padding:14px 16px; z-index:500; box-shadow:0 10px 30px rgba(0,0,0,.15); }
+    h1 { font:500 1.4rem Georgia,serif; margin:0 0 4px; } small { color:#6a6863; }
+    .end { display:grid; place-items:center; height:100%; text-align:center; padding:24px; }
+  </style>
+</head>
+<body>
+{% if ok %}
+  <div id="map"></div>
+  <div class="card"><h1>{{ name }}</h1><small id="st">Loading where they are…</small></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script>
+    const map = L.map("map", { zoomControl: false }).setView([30, 31], 3);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors © CARTO", maxZoom: 19 }).addTo(map);
+    let pin = null, first = true;
+    const ago = s => { const d = Math.round(Date.now() / 1000 - s); return d < 90 ? "just now" : d < 3600 ? Math.round(d / 60) + " min ago" : Math.round(d / 3600) + " h ago"; };
+    async function tick() {
+      try {
+        const r = await fetch("/api/trip/{{ token }}"); if (!r.ok) { document.getElementById("st").textContent = "This link has ended."; return; }
+        const d = await r.json(), left = Math.max(0, Math.round((d.expires - Date.now() / 1000) / 60));
+        if (d.lat == null) { document.getElementById("st").textContent = "Not sharing right now · link ends in " + left + " min"; }
+        else {
+          if (!pin) pin = L.circleMarker([d.lat, d.lng], { radius: 11, color: "#141414", weight: 4, fillColor: "#fff", fillOpacity: 1 }).addTo(map); else pin.setLatLng([d.lat, d.lng]);
+          if (first) { map.setView([d.lat, d.lng], 16); first = false; }
+          document.getElementById("st").textContent = "Live · updated " + ago(d.at) + " · link ends in " + left + " min";
+        }
+      } catch (e) { document.getElementById("st").textContent = "Reconnecting…"; }
+      setTimeout(tick, 15000);
+    }
+    tick();
+  </script>
+{% else %}
+  <div class="end"><div><h1>This link has ended</h1><small>Live-location links from Mellow only work for a few hours.</small></div></div>
+{% endif %}
+</body>
+</html>

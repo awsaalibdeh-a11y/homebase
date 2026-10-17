@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="sos_widget">A big SOS button. It opens Mellow on a 3-second countdown, then tells your family with your live location.</string>
+    <string name="family_widget">Everyone in the family and where they are, from Mellow.</string>
 </resources>

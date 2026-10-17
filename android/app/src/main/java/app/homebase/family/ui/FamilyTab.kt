@@ -2,6 +2,7 @@ package app.homebase.family.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -42,6 +43,9 @@ fun PersonCard(nav: Nav, m: Member, onFocus: (app.homebase.family.Spot) -> Unit)
     val ctx = LocalContext.current
     val me = ctx.hb.store
     val call = rememberCaller()
+    var more by remember { mutableStateOf(false) }
+    var expectOpen by remember { mutableStateOf(false) }
+    var speedOpen by remember { mutableStateOf(false) }
     SoftCard(onClick = { m.location?.let(onFocus) }) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MemberAvatar(m, 52, if (m.isParent) SunSoft else AccentSoft)
@@ -70,7 +74,27 @@ fun PersonCard(nav: Nav, m: Member, onFocus: (app.homebase.family.Spot) -> Unit)
                 TextButton({ askWhere(ctx, m) }, enabled = canDo(m, "ping")) { Text("Where?", maxLines = 1, softWrap = false) }
             }
             if (m.id == me.myId || (me.isParent && !m.isParent)) TextButton({ nav.go(Screen.History(m.id)) }) { Text("Trail", maxLines = 1, softWrap = false) }
+            Box {
+                TextButton({ more = true }) { Text("More ▾", maxLines = 1, softWrap = false) }
+                androidx.compose.material3.DropdownMenu(more, { more = false }) {
+                    if (m.id == me.myId || (me.isParent && !m.isParent)) androidx.compose.material3.DropdownMenuItem({ Text("🕓 Today's places") }, { more = false; nav.go(Screen.Timeline(m.id)) })
+                    if (m.id != me.myId) androidx.compose.material3.DropdownMenuItem({ Text("⭐ Give kudos") }, { more = false; nav.go(Screen.Kudos) })
+                    if (me.isParent && !m.isParent) {
+                        androidx.compose.material3.DropdownMenuItem({ Text("😊 Moods") }, { more = false; nav.go(Screen.Mood(m.id)) })
+                        androidx.compose.material3.DropdownMenuItem({ Text("📍 Tell me when they get there") }, { more = false; expectOpen = true })
+                        androidx.compose.material3.DropdownMenuItem({ Text("🚗 Speed alert" + if (m.speedLimit > 0) " (${m.speedLimit} km/h)" else "") }, { more = false; speedOpen = true })
+                        androidx.compose.material3.DropdownMenuItem({ Text("🌙 Bedtime reminder") }, { more = false; pickBedtime(ctx, m.id) })
+                    }
+                    if (m.id == me.myId || (me.isParent && (!m.isParent || true))) androidx.compose.material3.DropdownMenuItem({ Text("📱 Ring their phone") }, {
+                        more = false
+                        ctx.hb.scope.launch { runCatching { ctx.hb.api.ring(m.id) }.onSuccess { toast(ctx, "Ringing ${m.name}'s phone") }.onFailure { toast(ctx, it.message ?: "Could not ring it") } }
+                    })
+                }
+            }
         }
+        m.walk?.let { w -> Text("🚶 Safe Walk to ${w.emoji} ${w.place} · live", color = Ink, style = MaterialTheme.typography.bodyMedium) }
+        if (expectOpen) ExpectDialog(m) { expectOpen = false }
+        if (speedOpen) SpeedDialog(m) { speedOpen = false }
         if (!m.isParent && me.isParent) BigButton("🎛️ Controls: screen time, lock, ground apps") { nav.go(Screen.Controls(m.id)) }
         if (!m.isParent && me.isParent) TextButton({
             ctx.hb.scope.launch { runCatching { ctx.hb.api.critical(m.id) }.onSuccess { toast(ctx, "${m.name}'s phone will ring until they tap I'm OK") }.onFailure { toast(ctx, it.message ?: "Could not send it") } }
@@ -98,11 +122,13 @@ fun HomeTab(nav: Nav) {
     var planOpen by remember { mutableStateOf(false) }
     var mealOpen by remember { mutableStateOf(false) }
     var pollOpen by remember { mutableStateOf(false) }
+    var walkOpen by remember { mutableStateOf(false) }
     val nameOf: (Int) -> String = { id -> if (id == me.myId) "You" else fam?.members?.firstOrNull { it.id == id }?.name ?: "Someone" }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SetupBanner()
         SafetyBanners()
         SosAlerts(nav)
+        WalkBanner()
         Heading(fam?.family?.name ?: me.familyName.ifBlank { "Home" }, "${fam?.members?.size ?: 1} people")
         if (!me.isParent) SosButton { state.sosAsk.value = true }
         GroupRequests()
@@ -130,6 +156,8 @@ fun HomeTab(nav: Nav) {
             SoftButton(if (mine != null) "${mine.emoji} ${mine.text}".trim() else "🙂 What I'm up to", Modifier.padding(top = 10.dp)) { statusOpen = true }
             if (me.isParent) SoftButton("📢 Announce to the family", Modifier.padding(top = 8.dp)) { announceOpen = true }
         }
+        WeatherCard()
+        CountdownsCard()
         val today = java.time.LocalDate.now().toString()
         val tonight = meals.filter { it.day == today }.sortedBy { MEAL_SLOTS.indexOf(it.slot) }
         SectionLabel("🍽️ What are we eating?")
@@ -140,6 +168,7 @@ fun HomeTab(nav: Nav) {
         TwoUp({ SoftButton("Pick me up 🚗") { sendQuick(ctx, "pickup", "Can someone pick me up?", 0, true, "Sent to the family") } }, { SoftButton("🎮 Family game") { startFamilyGame(ctx) } })
         TwoUp({ SoftButton("📅 Add a plan") { planOpen = true } }, { SoftButton("🗳️ Ask the family") { pollOpen = true } })
         TwoUp({ SoftButton("🔎 Search recipes") { nav.go(Screen.Recipes()) } }, { SoftButton("🎉 Fun") { nav.go(Screen.Fun) } })
+        TwoUp({ SoftButton("🚶 Safe Walk") { walkOpen = true } }, { SoftButton("😊 How I feel") { nav.go(Screen.Mood()) } })
         val waiting = polls.count { !it.closed && it.mine == null }
         if (waiting > 0) SoftButton("🗳️ $waiting to vote on") { state.tab.value = 2 }
         if (plans.isNotEmpty()) {
@@ -170,6 +199,7 @@ fun HomeTab(nav: Nav) {
     if (announceOpen) AnnounceDialog { announceOpen = false }
     if (planOpen) AddPlanDialog(null) { planOpen = false }
     if (pollOpen) AskPollDialog { pollOpen = false }
+    if (walkOpen) WalkDialog { walkOpen = false }
     if (mealOpen) AddMealDialog(null) { mealOpen = false }
     if (lateOpen) PickDialog("How late will you be?", LATE_CHOICES, { lateSend(ctx, it) }, { lateOpen = false })
 }

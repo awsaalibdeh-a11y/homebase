@@ -60,7 +60,8 @@ class AppState(val store: Store, val api: Api) {
     val showOnMap = MutableSharedFlow<Spot>(extraBufferCapacity = 4)
     val openGroup = MutableStateFlow<Int?>(null)
     val support = MutableStateFlow<String?>(null)                      // a kind note for a child who wrote something that sounded like self-harm
-    val sosAsk = MutableStateFlow(false)                               // the SOS countdown (from the home-screen widget or the Home button)                     // the friend group on screen right now, so its messages do not also ping
+    val sosAsk = MutableStateFlow(false)
+    var onFamily: (() -> Unit)? = null                                // repaints the home-screen widget                               // the SOS countdown (from the home-screen widget or the Home button)                     // the friend group on screen right now, so its messages do not also ping
 
     private inline fun <reified T> cached(key: String): List<T> = runCatching { cacheJson.decodeFromString<List<T>>(store.text(key)) }.getOrDefault(emptyList())
     private inline fun <reified T> keep(key: String, v: List<T>) { runCatching { store.saveText(key, cacheJson.encodeToString(v)) } }
@@ -115,6 +116,7 @@ class AppState(val store: Store, val api: Api) {
             family.value = it
             store.familyName = it.family.name
             runCatching { store.familyCache = cacheJson.encodeToString(FamilyResp.serializer(), it) }
+            runCatching { onFamily?.invoke() }
             flushOutbox()
         }
         return r.isSuccess
@@ -198,6 +200,7 @@ class HomebaseApp : Application() {
         api = Api(store)
         state = AppState(store, api)
         calls = CallManager(this, api, state, scope)
+        state.onFamily = { FamilyWidget.refresh(this) }
         Notifications.createChannels(this)
     }
 }

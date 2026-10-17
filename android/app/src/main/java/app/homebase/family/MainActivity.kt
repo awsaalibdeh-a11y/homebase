@@ -73,6 +73,8 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
         if (o.startsWith("chat:") && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Thread(o.removePrefix("chat:").toIntOrNull() ?: 0)) }
         else if (o.startsWith("group:") && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 3; nav.go(Screen.Group(o.removePrefix("group:").toIntOrNull() ?: 0)) }
         else if (o == "sos" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 0; state.sosAsk.value = true }
+        else if (o == "wallet" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Wallet) }
+        else if (o == "kudos" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Kudos) }
         else if (o == "safety" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Safety) }
         else if (o == "places" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); nav.go(Screen.Places) }
         else if (o == "map" && ctx.hb.store.signedIn) { nav.reset(Screen.Main); state.tab.value = 1 }
@@ -113,6 +115,13 @@ private fun Root(nav: Nav, open: androidx.compose.runtime.MutableState<String?>)
             Screen.Fun -> app.homebase.family.ui.FunScreen(nav)
             Screen.Emergency -> app.homebase.family.ui.EmergencyScreen(nav)
             Screen.Safety -> app.homebase.family.ui.SafetyScreen(nav)
+            Screen.Wallet -> app.homebase.family.ui.WalletScreen(nav)
+            is Screen.Mood -> app.homebase.family.ui.MoodScreen(nav, s.member)
+            Screen.Album -> app.homebase.family.ui.AlbumScreen(nav)
+            Screen.Kudos -> app.homebase.family.ui.KudosScreen(nav)
+            Screen.Homework -> app.homebase.family.ui.HomeworkScreen(nav)
+            Screen.Trusted -> app.homebase.family.ui.TrustedScreen(nav)
+            is Screen.Timeline -> app.homebase.family.ui.TimelineScreen(nav, s.member)
             Screen.SafeBrowsing -> app.homebase.family.ui.SafeBrowsingScreen(nav)
             Screen.Pocket -> app.homebase.family.ui.PocketScreen(nav)
             is Screen.Camera -> app.homebase.family.ui.CameraScreen(nav, s.purpose)

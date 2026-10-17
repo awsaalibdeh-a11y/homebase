@@ -33,6 +33,9 @@ data class Member(
     val eta: EtaInfo? = null,                                         // "running late": roughly how far from home
     @SerialName("safe_dns") val safeDns: String? = null,              // the phone's web filter (a child's, seen by parents): a host name, "off", or not reported
     val critical: CriticalInfo? = null,                               // a parent's Critical Check-In waiting for "I'm OK" (only in my own view)
+    val walk: WalkInfo? = null,                                       // a Safe Walk going on
+    @SerialName("speed_limit") val speedLimit: Int = 0,               // a child's speed alert in km/h (0 = off)
+    val bedtime: BedInfo? = null,
 ) {
     val isParent get() = role == "parent"
     /** Whether a parent may do [key] with this person. Everything is allowed until they turn it off. */
@@ -407,3 +410,31 @@ data class RecipeTag(val id: String, val name: String = "")
 
 @Serializable
 data class RecipesResp(val recipes: List<Recipe> = emptyList(), val tags: List<RecipeTag> = emptyList())
+
+// ---- Mellow 5.0
+@Serializable data class WalkInfo(val place: String = "", val emoji: String = "📍", val until: Double = 0.0, val started: Double = 0.0)
+@Serializable data class BedInfo(val from: Int = -1, val to: Int = -1)
+@Serializable data class AlbumPhoto(val id: Int, val url: String = "", val by: Int = 0, val name: String = "", val caption: String = "", val at: Double = 0.0)
+@Serializable data class AlbumResp(val photos: List<AlbumPhoto> = emptyList())
+@Serializable data class WalletEntry(val id: Int, val cents: Int = 0, val note: String = "", val status: String = "done", val by: String = "", val at: Double = 0.0)
+@Serializable data class Goal(val id: Int, val title: String = "", val emoji: String = "🎯", val target: Int = 0, val saved: Int = 0)
+@Serializable data class WalletInfo(val member: Int, val name: String = "", val balance: Int = 0, val entries: List<WalletEntry> = emptyList(), val goals: List<Goal> = emptyList())
+@Serializable data class WalletResp(val wallets: List<WalletInfo> = emptyList())
+@Serializable data class MoodDay(val day: String = "", val mood: Int = 0, val note: String = "", @SerialName("private") val isPrivate: Boolean = false)
+@Serializable data class MoodsResp(val name: String = "", val days: List<MoodDay> = emptyList())
+@Serializable data class WeatherDay(val day: String = "", val icon: String = "", val words: String = "", val max: Int = 0, val min: Int = 0, val rain: Int = 0)
+@Serializable data class WeatherResp(val where: String = "", val temp: Int = 0, val icon: String = "", val words: String = "", val wind: Int = 0, val days: List<WeatherDay> = emptyList())
+@Serializable data class Visit(val place: String = "", val emoji: String = "📍", val kind: String = "", val at: Double = 0.0)
+@Serializable data class TimelineResp(val name: String = "", val items: List<Visit> = emptyList())
+@Serializable data class KudosItem(val from: String = "", val to: String = "", val emoji: String = "⭐", val reason: String = "", val at: Double = 0.0)
+@Serializable data class Star(val member: Int = 0, val name: String = "", val count: Int = 0)
+@Serializable data class KudosResp(val star: Star? = null, val recent: List<KudosItem> = emptyList())
+@Serializable data class Badge(val id: String, val emoji: String = "", val name: String = "", val how: String = "", val have: Int = 0, val goal: Int = 1, val earned: Boolean = false)
+@Serializable data class BadgesResp(val name: String = "", val badges: List<Badge> = emptyList())
+@Serializable data class Countdown(val id: Int, val title: String = "", val emoji: String = "⏳", val at: Double = 0.0, val by: Int = 0)
+@Serializable data class CountdownsResp(val countdowns: List<Countdown> = emptyList())
+@Serializable data class Trusted(val id: Int, val name: String = "", val phone: String = "", val relation: String = "")
+@Serializable data class TrustedResp(val people: List<Trusted> = emptyList())
+@Serializable data class Homework(val id: Int, val member: Int = 0, val name: String = "", val subject: String = "", val title: String = "", val due: String = "", val done: Boolean = false)
+@Serializable data class HomeworkResp(val items: List<Homework> = emptyList())
+@Serializable data class UrlResp(val url: String = "")

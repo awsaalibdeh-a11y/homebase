@@ -28,7 +28,7 @@ object CriticalAlarm {
     @Volatile var ringing = false
         private set
 
-    fun start(ctx: Context, by: String) {
+    fun start(ctx: Context, by: String, findPhone: Boolean = false) {
         if (ringing) return
         ringing = true
         val app = ctx.applicationContext
@@ -57,11 +57,11 @@ object CriticalAlarm {
         }
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val open = PendingIntent.getActivity(app, 40, Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP), flags)
-        val ok = PendingIntent.getBroadcast(app, 41, Intent(app, ActionReceiver::class.java).setAction("critical_ok"), flags)
+        val ok = PendingIntent.getBroadcast(app, 41, Intent(app, ActionReceiver::class.java).setAction(if (findPhone) "ring_ok" else "critical_ok"), flags)
         val n = NotificationCompat.Builder(app, Notifications.CH_SOS).setSmallIcon(R.drawable.ic_stat_home)
-            .setContentTitle("🚨 $by needs you to check in").setContentText("Tap I'm OK to stop the sound.")
+            .setContentTitle(if (findPhone) "📱 Find my phone" else "🚨 $by needs you to check in").setContentText(if (findPhone) "$by is looking for this phone. Tap Found it." else "Tap I'm OK to stop the sound.")
             .setPriority(NotificationCompat.PRIORITY_MAX).setCategory(NotificationCompat.CATEGORY_ALARM).setOngoing(true)
-            .setFullScreenIntent(open, true).setContentIntent(open).addAction(0, "I'm OK", ok).build()
+            .setFullScreenIntent(open, true).setContentIntent(open).addAction(0, if (findPhone) "Found it" else "I'm OK", ok).build()
         runCatching { NotificationManagerCompat.from(app).notify(ID, n) }
     }
 

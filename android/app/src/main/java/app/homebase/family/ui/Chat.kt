@@ -89,6 +89,7 @@ fun messagePreview(m: Message, me: Int): String {
     val text = when (m.kind) {
         "gif" -> "🎞️ GIF"
         "image" -> "📷 Photo"
+        "voice" -> "🎤 Voice note"
         "heart" -> "❤️"
         "game" -> "🎮 " + gameText(m.body)
         "checkin" -> "✓ " + m.body.ifBlank { "I'm OK" }
@@ -232,6 +233,7 @@ private fun Bubble(m: Message, mine: Boolean, who: String, me: Int, picking: Boo
             when (m.kind) {
                 "heart" -> Text("❤️", fontSize = 34.sp)
                 "gif" -> GifImage(m.body, Modifier.size(180.dp))
+                "voice" -> VoiceBubble(m.body, ink)
                 "image" -> AsyncImage(pictureUrl(ctx, m.body), "Photo", Modifier.widthIn(max = 240.dp).size(width = 240.dp, height = 240.dp).clip(RoundedCornerShape(14.dp)).clickable { onPhoto(pictureUrl(ctx, m.body)) }, contentScale = ContentScale.Crop)
                 "game" -> {
                     Text("🎮 " + gameText(m.body), color = ink)
@@ -281,6 +283,9 @@ fun ThreadScreen(nav: Nav, id: Int) {
     var plus by remember { mutableStateOf(false) }
     var tray by remember { mutableStateOf(false) }
     var big by remember { mutableStateOf<String?>(null) }
+    var recording by remember { mutableStateOf(false) }
+    val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (!ok) toast(ctx, "Mellow needs the microphone for voice notes") }
+    DisposableEffect(Unit) { onDispose { if (recording) Voice.cancel() } }
     val peer = fam?.members?.firstOrNull { it.id == id }
     val call = rememberCaller()
     val videoCall = rememberVideoCaller()
@@ -329,6 +334,12 @@ fun ThreadScreen(nav: Nav, id: Int) {
             OutlinedTextField(text, { text = it }, Modifier.weight(1f), placeholder = { Text("Message") }, maxLines = 4, shape = RoundedCornerShape(24.dp))
             if (text.isNotBlank()) Box(Modifier.size(40.dp).clip(CircleShape).background(Accent).clickable { sendQuick(ctx, "text", text.trim(), id, done = "Sent"); text = "" }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.ArrowUpward, "Send", tint = OnAccent)
+            } else Box(Modifier.size(40.dp).clip(CircleShape).background(if (recording) Rose else Surface2).clickable {
+                if (recording) { recording = false; Voice.stop()?.let { sendVoice(ctx, it, id) } ?: toast(ctx, "Too short. Tap, talk, then tap again.") }
+                else if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) askMic.launch(android.Manifest.permission.RECORD_AUDIO)
+                else { recording = Voice.start(ctx); if (recording) toast(ctx, "Recording… tap again to send") else toast(ctx, "Could not use the microphone") }
+            }, contentAlignment = Alignment.Center) {
+                Text(if (recording) "■" else "🎤", color = if (recording) androidx.compose.ui.graphics.Color.White else Ink, fontSize = 18.sp)
             }
         }
     }

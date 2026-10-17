@@ -41,7 +41,11 @@ fun sendQuick(ctx: Context, kind: String, body: String, to: Int = 0, withSpot: B
             }
             .onFailure {
                 if (it is ApiError) toast(ctx, it.message ?: "Could not send")
-                else { ctx.hb.state.queueSend(kind, body, to, spot?.lat, spot?.lng); toast(ctx, "You are offline. Saved: it sends by itself when you have signal.") }
+                else {
+                    ctx.hb.state.queueSend(kind, body, to, spot?.lat, spot?.lng)
+                    val texted = if (kind == "sos") app.homebase.family.OfflineSos.send(ctx, spot?.lat, spot?.lng) else 0
+                    toast(ctx, if (texted > 0) "No internet: SOS texted to $texted people with your location. It also goes to the family when you are back online." else "You are offline. Saved: it sends by itself when you have signal.")
+                }
             }
     }
 }

@@ -156,7 +156,25 @@ class HomebaseService : Service() {
         hb.store.lastLat = fix.latitude.toFloat(); hb.store.lastLng = fix.longitude.toFloat(); hb.store.lastSentAt = now
         val battery = (getSystemService(Context.BATTERY_SERVICE) as BatteryManager).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         runCatching { hb.api.postLocation(fix.latitude, fix.longitude, fix.accuracy, fix.speed, battery) }
-            .onSuccess { r -> withContext(Dispatchers.Main) { applyRate(r.interval, r.mode) } }
+            .onSuccess { r ->
+                withContext(Dispatchers.Main) { applyRate(r.interval, r.mode) }
+                val queued = hb.store.text("trail")
+                if (queued.isNotBlank()) {                                   // a trail recorded with no internet goes up now
+                    val pts = kotlinx.serialization.json.JsonArray(queued.lines().filter { it.isNotBlank() }.mapNotNull { l ->
+                        val p = l.split(","); if (p.size < 5) null else kotlinx.serialization.json.buildJsonObject {
+                            put("lat", kotlinx.serialization.json.JsonPrimitive(p[0].toDoubleOrNull() ?: return@mapNotNull null)); put("lng", kotlinx.serialization.json.JsonPrimitive(p[1].toDoubleOrNull() ?: 0.0))
+                            put("acc", kotlinx.serialization.json.JsonPrimitive(p[2].toDoubleOrNull() ?: 0.0)); put("speed", kotlinx.serialization.json.JsonPrimitive(p[3].toDoubleOrNull() ?: 0.0)); put("at", kotlinx.serialization.json.JsonPrimitive(p[4].toDoubleOrNull() ?: 0.0))
+                        }
+                    })
+                    if (runCatching { hb.api.postLocations(pts) }.isSuccess) hb.store.saveText("trail", "")
+                }
+            }
+            .onFailure { e ->
+                if (e !is ApiError) {                                        // no internet: keep the point for later (the last 300)
+                    val line = "${fix.latitude},${fix.longitude},${fix.accuracy},${fix.speed},${now / 1000.0}"
+                    hb.store.saveText("trail", (hb.store.text("trail").lines().filter { it.isNotBlank() } + line).takeLast(300).joinToString("\n"))
+                }
+            }
     }
 
     private suspend fun eventLoop() {
@@ -288,6 +306,12 @@ class HomebaseService : Service() {
             "online" -> Notifications.post(this, Notifications.CH_MESSAGES, "✅ ${p.str("name")}'s phone is back online", "", "map")
             "critical" -> { app.state.refreshFamily(); withContext(Dispatchers.Main) { CriticalAlarm.start(this@HomebaseService, p.str("name")) } }
             "critical_ok" -> Notifications.post(this, Notifications.CH_ALERTS, "✅ ${p.str("name")} is OK", "They answered your Critical Check-In.", "map")
+            "ring" -> withContext(Dispatchers.Main) { CriticalAlarm.start(this@HomebaseService, p.str("name"), findPhone = true) }
+            "walk", "walk_done", "walk_late", "walk_still", "expect_ok", "expect_late", "speeding", "wallet", "wallet_request", "kudos", "bedtime", "homework_due" -> {
+                if (e.type.startsWith("walk")) app.state.refreshFamily()
+                val loud = e.type in setOf("walk_late", "walk_still", "expect_late", "speeding")
+                Notifications.post(this, if (loud) Notifications.CH_ALERTS else Notifications.CH_MESSAGES, p.str("title"), p.str("text"), if (e.type.startsWith("wallet")) "wallet" else if (e.type == "kudos") "kudos" else "map")
+            }
             "meals" -> app.state.refreshMeals()
             "meal_suggest" -> {
                 app.state.refreshMeals()

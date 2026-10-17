@@ -35,12 +35,12 @@ private fun ease(x: Float) = x * x * (3 - 2 * x)
 
 /**
  * The opening animation: a house, its door swings open on a warm light, we walk in, someone flops onto the couch,
- * and it all melts into "Mellow". About four seconds; a tap skips it.
+ * a happy "ahh", and it all melts into "Mellow". About eight seconds, taken slowly; a tap skips it.
  */
 @Composable
 fun SplashScreen(onDone: () -> Unit) {
     val p = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { p.animateTo(1f, tween(4000, easing = LinearEasing)); delay(300); onDone() }
+    LaunchedEffect(Unit) { p.animateTo(1f, tween(7500, easing = LinearEasing)); delay(600); onDone() }
     val t = p.value
     val ink = Ink
     val soft = Muted
@@ -118,6 +118,10 @@ fun SplashScreen(onDone: () -> Unit) {
                 drawRoundRect(soft.copy(alpha = room), Offset(px - cw * 0.02f, py - ch * 0.02f), Size(cw * 0.26f * sit + cw * 0.04f, ch * 0.12f), CornerRadius(14f))   // legs stretch out
             }
         }
+        // the sigh as they settle into the couch
+        val sigh = seg(t, 0.74f, 0.86f)
+        if (sigh > 0f && sigh < 1f) Text("ahh", Modifier.align(Alignment.Center).graphicsLayer { alpha = kotlin.math.sin(sigh * Math.PI.toFloat()); translationX = 140f; translationY = -260f - sigh * 60f },
+            fontFamily = FontFamily.Serif, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, fontSize = 30.sp, color = Ink)
         // ---- 3. "Mellow", in a relaxed hand
         val title = seg(t, 0.8f, 0.97f)
         Column(Modifier.align(Alignment.Center).graphicsLayer { alpha = title; translationY = (1f - title) * 60f }, horizontalAlignment = Alignment.CenterHorizontally) {

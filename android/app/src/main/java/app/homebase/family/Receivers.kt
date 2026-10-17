@@ -22,6 +22,7 @@ class ActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.hb
         when (intent.action) {
+            "ring_ok" -> CriticalAlarm.stop(context)
             "critical_ok" -> {
                 CriticalAlarm.stop(context)
                 val pending = goAsync()
