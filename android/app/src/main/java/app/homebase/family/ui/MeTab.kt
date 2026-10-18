@@ -158,6 +158,7 @@ fun MeTab(nav: Nav) {
                     if (!parent) { SectionLabel("Screen time"); ScreenTimeCard(nav) }
                 }
                 1 -> TileGrid(listOfNotNull(
+                    TileItem("📖", "Quran (Noor)", "Who read what, reading tasks") { nav.go(Screen.Noor) },
                     TileItem("💰", "Pocket money", "Wallet, requests, goals") { nav.go(Screen.Wallet) },
                     TileItem("📸", "Album", "Family photos") { nav.go(Screen.Album) },
                     TileItem("✅", "Jobs", "Points for helping") { nav.go(Screen.Chores) },

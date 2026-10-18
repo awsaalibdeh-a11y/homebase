@@ -33,6 +33,7 @@ sealed interface Screen {
     data object Album : Screen
     data object Kudos : Screen
     data object Homework : Screen
+    data object Noor : Screen
     data object Trusted : Screen
     data class Timeline(val member: Int) : Screen
     data object SafeBrowsing : Screen

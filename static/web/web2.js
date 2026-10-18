@@ -307,7 +307,8 @@ function moreHtml() {
 }
 function familyTabHtml() {
   const n = jobsAlert(), ra = rewardsAlert();
-  return accordion("wallet", "💰", "Pocket money", walletSub(), walletHtml())
+  return accordion("noor", "📖", "Quran (Noor)", noorSub(), noorHtml(), noorAlert())
+    + accordion("wallet", "💰", "Pocket money", walletSub(), walletHtml())
     + accordion("album", "📸", "Album", (S.album || []).length ? S.album.length + " photos" : "Family photos", albumHtml())
     + accordion("kudos", "⭐", "Kudos and badges", S.kudos && S.kudos.star ? "Star of the week: " + S.kudos.star.name : "Say thanks", kudosHtml())
     + accordion("homework", "📚", "Homework", (S.homework || []).filter(h => !h.done).length + " to do", homeworkHtml())
@@ -334,7 +335,7 @@ async function refreshV5() {
   const get = async (path, key, pick) => { try { const d = await api(path); S[key] = pick(d); } catch (e) { /* offline or not allowed */ } };
   await Promise.all([get("/api/wallet", "wallet", d => d.wallets), get("/api/album", "album", d => d.photos), get("/api/kudos", "kudos", d => d),
     get("/api/badges", "badges", d => d.badges), get("/api/homework", "homework", d => d.items), get("/api/trusted", "trusted", d => d.people),
-    get("/api/countdowns", "countdowns", d => d.countdowns), get("/api/weather", "weather", d => d)]);
+    get("/api/countdowns", "countdowns", d => d.countdowns), get("/api/weather", "weather", d => d), get("/api/noor/family", "noor", d => d)]);
   renderSide();
 }
 const money = c => (c < 0 ? "-" : "") + (Math.abs(c) / 100).toLocaleString(undefined, { style: "currency", currency: "GBP" }).replace("£", "") ;
@@ -361,6 +362,58 @@ function homeworkHtml() {
   return (S.homework || []).map(h => `<div class="item"><input type="checkbox" ${h.done ? "checked" : ""} data-hw="${h.id}"><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${esc(h.title)}</b><small>${esc([isParent() ? h.name : "", h.subject, "due " + dayLabel(h.due)].filter(Boolean).join(" · "))}</small></span></div>`).join("")
     + `<button class="btn sm" data-act="hwadd" style="margin-top:6px">＋ Add homework</button>`;
 }
+/* ---------- Quran (Noor): everyone's reading, and tasks parents give ---------- */
+const SURAHS_EN = ["Al-Fatihah","Al-Baqarah","Ali 'Imran","An-Nisa","Al-Ma'idah","Al-An'am","Al-A'raf","Al-Anfal","At-Tawbah","Yunus","Hud","Yusuf","Ar-Ra'd","Ibrahim","Al-Hijr","An-Nahl","Al-Isra","Al-Kahf","Maryam","Taha","Al-Anbiya","Al-Hajj","Al-Mu'minun","An-Nur","Al-Furqan","Ash-Shu'ara","An-Naml","Al-Qasas","Al-'Ankabut","Ar-Rum","Luqman","As-Sajdah","Al-Ahzab","Saba","Fatir","Ya-Sin","As-Saffat","Sad","Az-Zumar","Ghafir","Fussilat","Ash-Shura","Az-Zukhruf","Ad-Dukhan","Al-Jathiyah","Al-Ahqaf","Muhammad","Al-Fath","Al-Hujurat","Qaf","Adh-Dhariyat","At-Tur","An-Najm","Al-Qamar","Ar-Rahman","Al-Waqi'ah","Al-Hadid","Al-Mujadilah","Al-Hashr","Al-Mumtahanah","As-Saff","Al-Jumu'ah","Al-Munafiqun","At-Taghabun","At-Talaq","At-Tahrim","Al-Mulk","Al-Qalam","Al-Haqqah","Al-Ma'arij","Nuh","Al-Jinn","Al-Muzzammil","Al-Muddaththir","Al-Qiyamah","Al-Insan","Al-Mursalat","An-Naba","An-Nazi'at","'Abasa","At-Takwir","Al-Infitar","Al-Mutaffifin","Al-Inshiqaq","Al-Buruj","At-Tariq","Al-A'la","Al-Ghashiyah","Al-Fajr","Al-Balad","Ash-Shams","Al-Layl","Ad-Duha","Ash-Sharh","At-Tin","Al-'Alaq","Al-Qadr","Al-Bayyinah","Az-Zalzalah","Al-'Adiyat","Al-Qari'ah","At-Takathur","Al-'Asr","Al-Humazah","Al-Fil","Quraysh","Al-Ma'un","Al-Kawthar","Al-Kafirun","An-Nasr","Al-Masad","Al-Ikhlas","Al-Falaq","An-Nas"];
+const surahName = n => SURAHS_EN[n - 1] || ("Surah " + n);
+const KIND_WORD = { read: "Read", memorize: "Memorize", revise: "Revise" };
+function noorAlert() { const n = S.noor; if (!n) return 0; return n.tasks.filter(t => !t.done && t.to_id === S.me).length; }
+function noorSub() {
+  const n = S.noor; if (!n) return "Read the Quran together";
+  const linked = n.members.filter(m => m.linked).length, open = n.tasks.filter(t => !t.done).length;
+  return `${linked} of ${n.members.length} using Noor${open ? " · " + open + " task" + (open === 1 ? "" : "s") + " open" : ""}`;
+}
+function noorHtml() {
+  const n = S.noor; if (!n) return '<div class="empty">Loading…</div>';
+  const ago2 = t => t ? ago(t) : "";
+  const meLinked = (n.members.find(m => m.id === S.me) || {}).linked;
+  const people = n.members.map(m => { const s = m.stats || {}, last = s.last && s.last.s ? `${surahName(s.last.s)} ${s.last.s}:${s.last.a}` : "";
+    return `<div class="item" style="display:block"><b style="font-weight:600">${esc(m.emoji || "")} ${esc(m.name)}</b>${m.linked ? `<small style="float:right">${esc(ago2(m.synced))}</small>
+      <small style="display:block">🔥 ${s.streak || 0} days · ${s.today || 0} ayahs today${s.khatma ? ` · khatma ${s.khatma.done || 0}/${s.khatma.days || 0}` : ""}${s.hifz ? ` · ${s.hifz.surahs || 0} surahs memorized` : ""}</small>
+      ${last ? `<small style="display:block">Last read: ${esc(last)}</small>` : ""}${s.recite ? `<small style="display:block">Last recitation score: ${s.recite.score}%</small>` : ""}` : `<small style="display:block">Not using Noor yet</small>`}</div>`; }).join("");
+  const open = n.tasks.filter(t => !t.done), done = n.tasks.filter(t => t.done).slice(0, 6);
+  const task = t => `<div class="item"><span style="flex:1;min-width:0"><b style="display:block;font-weight:600">${KIND_WORD[t.kind] || "Read"} ${esc(surahName(t.surah))} ${t.from}–${t.upto}</b>
+    <small>${esc([isParent() ? "for " + t.to_name : "from " + t.by, t.note, t.due ? "by " + t.due : "", t.done ? "done " + ago2(t.done_at) + (t.score >= 0 ? " · " + t.score + "%" : "") : ""].filter(Boolean).join(" · "))}</small></span>
+    ${!t.done ? `<a class="btn sm" href="${esc(n.noor_url)}/#/s/${t.surah}/${t.from}" target="_blank" rel="noopener">Open</a>${t.to_id === S.me ? `<button class="btn sm solid" data-act="noordone" data-id="${t.id}">Done</button>` : ""}` : "✅"}
+    ${isParent() && !t.done ? `<button class="btn sm" data-act="noordel" data-id="${t.id}">✕</button>` : ""}</div>`;
+  return `<p class="tabhelp">${meLinked ? "Your Noor is linked." : "Link Noor, the Quran app, to share your reading with the family and get tasks."}</p>
+    <div class="pl-btns"><button class="btn sm ${meLinked ? "" : "solid"}" data-act="noorlink">${meLinked ? "Link Noor again" : "📖 Link Noor"}</button>${isParent() ? '<button class="btn sm solid" data-act="noortask">＋ Give a reading task</button>' : ""}</div>
+    <h4 style="margin:12px 0 4px">Tasks</h4>${open.map(task).join("") || '<div class="empty">No open tasks.</div>'}${done.length ? '<h4 style="margin:12px 0 4px">Finished</h4>' + done.map(task).join("") : ""}
+    <h4 style="margin:12px 0 4px">Who read what</h4>${people}`;
+}
+async function noorAct(act, id) {
+  const reload = async () => { try { S.noor = await api("/api/noor/family"); } catch (e) { /* offline */ } renderSide(); };
+  if (act === "noorlink") {
+    try { const r = await api("/api/noor/code", "POST"); window.open(r.url, "_blank", "noopener"); toast("Noor opened. Keep this page open; your link is ready."); } catch (e) { toast(e.message); }
+    return true;
+  }
+  if (act === "noortask") {
+    const kids = S.members.filter(m => m.id !== S.me);
+    const who = prompt("Who is it for? Type the name:\n" + S.members.map(m => m.name).join(", "), kids[0] ? kids[0].name : ""); if (who === null) return true;
+    const m = S.members.find(x => x.name.toLowerCase() === who.trim().toLowerCase()); if (!m) { toast("Nobody called " + who); return true; }
+    const kind = (prompt("Read, memorize or revise?", "read") || "").trim().toLowerCase(); if (!kind) return true;
+    const sq = (prompt("Which surah? (a number 1-114 or a name, like Al-Mulk)", "67") || "").trim(); if (!sq) return true;
+    let s = /^\d+$/.test(sq) ? +sq : SURAHS_EN.findIndex(x => x.toLowerCase().replace(/[^a-z]/g, "") === sq.toLowerCase().replace(/[^a-z]/g, "")) + 1;
+    if (!(s >= 1 && s <= 114)) { toast("I couldn't find that surah"); return true; }
+    const range = (prompt(`Which ayahs of ${surahName(s)}? (like 1-10, or leave empty for all)`, "") || "").trim();
+    const [a, b] = range ? range.split(/[-–]/).map(x => parseInt(x)) : [1, 999];
+    const note = prompt("A note? (optional)", "") || "";
+    try { await api("/api/noor/tasks", "POST", { to: m.id, kind: kind.startsWith("mem") ? "memorize" : kind.startsWith("rev") ? "revise" : "read", surah: s, from: a || 1, to_ayah: b || a || 999, note }); toast("Task sent to " + m.name); } catch (e) { toast(e.message); }
+    await reload(); return true;
+  }
+  if (act === "noordel") { if (confirm("Remove this task?")) { try { await api(`/api/noor/tasks/${id}`, "DELETE"); } catch (e) { toast(e.message); } await reload(); } return true; }
+  if (act === "noordone") { try { await api(`/api/noor/tasks/${id}/done`, "POST"); toast("Well done!"); } catch (e) { toast(e.message); } await reload(); return true; }
+  return false;
+}
 const FACES = ["", "😢", "😕", "😐", "🙂", "😄"];
 function moodCardHtml() { return `<section class="calcard"><h3>How are you feeling?</h3><div class="pl-btns">${[1, 2, 3, 4, 5].map(v => `<button class="btn" style="font-size:22px" data-act="mood" data-id="${v}">${FACES[v]}</button>`).join("")}</div><small>Your family sees it, unless you keep it private in the app.</small></section>`; }
 function weatherHtml() {
@@ -372,6 +425,7 @@ function countdownsHtml() {
   return `<section class="calcard"><h3>⏳ Counting down</h3>${c.slice(0, 4).map(x => { const d = Math.ceil((x.at - Date.now() / 1000) / 86400); return `<div class="item"><span style="flex:1">${esc(x.emoji)} ${esc(x.title)}</span><b>${d <= 0 ? "Today!" : d === 1 ? "Tomorrow" : d + " days"}</b></div>`; }).join("")}</section>`;
 }
 async function v5Act(act, id, el) {
+  if (act && act.startsWith("noor")) return noorAct(act, id);
   const ask = (q, d) => { const v = prompt(q, d || ""); return v === null ? null : v.trim(); };
   const run = async (fn, done) => { try { await fn(); if (done) toast(done); refreshV5(); } catch (e) { toast(e.message); } };
   if (act === "moretab") { S.moreTab = el.dataset.id; try { localStorage.setItem("hb_more", S.moreTab); } catch (e) { /* ignore */ } renderSide(); return true; }
@@ -547,3 +601,13 @@ function hb2Boot() {
     const gm = $("#gameBtn"); if (gm) gm.onclick = gameDialog; const gb = $("#gifBtn"); if (gb) gb.onclick = gifPicker; const sb = $("#bSearch"); if (sb) sb.onclick = searchDialog;
   }
 }
+
+/* Noor asks to link: Mellow makes a one-time code and sends you back to Noor with it */
+(function noorLinkFromHash() {
+  if (location.hash !== "#noorlink") return;
+  const go = async (tries) => {
+    if (!S.token) { if (tries === 0) toast("Sign in to Mellow, then Noor will be linked."); if (tries < 120) setTimeout(() => go(tries + 1), 1500); return; }
+    try { const r = await api("/api/noor/code", "POST"); history.replaceState(null, "", location.pathname); location.href = r.url; } catch (e) { toast(e.message); }
+  };
+  setTimeout(() => go(0), 600);
+})();

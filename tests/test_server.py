@@ -2646,5 +2646,47 @@ class StuckCalls(Base):
         self.assertEqual(self.post(self.mum, "/api/calls", to=self.kid_id, offer="o").status_code, 200, "but not after hours with nobody hanging up")
 
 
+class NoorQuran(Base):
+    def link(self, who):
+        code = self.post(who, "/api/noor/code").get_json()["code"]
+        r = self.c.post("/api/noor-app/exchange", json={"code": code})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.c.post("/api/noor-app/exchange", json={"code": code}).status_code, 400, "a code works once")
+        return {"Authorization": "Bearer " + r.get_json()["token"]}
+
+    def test_link_sync_and_family_sees_progress(self):
+        kn = self.link(self.kid)
+        r = self.c.post("/api/noor-app/sync", headers=kn, json={"stats": {"streak": 4, "today": 12, "last": {"s": 18, "a": 10}, "secret": "x"}, "data": {"bookmarks": [1]}})
+        self.assertEqual(r.status_code, 200)
+        fam = self.get(self.mum, "/api/noor/family").get_json()
+        kid = [m for m in fam["members"] if m["id"] == self.kid_id][0]
+        self.assertTrue(kid["linked"])
+        self.assertEqual(kid["stats"]["streak"], 4)
+        self.assertNotIn("secret", kid["stats"])
+        self.assertEqual(self.c.get("/api/noor-app/data", headers=kn).get_json()["data"], {"bookmarks": [1]})
+
+    def test_parent_gives_task_child_finishes_with_score(self):
+        kn = self.link(self.kid)
+        self.assertEqual(self.post(self.kid, "/api/noor/tasks", to=self.kid_id, kind="read", surah=67).status_code, 403, "children cannot give tasks")
+        r = self.post(self.mum, "/api/noor/tasks", to=self.kid_id, kind="memorize", surah=67, **{"from": 1, "to_ayah": 999}, note="By Friday")
+        self.assertEqual(r.status_code, 200)
+        tasks = self.c.get("/api/noor-app/family", headers=kn).get_json()["tasks"]
+        self.assertEqual((tasks[0]["surah"], tasks[0]["from"], tasks[0]["upto"], tasks[0]["kind"]), (67, 1, 30, "memorize"), "ayahs are kept inside the surah")
+        self.assertEqual(self.c.post(f"/api/noor-app/tasks/{tasks[0]['id']}/done", headers=kn, json={"score": 92}).status_code, 200)
+        t = self.get(self.mum, "/api/noor/family").get_json()["tasks"][0]
+        self.assertTrue(t["done"])
+        self.assertEqual(t["score"], 92)
+        feed = self.get(self.mum, "/api/feed").get_json()["items"]
+        self.assertTrue(any("memorized surah 67" in i["body"] for i in feed), "the family hears about it")
+
+    def test_bad_keys_and_other_families(self):
+        self.assertEqual(self.c.get("/api/noor-app/family", headers={"Authorization": "Bearer hbn_nope"}).status_code, 401)
+        self.assertEqual(self.c.post("/api/noor-app/exchange", json={"code": "nope"}).status_code, 400)
+        r = self.c.get("/api/noor-app/family", headers={"Origin": "https://noor-quran-xuzt.onrender.com", "Authorization": "Bearer hbn_nope"})
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "https://noor-quran-xuzt.onrender.com")
+        r = self.c.get("/api/noor-app/family", headers={"Origin": "https://evil.example", "Authorization": "Bearer hbn_nope"})
+        self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))
+
+
 if __name__ == "__main__":
     unittest.main()

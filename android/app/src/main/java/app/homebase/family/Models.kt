@@ -438,4 +438,15 @@ data class RecipesResp(val recipes: List<Recipe> = emptyList(), val tags: List<R
 @Serializable data class TrustedResp(val people: List<Trusted> = emptyList())
 @Serializable data class Homework(val id: Int, val member: Int = 0, val name: String = "", val subject: String = "", val title: String = "", val due: String = "", val done: Boolean = false)
 @Serializable data class HomeworkResp(val items: List<Homework> = emptyList())
+@Serializable data class NoorLast(val s: Int = 0, val a: Int = 0)
+@Serializable data class NoorKhatma(val days: Int = 0, val done: Int = 0)
+@Serializable data class NoorHifz(val surahs: Int = 0, val ayahs: Int = 0)
+@Serializable data class NoorRecite(val score: Int = 0, val s: Int = 0)
+@Serializable data class NoorStats(val streak: Int = 0, val best: Int = 0, val today: Int = 0, val last: NoorLast? = null, val khatma: NoorKhatma? = null, val hifz: NoorHifz? = null, val recite: NoorRecite? = null)
+@Serializable data class NoorPerson(val id: Int, val name: String = "", val emoji: String = "", val role: String = "", val linked: Boolean = false, val synced: Double = 0.0, val stats: NoorStats = NoorStats())
+@Serializable data class NoorTask(val id: Int, val kind: String = "read", val surah: Int = 1, val from: Int = 1, val upto: Int = 1, val note: String = "", val due: String = "",
+                                  val by: String = "", @SerialName("by_id") val byId: Int = 0, @SerialName("to_id") val toId: Int = 0, @SerialName("to_name") val toName: String = "",
+                                  val done: Boolean = false, @SerialName("done_at") val doneAt: Double = 0.0, val score: Int = -1)
+@Serializable data class NoorFamily(val members: List<NoorPerson> = emptyList(), val tasks: List<NoorTask> = emptyList(), val me: Int = 0, val role: String = "", @SerialName("noor_url") val noorUrl: String = "")
+@Serializable data class NoorCode(val code: String = "", val url: String = "")
 @Serializable data class UrlResp(val url: String = "")

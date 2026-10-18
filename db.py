@@ -142,6 +142,16 @@ integrations = Table("integrations", meta,                                # an a
 game_links = Table("game_links", meta,                                    # a one-time link for starting a family game (Alibi) from the chat: the game uses it once to post its code
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("member_id", Integer),
     Column("token_hash", String(64), unique=True), Column("game", String(12)), Column("created", Float), Column("expires", Float), Column("used", Boolean, default=False))
+noor_links = Table("noor_links", meta,                                    # a member's Noor (Quran app) linked to their account: its own key, their reading progress
+    Column("id", Integer, primary_key=True), Column("member_id", Integer, index=True), Column("family_id", Integer, index=True),
+    Column("token_hash", String(64), unique=True), Column("created", Float), Column("last_used", Float, default=0),
+    Column("stats", Text, default=""), Column("data", Text, default=""), Column("synced", Float, default=0))
+noor_codes = Table("noor_codes", meta,                                    # a one-time code that links Noor (10 minutes)
+    Column("id", Integer, primary_key=True), Column("member_id", Integer), Column("code_hash", String(64), unique=True), Column("expires", Float), Column("used", Boolean, default=False))
+noor_tasks = Table("noor_tasks", meta,                                    # a parent asks someone to read or memorize a passage
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("by_id", Integer), Column("to_id", Integer, index=True),
+    Column("kind", String(10)), Column("surah", Integer), Column("ayah_from", Integer), Column("ayah_to", Integer), Column("note", String(200), default=""),
+    Column("due", String(10), default=""), Column("created", Float), Column("done_at", Float, default=0), Column("score", Integer, default=-1))
 friend_groups = Table("friend_groups", meta,                              # a group of friends: separate from the family, but a child's parents can read it
     Column("id", Integer, primary_key=True), Column("name", String(40)), Column("emoji", String(8), default="\U0001F465"), Column("code", String(10), unique=True),
     Column("created_by", Integer), Column("created", Float))

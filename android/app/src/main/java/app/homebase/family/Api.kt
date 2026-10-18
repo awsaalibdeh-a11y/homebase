@@ -231,6 +231,13 @@ class Api(private val store: Store) {
     suspend fun addTrusted(name: String, phone: String, relation: String) { raw("POST", "/api/trusted", obj { put("name", name); put("phone", phone); put("relation", relation) }) }
     suspend fun dropTrusted(id: Int) { raw("DELETE", "/api/trusted/$id") }
     suspend fun homework(): List<Homework> = ask<HomeworkResp>("GET", "/api/homework").items
+    suspend fun noorFamily(): NoorFamily = ask("GET", "/api/noor/family")
+    suspend fun noorCode(): NoorCode = ask("POST", "/api/noor/code")
+    suspend fun noorAddTask(to: Int, kind: String, surah: Int, from: Int, upto: Int, note: String) {
+        raw("POST", "/api/noor/tasks", obj { put("to", to); put("kind", kind); put("surah", surah); put("from", from); put("to_ayah", upto); put("note", note) })
+    }
+    suspend fun noorDropTask(id: Int) { raw("DELETE", "/api/noor/tasks/$id") }
+    suspend fun noorTaskDone(id: Int) { raw("POST", "/api/noor/tasks/$id/done") }
     suspend fun addHomework(title: String, subject: String, due: String, member: Int? = null) { raw("POST", "/api/homework", obj { put("title", title); put("subject", subject); put("due", due); if (member != null) put("member", member) }) }
     suspend fun tickHomework(id: Int, done: Boolean) { raw("POST", "/api/homework/$id", obj { put("done", done) }) }
     suspend fun dropHomework(id: Int) { raw("DELETE", "/api/homework/$id") }

@@ -604,3 +604,100 @@ fun AgeDialog(onDone: () -> Unit) {
         confirmButton = { TextButton({ val d = date ?: return@TextButton; go(ctx, "Saved 🎂", { ctx.hb.api.setBirthday(d.monthValue, d.dayOfMonth, d.year) }) { ctx.hb.state.refreshFamily() }; onDone() }, enabled = date != null) { Text("Save") } },
         dismissButton = { TextButton(onDone) { Text("Not now") } })
 }
+
+
+// ================================================================ Quran (Noor): who read what, and reading tasks from parents
+private val SURAH_NAMES = listOf("Al-Fatihah","Al-Baqarah","Ali 'Imran","An-Nisa","Al-Ma'idah","Al-An'am","Al-A'raf","Al-Anfal","At-Tawbah","Yunus","Hud","Yusuf","Ar-Ra'd","Ibrahim","Al-Hijr","An-Nahl","Al-Isra","Al-Kahf","Maryam","Taha","Al-Anbiya","Al-Hajj","Al-Mu'minun","An-Nur","Al-Furqan","Ash-Shu'ara","An-Naml","Al-Qasas","Al-'Ankabut","Ar-Rum","Luqman","As-Sajdah","Al-Ahzab","Saba","Fatir","Ya-Sin","As-Saffat","Sad","Az-Zumar","Ghafir","Fussilat","Ash-Shura","Az-Zukhruf","Ad-Dukhan","Al-Jathiyah","Al-Ahqaf","Muhammad","Al-Fath","Al-Hujurat","Qaf","Adh-Dhariyat","At-Tur","An-Najm","Al-Qamar","Ar-Rahman","Al-Waqi'ah","Al-Hadid","Al-Mujadilah","Al-Hashr","Al-Mumtahanah","As-Saff","Al-Jumu'ah","Al-Munafiqun","At-Taghabun","At-Talaq","At-Tahrim","Al-Mulk","Al-Qalam","Al-Haqqah","Al-Ma'arij","Nuh","Al-Jinn","Al-Muzzammil","Al-Muddaththir","Al-Qiyamah","Al-Insan","Al-Mursalat","An-Naba","An-Nazi'at","'Abasa","At-Takwir","Al-Infitar","Al-Mutaffifin","Al-Inshiqaq","Al-Buruj","At-Tariq","Al-A'la","Al-Ghashiyah","Al-Fajr","Al-Balad","Ash-Shams","Al-Layl","Ad-Duha","Ash-Sharh","At-Tin","Al-'Alaq","Al-Qadr","Al-Bayyinah","Az-Zalzalah","Al-'Adiyat","Al-Qari'ah","At-Takathur","Al-'Asr","Al-Humazah","Al-Fil","Quraysh","Al-Ma'un","Al-Kawthar","Al-Kafirun","An-Nasr","Al-Masad","Al-Ikhlas","Al-Falaq","An-Nas")
+private val SURAH_AYAHS = listOf(7, 286, 200, 176, 120, 165, 206, 75, 129, 109, 123, 111, 43, 52, 99, 128, 111, 110, 98, 135, 112, 78, 118, 64, 77, 227, 93, 88, 69, 60, 34, 30, 73, 54, 45, 83, 182, 88, 75, 85, 54, 53, 89, 59, 37, 35, 38, 29, 18, 45, 60, 49, 62, 55, 78, 96, 29, 22, 24, 13, 14, 11, 11, 18, 12, 12, 30, 52, 52, 44, 28, 28, 20, 56, 40, 31, 50, 40, 46, 42, 29, 19, 36, 25, 22, 17, 19, 26, 30, 20, 15, 21, 11, 8, 8, 19, 5, 8, 8, 11, 11, 8, 3, 9, 5, 4, 7, 3, 6, 3, 5, 4, 5, 6)
+private fun surahName(n: Int) = SURAH_NAMES.getOrNull(n - 1) ?: "Surah $n"
+private fun kindWord(k: String) = when (k) { "memorize" -> "Memorize"; "revise" -> "Revise"; else -> "Read" }
+
+@Composable
+fun NoorScreen(nav: Nav) {
+    val ctx = LocalContext.current
+    val parent = ctx.hb.store.isParent
+    val me = ctx.hb.store.myId
+    var data by remember { mutableStateOf<app.homebase.family.NoorFamily?>(null) }
+    var round by remember { mutableIntStateOf(0) }
+    var adding by remember { mutableStateOf(false) }
+    LaunchedEffect(round) { data = runCatching { ctx.hb.api.noorFamily() }.getOrNull() ?: app.homebase.family.NoorFamily() }
+    val open = { url: String -> runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
+    Page(nav, "Quran (Noor)", "Noor is the family's Quran app. See who read what, and " + (if (parent) "give reading and memorizing tasks." else "do the tasks your parents give.")) {
+        val d = data
+        if (d == null) { CenterNote("Loading…"); return@Page }
+        val mine = d.members.firstOrNull { it.id == me }
+        SoftCard {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (mine?.linked == true) "Your Noor is linked." else "Link Noor to share your reading with the family and get tasks.", color = Muted, fontSize = 14.sp)
+                BigButton(if (mine?.linked == true) "Link Noor again" else "📖 Link Noor") { go(ctx, "", { val c = ctx.hb.api.noorCode(); open(c.url) }) }
+                if (d.noorUrl.isNotBlank()) SoftButton("Open Noor") { open(d.noorUrl) }
+            }
+        }
+        if (parent) BigButton("＋ Give a reading task") { adding = true }
+        val todo = d.tasks.filter { !it.done }
+        SectionLabel("Tasks")
+        if (todo.isEmpty()) CenterNote("No open tasks.")
+        (todo + d.tasks.filter { it.done }.take(6)).forEach { t ->
+            SoftCard {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${kindWord(t.kind)} ${surahName(t.surah)} ${t.from}–${t.upto}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, color = if (t.done) Muted else Ink)
+                        if (t.done) Text("✅")
+                    }
+                    Text(listOf(if (parent) "for ${t.toName}" else "from ${t.by}", t.note, if (t.due.isNotBlank()) "by ${t.due}" else "",
+                        if (t.done) "done " + timeAgo(t.doneAt) + (if (t.score >= 0) " · ${t.score}%" else "") else "").filter { it.isNotBlank() }.joinToString(" · "), color = Muted, fontSize = 13.sp)
+                    if (!t.done) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TextButton({ open("${d.noorUrl}/#/s/${t.surah}/${t.from}") }) { Text("Open in Noor") }
+                        if (t.toId == me) TextButton({ go(ctx, "Well done!", { ctx.hb.api.noorTaskDone(t.id) }) { round++ } }) { Text("Done") }
+                        if (parent) TextButton({ go(ctx, "Removed", { ctx.hb.api.noorDropTask(t.id) }) { round++ } }) { Text("Remove", color = Rose) }
+                    }
+                }
+            }
+        }
+        SectionLabel("Who read what")
+        d.members.forEach { p ->
+            SoftCard {
+                Column {
+                    Text("${p.emoji} ${p.name}", style = MaterialTheme.typography.titleMedium)
+                    val s = p.stats
+                    if (!p.linked) Text("Not using Noor yet", color = Muted, fontSize = 13.sp)
+                    else {
+                        Text("🔥 ${s.streak} days · ${s.today} ayahs today" + (s.khatma?.let { " · khatma ${it.done}/${it.days}" } ?: "") + (s.hifz?.let { if (it.surahs > 0) " · ${it.surahs} surahs memorized" else "" } ?: ""), color = Muted, fontSize = 13.sp)
+                        s.last?.let { if (it.s > 0) Text("Last read: ${surahName(it.s)} ${it.s}:${it.a}", color = Muted, fontSize = 13.sp) }
+                        s.recite?.let { Text("Last recitation: ${it.score}%", color = Muted, fontSize = 13.sp) }
+                        if (p.synced > 0) Text("Updated " + timeAgo(p.synced), color = Muted, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+    if (adding) {
+        val others = data?.members.orEmpty().filter { it.id != me }
+        var who by remember { mutableIntStateOf(others.firstOrNull()?.id ?: 0) }
+        var kind by remember { mutableStateOf("read") }
+        var surah by remember { mutableIntStateOf(67) }
+        var from by remember { mutableStateOf("1") }
+        var upto by remember { mutableStateOf(SURAH_AYAHS[66].toString()) }
+        var note by remember { mutableStateOf("") }
+        var query by remember { mutableStateOf("") }
+        AlertDialog(onDismissRequest = { adding = false }, containerColor = Surface, title = { Text("Give a reading task") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { others.forEach { k -> Pill(k.name, who == k.id) { who = k.id } } }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("read", "memorize", "revise").forEach { k -> Pill(kindWord(k), kind == k) { kind = k } } }
+                    OutlinedTextField(query, { query = it.take(30) }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Surah: ${surah}. ${surahName(surah)} (type to change)") })
+                    if (query.isNotBlank()) {
+                        val hits = SURAH_NAMES.mapIndexed { i, n -> i + 1 to n }.filter { (i, n) -> n.contains(query, true) || i.toString() == query.trim() }.take(6)
+                        hits.forEach { (i, n) -> TextButton({ surah = i; from = "1"; upto = SURAH_AYAHS[i - 1].toString(); query = "" }) { Text("$i. $n") } }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(from, { from = it.filter(Char::isDigit).take(3) }, Modifier.weight(1f), singleLine = true, label = { Text("From ayah") })
+                        OutlinedTextField(upto, { upto = it.filter(Char::isDigit).take(3) }, Modifier.weight(1f), singleLine = true, label = { Text("To ayah") })
+                    }
+                    OutlinedTextField(note, { note = it.take(200) }, Modifier.fillMaxWidth(), placeholder = { Text("A note (optional)") })
+                }
+            },
+            confirmButton = { TextButton({ if (who != 0) { go(ctx, "Task sent", { ctx.hb.api.noorAddTask(who, kind, surah, from.toIntOrNull() ?: 1, upto.toIntOrNull() ?: 999, note.trim()) }) { round++ }; adding = false } }) { Text("Send") } },
+            dismissButton = { TextButton({ adding = false }) { Text("Cancel") } })
+    }
+}

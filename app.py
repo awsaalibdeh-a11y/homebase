@@ -28,9 +28,14 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "16"))      # what Android compares (a plain counter)
-VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.2")           # what people see: a whole number is a big update, a decimal is a small one
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "17"))      # what Android compares (a plain counter)
+VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.3")           # what people see: a whole number is a big update, a decimal is a small one
 CHANGELOG = [                                                         # newest first; shown on the install and update page
+    {"v": "6.3", "date": "18 Oct 2026", "title": "Quran together, with Noor", "items": [
+        "New in More → Family: Quran (Noor). See what everyone in the family read in Noor, the Quran app: their streak, today's ayahs, last ayah, memorized surahs and recitation scores.",
+        "Parents can give reading, memorizing and revising tasks for any surah and ayahs. They show up in Noor, and the family hears when one is done, with the recitation score.",
+        "Link Noor to your Mellow account in one tap, so a new phone gets your Noor progress back.",
+    ]},
     {"v": "6.2", "date": "18 Oct 2026", "title": "The map really loads now", "items": [
         "Fixed the map staying blank: it opened far away and slid across to your family, downloading hundreds of map pieces on the way, so yours never arrived. It now opens straight on your family.",
         "New people are no longer told \"Homebase has a new name\" when they never used Homebase.",
@@ -4374,6 +4379,257 @@ def download():
     if not os.path.exists(os.path.join(path, "homebase.apk")):
         return err("The app file is not uploaded yet.", 404)
     return send_from_directory(path, "homebase.apk", as_attachment=True, mimetype="application/vnd.android.package-archive")
+
+
+# ---------------------------------------------------------------- Noor, the Quran app: linked accounts, reading progress, tasks from parents
+NOOR_URL = os.environ.get("NOOR_URL", "https://noor-quran-xuzt.onrender.com").rstrip("/")
+NOOR_ORIGINS = {NOOR_URL, "http://localhost:5185", "http://127.0.0.1:5185"}
+SURAH_AYAHS = [7, 286, 200, 176, 120, 165, 206, 75, 129, 109, 123, 111, 43, 52, 99, 128, 111, 110, 98, 135, 112, 78, 118, 64, 77, 227, 93, 88, 69, 60, 34, 30, 73, 54, 45, 83, 182, 88, 75, 85, 54, 53, 89, 59, 37, 35, 38, 29, 18, 45, 60, 49, 62, 55, 78, 96, 29, 22, 24, 13, 14, 11, 11, 18, 12, 12, 30, 52, 52, 44, 28, 28, 20, 56, 40, 31, 50, 40, 46, 42, 29, 19, 36, 25, 22, 17, 19, 26, 30, 20, 15, 21, 11, 8, 8, 19, 5, 8, 8, 11, 11, 8, 3, 9, 5, 4, 7, 3, 6, 3, 5, 4, 5, 6]
+
+
+def noor_member():
+    """The member a Noor key belongs to, and the link row; or (None, None)."""
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not token.startswith("hbn_"):
+        return None, None
+    row = db.one(select(db.noor_links).where(db.noor_links.c.token_hash == db.hash_token(token)))
+    if not row:
+        return None, None
+    m = db.one(select(db.members).where(db.members.c.id == row["member_id"]))
+    if not m:
+        return None, None
+    if time.time() - (row["last_used"] or 0) > 60:
+        db.run(update(db.noor_links).where(db.noor_links.c.id == row["id"]).values(last_used=time.time()))
+    return m, row
+
+
+def noor_need(fn):
+    def wrapped(*a, **k):
+        m, row = noor_member()
+        if not m:
+            return err("This Noor link is not valid any more. Link Noor again from Mellow.", 401)
+        g.m, g.noor = m, row
+        return fn(*a, **k)
+    wrapped.__name__ = fn.__name__
+    return wrapped
+
+
+@app.after_request
+def noor_cors(resp):
+    origin = request.headers.get("Origin", "")
+    if request.path.startswith("/api/noor-app/") and origin in NOOR_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+        resp.headers["Access-Control-Max-Age"] = "600"
+        resp.headers["Vary"] = "Origin"
+    return resp
+
+
+@app.route("/api/noor-app/<path:rest>", methods=["OPTIONS"])
+def noor_preflight(rest):
+    return app.response_class("", status=204)
+
+
+def task_view(t, names):
+    return {"id": t["id"], "kind": t["kind"], "surah": t["surah"], "from": t["ayah_from"], "upto": t["ayah_to"], "note": t["note"] or "", "due": t["due"] or "",
+            "by": names.get(t["by_id"], ""), "by_id": t["by_id"], "to_id": t["to_id"], "to_name": names.get(t["to_id"], ""), "created": t["created"],
+            "done": bool(t["done_at"]), "done_at": t["done_at"] or 0, "score": t["score"] if t["score"] is not None else -1}
+
+
+def noor_family(m):
+    """Everyone in the family with their Noor progress (if linked), and the family's reading tasks."""
+    people = family_members(m["family_id"])
+    names = {p["id"]: p["name"] for p in people}
+    links = {r["member_id"]: r for r in db.many(select(db.noor_links).where(db.noor_links.c.family_id == m["family_id"]))}
+    out = []
+    for p in people:
+        r = links.get(p["id"])
+        try:
+            st = json.loads(r["stats"]) if r and r["stats"] else {}
+        except ValueError:
+            st = {}
+        out.append({"id": p["id"], "name": p["name"], "emoji": p["emoji"], "role": p["role"], "linked": bool(r), "synced": (r or {}).get("synced") or 0, "stats": st})
+    rows = db.many(select(db.noor_tasks).where(db.noor_tasks.c.family_id == m["family_id"]).order_by(db.noor_tasks.c.id.desc()).limit(80))
+    if m["role"] != "parent":
+        rows = [t for t in rows if t["to_id"] == m["id"] or t["by_id"] == m["id"]]
+    return {"members": out, "tasks": [task_view(t, names) for t in rows], "me": m["id"], "role": m["role"], "noor_url": NOOR_URL}
+
+
+def make_task(m, d):
+    if m["role"] != "parent":
+        return None, err("Only a parent can give reading tasks.", 403)
+    who = db.one(select(db.members).where(db.members.c.id == int(d.get("to") or 0))) if str(d.get("to") or "").isdigit() else None
+    if not who or who["family_id"] != m["family_id"]:
+        return None, err("Pick someone in your family.")
+    kind = d.get("kind") if d.get("kind") in ("read", "memorize", "revise") else "read"
+    s = int(d.get("surah") or 0) if str(d.get("surah") or "").isdigit() else 0
+    if not 1 <= s <= 114:
+        return None, err("Pick a surah.")
+    n = SURAH_AYAHS[s - 1]
+    a = max(1, min(n, int(d.get("from") or 1) if str(d.get("from") or "1").isdigit() else 1))
+    b = max(a, min(n, int(d.get("to_ayah") or n) if str(d.get("to_ayah") or n).isdigit() else n))
+    open_ = db.many(select(db.noor_tasks).where(db.noor_tasks.c.family_id == m["family_id"], db.noor_tasks.c.done_at == 0))
+    if len(open_) >= 60:
+        return None, err("There are a lot of open tasks. Finish or remove some first.")
+    due = str(d.get("due") or "")[:10]
+    tid = db.run(insert(db.noor_tasks).values(family_id=m["family_id"], by_id=m["id"], to_id=who["id"], kind=kind, surah=s, ayah_from=a, ayah_to=b,
+                                              note=str(d.get("note") or "")[:200], due=due if re.match(r"^\d{4}-\d{2}-\d{2}$", due) else "", created=time.time()))
+    verb = {"read": "read", "memorize": "memorize", "revise": "revise"}[kind]
+    push(who["id"], "noor_task", {"id": tid, "name": m["name"], "kind": kind, "surah": s, "from": a, "to": b})
+    say(m["family_id"], 0, f"\U0001F4D6 {m['name']} asked {who['name']} to {verb} surah {s}, ayahs {a}-{b}")
+    return tid, None
+
+
+def finish_task(m, tid, score=-1):
+    t = db.one(select(db.noor_tasks).where(db.noor_tasks.c.id == tid))
+    if not t or t["family_id"] != m["family_id"] or (t["to_id"] != m["id"] and m["role"] != "parent"):
+        return err("That task is not yours.", 404)
+    if t["done_at"]:
+        return jsonify(ok=True)
+    score = score if isinstance(score, int) and 0 <= score <= 100 else -1
+    db.run(update(db.noor_tasks).where(db.noor_tasks.c.id == tid).values(done_at=time.time(), score=score))
+    who = db.one(select(db.members).where(db.members.c.id == t["to_id"]))
+    verb = {"read": "read", "memorize": "memorized", "revise": "revised"}.get(t["kind"], "read")
+    say(m["family_id"], 0, f"\u2705 {who['name']} {verb} surah {t['surah']}, ayahs {t['ayah_from']}-{t['ayah_to']}" + (f" (score {score}%)" if score >= 0 else ""))
+    push(t["by_id"], "noor_done", {"id": tid, "name": who["name"]})
+    return jsonify(ok=True)
+
+
+# --- from Mellow (the family's own sign-in)
+@app.post("/api/noor/code")
+@need
+def noor_code():
+    """A one-time code that links Noor to this account. The page that opens Noor is built here, so the code only ever goes to Noor."""
+    if limited(f"noorcode:{g.m['id']}", 20):
+        return err("Slow down a little.", 429)
+    code = secrets.token_urlsafe(18)
+    db.run(insert(db.noor_codes).values(member_id=g.m["id"], code_hash=db.hash_token(code), expires=time.time() + 600))
+    return jsonify(code=code, url=f"{NOOR_URL}/#/account?c={code}", short=code[:8])
+
+
+@app.get("/api/noor/family")
+@need
+def noor_family_get():
+    return jsonify(noor_family(g.m))
+
+
+@app.post("/api/noor/tasks")
+@need
+def noor_task_add():
+    tid, bad = make_task(g.m, request.get_json(silent=True) or {})
+    return bad if bad else jsonify(ok=True, id=tid)
+
+
+@app.delete("/api/noor/tasks/<int:tid>")
+@parent_only
+def noor_task_del(tid):
+    t = db.one(select(db.noor_tasks).where(db.noor_tasks.c.id == tid))
+    if not t or t["family_id"] != g.m["family_id"]:
+        return err("Not found.", 404)
+    db.run(delete(db.noor_tasks).where(db.noor_tasks.c.id == tid))
+    return jsonify(ok=True)
+
+
+@app.post("/api/noor/tasks/<int:tid>/done")
+@need
+def noor_task_done(tid):
+    return finish_task(g.m, tid)
+
+
+@app.delete("/api/noor/link")
+@need
+def noor_unlink_mine():
+    db.run(delete(db.noor_links).where(db.noor_links.c.member_id == g.m["id"]))
+    return jsonify(ok=True)
+
+
+# --- from Noor (its own key, made from the one-time code)
+@app.post("/api/noor-app/exchange")
+def noor_exchange():
+    d = request.get_json(silent=True) or {}
+    code = str(d.get("code") or "")
+    if limited(f"noorx:{request.remote_addr}", 30):
+        return err("Slow down a little.", 429)
+    c = db.one(select(db.noor_codes).where(db.noor_codes.c.code_hash == db.hash_token(code))) if code else None
+    if not c or c["used"] or c["expires"] < time.time():
+        return err("This link has expired. Open Mellow and link Noor again.", 400)
+    db.run(update(db.noor_codes).where(db.noor_codes.c.id == c["id"]).values(used=True))
+    m = db.one(select(db.members).where(db.members.c.id == c["member_id"]))
+    if not m:
+        return err("That account is gone.", 400)
+    db.run(delete(db.noor_links).where(db.noor_links.c.member_id == m["id"]))          # one Noor per person: linking again replaces the old one
+    token = "hbn_" + secrets.token_urlsafe(32)
+    db.run(insert(db.noor_links).values(member_id=m["id"], family_id=m["family_id"], token_hash=db.hash_token(token), created=time.time(), last_used=time.time()))
+    fam = db.one(select(db.families).where(db.families.c.id == m["family_id"]))
+    say(m["family_id"], 0, f"\U0001F4D6 {m['name']} linked Noor, the Quran app")
+    return jsonify(token=token, me={"id": m["id"], "name": m["name"], "emoji": m["emoji"], "role": m["role"]}, family=fam["name"] if fam else "")
+
+
+@app.get("/api/noor-app/family")
+@noor_need
+def noor_app_family():
+    fam = db.one(select(db.families).where(db.families.c.id == g.m["family_id"]))
+    out = noor_family(g.m)
+    out.update(family=fam["name"] if fam else "", my={"id": g.m["id"], "name": g.m["name"], "emoji": g.m["emoji"], "role": g.m["role"]})
+    return jsonify(out)
+
+
+@app.post("/api/noor-app/sync")
+@noor_need
+def noor_app_sync():
+    """Noor sends a short summary for the family to see, and (optionally) its saved data, so a new phone can pick up where the old one stopped."""
+    d = request.get_json(silent=True) or {}
+    stats = d.get("stats") if isinstance(d.get("stats"), dict) else {}
+    keep = {k: stats[k] for k in ("streak", "best", "today", "day", "week", "last", "khatma", "hifz", "recite", "total", "goal") if k in stats}
+    vals = {"stats": json.dumps(keep, ensure_ascii=False)[:4000], "synced": time.time()}
+    if isinstance(d.get("data"), (dict, list)):
+        blob = json.dumps(d["data"], ensure_ascii=False)
+        if len(blob) > 300_000:
+            return err("Too much to save.", 413)
+        vals["data"] = blob
+    db.run(update(db.noor_links).where(db.noor_links.c.id == g.noor["id"]).values(**vals))
+    return jsonify(ok=True)
+
+
+@app.get("/api/noor-app/data")
+@noor_need
+def noor_app_data():
+    try:
+        return jsonify(data=json.loads(g.noor["data"]) if g.noor["data"] else None)
+    except ValueError:
+        return jsonify(data=None)
+
+
+@app.post("/api/noor-app/tasks")
+@noor_need
+def noor_app_task_add():
+    tid, bad = make_task(g.m, request.get_json(silent=True) or {})
+    return bad if bad else jsonify(ok=True, id=tid)
+
+
+@app.delete("/api/noor-app/tasks/<int:tid>")
+@noor_need
+def noor_app_task_del(tid):
+    t = db.one(select(db.noor_tasks).where(db.noor_tasks.c.id == tid))
+    if g.m["role"] != "parent" or not t or t["family_id"] != g.m["family_id"]:
+        return err("Not allowed.", 403)
+    db.run(delete(db.noor_tasks).where(db.noor_tasks.c.id == tid))
+    return jsonify(ok=True)
+
+
+@app.post("/api/noor-app/tasks/<int:tid>/done")
+@noor_need
+def noor_app_task_done(tid):
+    d = request.get_json(silent=True) or {}
+    return finish_task(g.m, tid, d.get("score") if isinstance(d.get("score"), int) else -1)
+
+
+@app.delete("/api/noor-app/link")
+@noor_need
+def noor_app_unlink():
+    db.run(delete(db.noor_links).where(db.noor_links.c.id == g.noor["id"]))
+    return jsonify(ok=True)
 
 
 @app.get("/health")
