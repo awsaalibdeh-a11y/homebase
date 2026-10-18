@@ -28,9 +28,14 @@ app = Flask(__name__)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "15"))      # what Android compares (a plain counter)
-VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.1")           # what people see: a whole number is a big update, a decimal is a small one
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "16"))      # what Android compares (a plain counter)
+VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.2")           # what people see: a whole number is a big update, a decimal is a small one
 CHANGELOG = [                                                         # newest first; shown on the install and update page
+    {"v": "6.2", "date": "18 Oct 2026", "title": "The map really loads now", "items": [
+        "Fixed the map staying blank: it opened far away and slid across to your family, downloading hundreds of map pieces on the way, so yours never arrived. It now opens straight on your family.",
+        "New people are no longer told \"Homebase has a new name\" when they never used Homebase.",
+        "The welcome screen shows the Mellow logo.",
+    ]},
     {"v": "6.1", "date": "17 Oct 2026", "title": "The map works again", "items": [
         "Fixed the map showing \"API key required\": the map style used since 4.0 started asking for a paid key, so Mellow is back on OpenStreetMap, with a night version for the dark look.",
         "The share-my-trip page uses the same free map.",

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -59,9 +60,12 @@ fun EmojiPicker(options: List<String>, picked: String, onPick: (String) -> Unit)
 
 @Composable
 fun WelcomeScreen(nav: Nav) {
+    val ctxW = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(Unit) { ctxW.hb.store.mellowWelcome = true }      // someone new never used Homebase, so skip the "new name" note
     Page {
-        Gap(40)
-        Text("🏠", fontSize = 64.sp)
+        Gap(28)
+        androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(app.homebase.family.R.drawable.ic_launcher_foreground), "Mellow",
+            Modifier.size(110.dp), colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Ink))
         Text("Mellow", style = MaterialTheme.typography.headlineLarge)
         Text("Stay close. Stay yourself.", style = MaterialTheme.typography.titleLarge, color = Accent, modifier = Modifier.padding(top = 4.dp))
         Gap(10)

@@ -87,12 +87,13 @@ fun OsmMap(
                 overlayManager.tilesOverlay.loadingBackgroundColor = android.graphics.Color.parseColor("#F1F1F3")
                 overlayManager.tilesOverlay.loadingLineColor = android.graphics.Color.parseColor("#E1E1E6")
             }
-            overlayManager.tilesOverlay.loadingBackgroundColor = android.graphics.Color.parseColor("#F1F1F3")
-            overlayManager.tilesOverlay.loadingLineColor = android.graphics.Color.parseColor("#E1E1E6")
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-            controller.setZoom(14.0)
-            controller.setCenter(GeoPoint(30.0, 31.0))
+            // Open straight on the family. Starting somewhere fixed and sliding over made the map queue hundreds of tiles along the way,
+            // so the tiles people actually look at waited behind them and the map stayed blank.
+            val first = (members.firstOrNull { it.id == myId }?.location ?: members.firstNotNullOfOrNull { it.location })
+            controller.setZoom(if (first != null) 15.0 else 3.0)
+            controller.setCenter(if (first != null) GeoPoint(first.lat, first.lng) else GeoPoint(30.0, 10.0))
         }
     }
     DisposableEffect(Unit) {
@@ -147,7 +148,7 @@ fun OsmMap(
         if (!fitted[0] && pts.isNotEmpty()) {
             fitted[0] = true
             if (pts.size == 1) { m.controller.setZoom(16.0); m.controller.setCenter(pts[0]) }
-            else m.post { runCatching { m.zoomToBoundingBox(BoundingBox.fromGeoPoints(pts), true, 140) } }
+            else m.post { runCatching { m.zoomToBoundingBox(BoundingBox.fromGeoPoints(pts), false, 140); if (m.zoomLevelDouble > 17.0) m.controller.setZoom(17.0) } }
         }
         m.invalidate()
     })
