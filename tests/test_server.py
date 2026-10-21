@@ -309,7 +309,7 @@ class Misc(Base):
 
 
 class ScreenTime(Base):
-    DAY = "2026-10-10"
+    DAY = datetime.date.today().isoformat()                               # the screen time page only shows recent days
 
     def send(self, who, **apps):
         return self.post(who, "/api/screentime", day=self.DAY, apps=[{"pkg": k, "label": k.title(), "cat": c, "sec": s} for k, (c, s) in apps.items()])
@@ -511,7 +511,7 @@ class Rules(Base):
 
     def test_reaching_the_limit_nudges_the_child_and_tells_the_family_once(self):
         self.post(self.mum, "/api/rules", limits={str(self.kid_id): 30})
-        sent = lambda sec: self.post(self.kid, "/api/screentime", day="2026-10-11", apps=[{"pkg": "roblox", "label": "Roblox", "cat": "play", "sec": sec}])
+        sent = lambda sec: self.post(self.kid, "/api/screentime", day=datetime.date.today().isoformat(), apps=[{"pkg": "roblox", "label": "Roblox", "cat": "play", "sec": sec}])
         sent(900)
         self.assertEqual([e for e in self.events(self.kid) if e["type"] == "nudge" and "limit" in e["payload"]["text"]], [])
         sent(1900)
@@ -579,7 +579,7 @@ class Devices(Base):
         r = self.claim(code)
         self.assertEqual(r.status_code, 200)
         dev = {"Authorization": "Bearer " + r.get_json()["token"]}
-        self.assertEqual(self.post(dev, "/api/screentime", day="2026-10-12", apps=[{"pkg": "pc:roblox", "label": "Roblox", "cat": "play", "sec": 600}]).status_code, 200)
+        self.assertEqual(self.post(dev, "/api/screentime", day=datetime.date.today().isoformat(), apps=[{"pkg": "pc:roblox", "label": "Roblox", "cat": "play", "sec": 600}]).status_code, 200)
         self.assertEqual(self.get(self.mum, f"/api/screentime?member={self.kid_id}").get_json()["days"][0]["total"], 600)   # it counted as Sam
         self.assertEqual(self.claim(code).status_code, 400)                                                                # a code works once
         said = [m["body"] for m in self.get(self.mum, "/api/messages?with=0").get_json()["messages"]]
