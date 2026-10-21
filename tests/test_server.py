@@ -2679,6 +2679,24 @@ class NoorQuran(Base):
         feed = self.get(self.mum, "/api/feed").get_json()["items"]
         self.assertTrue(any("memorized surah 67" in i["body"] for i in feed), "the family hears about it")
 
+    def test_family_khatma(self):
+        kn = self.link(self.kid)
+        self.assertEqual(self.post(self.mum, "/api/noor/khatma", action="start").status_code, 200)
+        self.assertEqual(self.post(self.mum, "/api/noor/khatma", action="start").status_code, 400, "one at a time")
+        self.assertEqual(self.c.post("/api/noor-app/khatma", headers=kn, json={"action": "take", "juz": 30}).status_code, 200)
+        self.assertEqual(self.post(self.mum, "/api/noor/khatma", action="take", juz=30).status_code, 400, "taken")
+        self.assertEqual(self.c.post("/api/noor-app/khatma", headers=kn, json={"action": "done", "juz": 30}).status_code, 200)
+        k = self.get(self.mum, "/api/noor/family").get_json()["khatma"]
+        self.assertEqual(k["finished"], 1)
+        self.assertEqual(k["juz"][29]["name"], "Sam")
+        for j in range(1, 30):
+            self.post(self.mum, "/api/noor/khatma", action="done", juz=j)
+        k = self.get(self.mum, "/api/noor/family").get_json()["khatma"]
+        self.assertTrue(k["done_at"])
+        feed = self.get(self.mum, "/api/feed").get_json()["items"]
+        self.assertTrue(any("finished a whole khatma" in i["body"] for i in feed))
+        self.assertEqual(self.post(self.mum, "/api/noor/khatma", action="start").status_code, 200, "a new one can start")
+
     def test_bad_keys_and_other_families(self):
         self.assertEqual(self.c.get("/api/noor-app/family", headers={"Authorization": "Bearer hbn_nope"}).status_code, 401)
         self.assertEqual(self.c.post("/api/noor-app/exchange", json={"code": "nope"}).status_code, 400)

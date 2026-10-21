@@ -388,7 +388,13 @@ function noorHtml() {
   return `<p class="tabhelp">${meLinked ? "Your Noor is linked." : "Link Noor, the Quran app, to share your reading with the family and get tasks."}</p>
     <div class="pl-btns"><button class="btn sm ${meLinked ? "" : "solid"}" data-act="noorlink">${meLinked ? "Link Noor again" : "📖 Link Noor"}</button>${isParent() ? '<button class="btn sm solid" data-act="noortask">＋ Give a reading task</button>' : ""}</div>
     <h4 style="margin:12px 0 4px">Tasks</h4>${open.map(task).join("") || '<div class="empty">No open tasks.</div>'}${done.length ? '<h4 style="margin:12px 0 4px">Finished</h4>' + done.map(task).join("") : ""}
+    <h4 style="margin:12px 0 4px">Family khatma</h4>${khatmaHtml(n.khatma)}
     <h4 style="margin:12px 0 4px">Who read what</h4>${people}`;
+}
+function khatmaHtml(k) {
+  if (!k || k.done_at) return `${k && k.done_at ? '<p class="tabhelp">🎉 Your family finished a khatma. Start another?</p>' : '<p class="tabhelp">Read the whole Quran together: everyone takes a juz.</p>'}<button class="btn sm solid" data-act="noorkstart">Start a family khatma</button>`;
+  return `<p class="tabhelp">${k.finished} of 30 juz read. Tap a juz to take it, tap yours again when you have read it.</p>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px">${k.juz.map(j => `<button class="btn sm ${j.done ? "solid" : ""}" style="padding:6px 0;min-width:0;${j.who === S.me && !j.done ? "outline:2px solid var(--accent)" : ""}" data-act="noork" data-id="${j.juz}" title="${esc(j.name || "Free")}">${j.juz}<br><small style="font-size:10px">${j.done ? "✓" : esc((j.name || "").slice(0, 5)) || "free"}</small></button>`).join("")}</div>`;
 }
 async function noorAct(act, id) {
   const reload = async () => { try { S.noor = await api("/api/noor/family"); } catch (e) { /* offline */ } renderSide(); };
@@ -408,6 +414,14 @@ async function noorAct(act, id) {
     const [a, b] = range ? range.split(/[-–]/).map(x => parseInt(x)) : [1, 999];
     const note = prompt("A note? (optional)", "") || "";
     try { await api("/api/noor/tasks", "POST", { to: m.id, kind: kind.startsWith("mem") ? "memorize" : kind.startsWith("rev") ? "revise" : "read", surah: s, from: a || 1, to_ayah: b || a || 999, note }); toast("Task sent to " + m.name); } catch (e) { toast(e.message); }
+    await reload(); return true;
+  }
+  if (act === "noorkstart") { try { await api("/api/noor/khatma", "POST", { action: "start" }); toast("Family khatma started"); } catch (e) { toast(e.message); } await reload(); return true; }
+  if (act === "noork") {
+    const j = (S.noor.khatma.juz || [])[+id - 1] || {};
+    const action = !j.who ? "take" : j.who === S.me ? (j.done ? "undo" : (confirm("Have you finished juz " + id + "? OK = done, Cancel = give it back") ? "done" : "drop")) : null;
+    if (!action) { toast(`Juz ${id} is ${j.name}'s`); return true; }
+    try { await api("/api/noor/khatma", "POST", { action, juz: +id }); if (action === "done") toast("Masha'Allah! Juz " + id + " done"); } catch (e) { toast(e.message); }
     await reload(); return true;
   }
   if (act === "noordel") { if (confirm("Remove this task?")) { try { await api(`/api/noor/tasks/${id}`, "DELETE"); } catch (e) { toast(e.message); } await reload(); } return true; }

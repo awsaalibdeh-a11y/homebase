@@ -152,6 +152,10 @@ noor_tasks = Table("noor_tasks", meta,                                    # a pa
     Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("by_id", Integer), Column("to_id", Integer, index=True),
     Column("kind", String(10)), Column("surah", Integer), Column("ayah_from", Integer), Column("ayah_to", Integer), Column("note", String(200), default=""),
     Column("due", String(10), default=""), Column("created", Float), Column("done_at", Float, default=0), Column("score", Integer, default=-1))
+noor_khatmas = Table("noor_khatmas", meta,                               # the family reads the whole Quran together, a juz each
+    Column("id", Integer, primary_key=True), Column("family_id", Integer, index=True), Column("by_id", Integer), Column("created", Float), Column("done_at", Float, default=0))
+noor_juz = Table("noor_juz", meta,
+    Column("id", Integer, primary_key=True), Column("khatma_id", Integer, index=True), Column("juz", Integer), Column("member_id", Integer, default=0), Column("done_at", Float, default=0))
 friend_groups = Table("friend_groups", meta,                              # a group of friends: separate from the family, but a child's parents can read it
     Column("id", Integer, primary_key=True), Column("name", String(40)), Column("emoji", String(8), default="\U0001F465"), Column("code", String(10), unique=True),
     Column("created_by", Integer), Column("created", Float))

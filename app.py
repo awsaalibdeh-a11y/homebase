@@ -4453,7 +4453,78 @@ def noor_family(m):
     rows = db.many(select(db.noor_tasks).where(db.noor_tasks.c.family_id == m["family_id"]).order_by(db.noor_tasks.c.id.desc()).limit(80))
     if m["role"] != "parent":
         rows = [t for t in rows if t["to_id"] == m["id"] or t["by_id"] == m["id"]]
-    return {"members": out, "tasks": [task_view(t, names) for t in rows], "me": m["id"], "role": m["role"], "noor_url": NOOR_URL}
+    return {"members": out, "tasks": [task_view(t, names) for t in rows], "me": m["id"], "role": m["role"], "noor_url": NOOR_URL, "khatma": khatma_view(m["family_id"], names)}
+
+
+def current_khatma(fid):
+    return db.one(select(db.noor_khatmas).where(db.noor_khatmas.c.family_id == fid).order_by(db.noor_khatmas.c.id.desc()).limit(1))
+
+
+def khatma_view(fid, names):
+    k = current_khatma(fid)
+    if not k:
+        return None
+    parts = {r["juz"]: r for r in db.many(select(db.noor_juz).where(db.noor_juz.c.khatma_id == k["id"]))}
+    juz = [{"juz": j, "who": (parts.get(j) or {}).get("member_id") or 0, "name": names.get((parts.get(j) or {}).get("member_id") or 0, ""),
+            "done": bool((parts.get(j) or {}).get("done_at"))} for j in range(1, 31)]
+    return {"id": k["id"], "created": k["created"], "done_at": k["done_at"] or 0, "by": names.get(k["by_id"], ""), "juz": juz, "finished": sum(1 for x in juz if x["done"])}
+
+
+def khatma_act(m, d):
+    """start | take | drop | done | undo, on the family's khatma."""
+    act, fid = d.get("action"), m["family_id"]
+    k = current_khatma(fid)
+    if act == "start":
+        if k and not k["done_at"]:
+            return err("Your family already has a khatma going.")
+        db.run(insert(db.noor_khatmas).values(family_id=fid, by_id=m["id"], created=time.time()))
+        say(fid, 0, f"\U0001F4D6 {m['name']} started a family khatma: pick a juz in Noor or Mellow")
+        return jsonify(ok=True)
+    if not k or k["done_at"]:
+        return err("Start a family khatma first.")
+    j = int(d.get("juz") or 0) if str(d.get("juz") or "").isdigit() else 0
+    if not 1 <= j <= 30:
+        return err("Pick a juz from 1 to 30.")
+    row = db.one(select(db.noor_juz).where(db.noor_juz.c.khatma_id == k["id"], db.noor_juz.c.juz == j))
+    mine = row and row["member_id"] == m["id"]
+    if act == "take":
+        if row and row["member_id"] and not mine:
+            return err("Someone already took that juz.")
+        if not row:
+            db.run(insert(db.noor_juz).values(khatma_id=k["id"], juz=j, member_id=m["id"]))
+        return jsonify(ok=True)
+    if act == "drop":
+        if row and (mine or m["role"] == "parent") and not row["done_at"]:
+            db.run(delete(db.noor_juz).where(db.noor_juz.c.id == row["id"]))
+        return jsonify(ok=True)
+    if act in ("done", "undo"):
+        if not row:
+            db.run(insert(db.noor_juz).values(khatma_id=k["id"], juz=j, member_id=m["id"]))
+            row = db.one(select(db.noor_juz).where(db.noor_juz.c.khatma_id == k["id"], db.noor_juz.c.juz == j))
+        elif row["member_id"] and not mine and m["role"] != "parent":
+            return err("That juz is someone else's.")
+        db.run(update(db.noor_juz).where(db.noor_juz.c.id == row["id"]).values(done_at=time.time() if act == "done" else 0))
+        if act == "done":
+            left = 30 - len([r for r in db.many(select(db.noor_juz).where(db.noor_juz.c.khatma_id == k["id"])) if r["done_at"]])
+            if left == 0:
+                db.run(update(db.noor_khatmas).where(db.noor_khatmas.c.id == k["id"]).values(done_at=time.time()))
+                say(fid, 0, "\U0001F389 The family finished a whole khatma of the Quran together. Masha'Allah!")
+            elif left in (20, 10, 5, 1):
+                say(fid, 0, f"\U0001F4D6 Family khatma: {30 - left} of 30 juz read, {left} to go")
+        return jsonify(ok=True)
+    return err("Unknown action.")
+
+
+@app.post("/api/noor/khatma")
+@need
+def noor_khatma_member():
+    return khatma_act(g.m, request.get_json(silent=True) or {})
+
+
+@app.post("/api/noor-app/khatma")
+@noor_need
+def noor_khatma_app():
+    return khatma_act(g.m, request.get_json(silent=True) or {})
 
 
 def make_task(m, d):
