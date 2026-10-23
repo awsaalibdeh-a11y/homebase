@@ -189,7 +189,7 @@ static class Native
 
 class App : ApplicationContext
 {
-    public const int Build = 23;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
+    public const int Build = 24;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -262,6 +262,7 @@ class App : ApplicationContext
         string hbDir = Environment.GetEnvironmentVariable("HB_DIR");                   // tests use their own folder, so they can run beside the real tracker
         using (Mutex mx = new Mutex(true, "Local\\HomebaseTracker" + (hbDir == null ? "" : "_" + Math.Abs(hbDir.GetHashCode())), out created))   // tests use their own folder, so they can run beside the real tracker
         {
+            if (!created && args.Contains("--ensure")) return;                         // startup / watchdog launch: one is already running, leave it be
             if (!created)
             {
                 // another copy is running, possibly an OLD version. Launching a new one means "update me": stop the old one and take over.
@@ -288,6 +289,7 @@ class App : ApplicationContext
             if (args[i] == "--server" && i + 1 < args.Length) server = args[i + 1].TrimEnd('/');
         }
         LoadConfig();
+        Log("start build " + Build + (args.Length > 0 ? " " + string.Join(" ", args.Where(a => a != "--code")) : ""));
         if (profiles.Count == 0)
         {
             if (code == null) code = AskForCode();
@@ -301,6 +303,7 @@ class App : ApplicationContext
             string err = Claim(code);                                          // running it again with a code adds another person
             if (err != null) MessageBox.Show(err, "Mellow screen time"); else { Install(); }
         }
+        if (profiles.Count > 0 && !Test && LastShownBuild() < 24) Install();
         sync = new Control(); sync.CreateControl(); IntPtr force = sync.Handle;
         if (profiles.Count > 1) PickPerson(false);                              // two kids, one laptop: ask who is sitting down
         LoadToday(); LoadCustom();
@@ -419,6 +422,19 @@ class App : ApplicationContext
     static void Log(string s) { try { Directory.CreateDirectory(Dir); File.AppendAllText(LogFile, DateTime.Now + " " + s + Environment.NewLine); } catch { } }
 
     // ---------- install and remove
+    // Windows sometimes skips startup programs (after an update restart, for one), so a per-user scheduled task
+    // starts the tracker every 15 minutes if it is not running. With --ensure a running copy is left alone.
+    static void Watchdog(bool on)
+    {
+        try
+        {
+            string a = on ? "/Create /F /SC MINUTE /MO 15 /TN \"Mellow screen time\" /TR \"\\\"" + Installed + "\\\" --ensure\"" : "/Delete /F /TN \"Mellow screen time\"";
+            using (Process p = Process.Start(new ProcessStartInfo("schtasks.exe", a) { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true }))
+            { p.WaitForExit(10000); if (on && p.ExitCode != 0) Log("watchdog: " + p.StandardError.ReadToEnd().Trim()); }
+        }
+        catch (Exception e) { Log("watchdog: " + e.Message); }
+    }
+
     void Install()
     {
         try
@@ -428,7 +444,8 @@ class App : ApplicationContext
             if (!string.Equals(me, Installed, StringComparison.OrdinalIgnoreCase)) File.Copy(me, Installed, true);
             if (!Test)
             {
-                using (RegistryKey k = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run", true)) k.SetValue("HomebaseTracker", "\"" + Installed + "\"");
+                using (RegistryKey k = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run", true)) k.SetValue("HomebaseTracker", "\"" + Installed + "\" --ensure");
+                Watchdog(true);
             }
         }
         catch (Exception e) { Log("install: " + e.Message); }
@@ -437,6 +454,7 @@ class App : ApplicationContext
     {
         if (ask && MessageBox.Show("Take Mellow screen time off this computer?", "Mellow", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
         try { using (RegistryKey k = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run", true)) if (k != null) k.DeleteValue("HomebaseTracker", false); } catch { }
+        Watchdog(false);
         try { File.Delete(ConfigFile); foreach (string f in Directory.GetFiles(Dir, "today_*.txt")) File.Delete(f); } catch { }
         if (ask) MessageBox.Show("Done. Mellow screen time is removed from this computer.", "Mellow");
     }
