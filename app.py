@@ -30,9 +30,15 @@ Compress(app)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "17"))      # what Android compares (a plain counter)
-VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.3")           # what people see: a whole number is a big update, a decimal is a small one
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "18"))      # what Android compares (a plain counter)
+VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.4")           # what people see: a whole number is a big update, a decimal is a small one
 CHANGELOG = [                                                         # newest first; shown on the install and update page
+    {"v": "6.4", "date": "24 Oct 2026", "title": "Mellow rests at night", "items": [
+        "From midnight to 6 am Mellow rests so it stays free: background updates, location and screen-time sends wait until 6 am.",
+        "SOS and anything you do yourself still go through at night, and Mellow works normally while it is open on your screen.",
+        "A parent lock that is already running at midnight keeps working through the night.",
+        "Smaller and lighter: the app download and updates come from a faster download server.",
+    ]},
     {"v": "6.3", "date": "18 Oct 2026", "title": "Quran together, with Noor", "items": [
         "New in More → Family: Quran (Noor). See what everyone in the family read in Noor, the Quran app: their streak, today's ayahs, last ayah, memorized surahs and recitation scores.",
         "Parents can give reading, memorizing and revising tasks for any surah and ayahs. They show up in Noor, and the family hears when one is done, with the recitation score.",

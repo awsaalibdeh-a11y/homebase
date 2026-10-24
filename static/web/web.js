@@ -32,7 +32,10 @@ const S = { av: {}, token: localStorage.getItem("hb_token") || "", me: 0, family
   online: navigator.onLine, open: 0, chatOpen: false, outbox: load("hb_out", []), savedAt: 0, tmp: -1, plans: [], polls: [], rewards: [], asks: [], bal: {}, board: [], streaks: {}, bonus: {} };
 
 /* ---------- helpers ---------- */
+// Mellow rests from midnight to 6 am so the free server can sleep: a tab in the background sends nothing then
+const nightQuiet = () => document.hidden && new Date().getHours() < 6;
 async function api(path, method = "GET", body) {
+  if (nightQuiet() && method === "GET") { await new Promise(res => setTimeout(res, 60000)); throw Object.assign(new Error("Resting for the night."), { offline: true, night: true }); }
   let r;
   try { r = await fetch(path, { method, headers: { "Content-Type": "application/json", ...(S.token ? { Authorization: "Bearer " + S.token } : {}) }, body: body ? JSON.stringify(body) : undefined }); }
   catch (e) { setOnline(false); throw Object.assign(new Error("You are offline."), { offline: true }); }

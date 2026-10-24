@@ -160,6 +160,7 @@ class ScreenTimeTracker(private val ctx: Context) {
     }
 
     private suspend fun upload(store: Store) {
+        if (Night.quiet()) return                                            // sent at 6 am instead
         val apps: JsonArray = buildJsonArray { readToday(store).forEach { a -> add(buildJsonObject { put("pkg", a.pkg); put("label", a.label); put("cat", a.cat); put("sec", a.sec) }) } }
         runCatching { ctx.hb.api.postScreenTime(store.screenDay, apps) }.onSuccess { dirty = false; lastUpload = System.currentTimeMillis() }
     }

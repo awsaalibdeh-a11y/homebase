@@ -189,7 +189,7 @@ static class Native
 
 class App : ApplicationContext
 {
-    public const int Build = 24;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
+    public const int Build = 25;                                             // bump with windows/BUILD on the server; computers update themselves when the server's is higher
     const string DefaultServer = "https://homebase-family.onrender.com";
     const int ActiveSeconds = 150;
     static readonly string Dir = Environment.GetEnvironmentVariable("HB_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Homebase");
@@ -351,8 +351,14 @@ class App : ApplicationContext
     }
 
     // ---------- talking to Homebase
+    // Mellow rests from midnight to 6 am so the free server can sleep: no background traffic then.
+    static bool Night { get { return DateTime.Now.Hour < 6 && Environment.GetEnvironmentVariable("HB_NO_NIGHT") == null; } }
+    bool nightOk;                                                            // the one send at midnight that closes yesterday
+    DateTime lockUntil = DateTime.MinValue;                                  // a parent's lock, remembered so it holds through the night
+
     string Http(string method, string path, object body, out int status)
     {
+        if (Night && !nightOk && !path.StartsWith("/api/devices/claim")) { status = 0; return "{}"; }
         HttpWebRequest r = (HttpWebRequest)WebRequest.Create(server + path);
         r.Method = method; r.Timeout = 20000; r.UserAgent = "HomebaseTracker/1.0";
         if (token != "" && !path.StartsWith("/api/devices/claim")) r.Headers["Authorization"] = "Bearer " + token;
@@ -681,8 +687,9 @@ class App : ApplicationContext
         if (Environment.GetEnvironmentVariable("HB_DEBUG") != null) Log("step cursor=" + cursor);
         DateTime now = DateTime.Now; double elapsed = Math.Min(45, (now - lastTick).TotalSeconds); lastTick = now;
         string today = now.ToString("yyyy-MM-dd");
-        if (today != day) { if (dirty) Send(); day = today; apps.Clear(); dirty = false; }
+        if (today != day) { if (dirty) { nightOk = true; Send(); nightOk = false; } day = today; apps.Clear(); dirty = false; }
         int st; bool locked = false;
+        if (Night && DateTime.Now < lockUntil) { locked = true; Native.LockWorkStation(); }
         try
         {
             string txt = Http("GET", "/api/lock", null, out st);
@@ -691,7 +698,7 @@ class App : ApplicationContext
             if (d.ContainsKey("lock") && d["lock"] != null)
             {
                 var lk = (Dictionary<string, object>)d["lock"];
-                if (Convert.ToDouble(lk["until"]) > Convert.ToDouble(d["now"])) { locked = true; Native.LockWorkStation(); }       // a parent's lock: lock Windows until it ends
+                if (Convert.ToDouble(lk["until"]) > Convert.ToDouble(d["now"])) { locked = true; lockUntil = DateTime.Now.AddSeconds(Convert.ToDouble(lk["until"]) - Convert.ToDouble(d["now"])); Native.LockWorkStation(); }       // a parent's lock: lock Windows until it ends
             }
         }
         catch (Exception e) { Log("lock: " + e.Message); }

@@ -54,6 +54,9 @@ class MainActivity : ComponentActivity() {
         setContent { HomebaseTheme { Root(nav, open) } }
     }
 
+    override fun onResume() { super.onResume(); Night.appOpen = true }
+    override fun onPause() { Night.appOpen = false; super.onPause() }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

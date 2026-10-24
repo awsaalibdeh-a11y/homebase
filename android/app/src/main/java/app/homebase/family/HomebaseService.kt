@@ -152,6 +152,7 @@ class HomebaseService : Service() {
         val sos = hb.state.me?.sos == true
         val farEnough = if (sendEveryMs > 300_000L) 1000f else 150f
         if (!sos && now - lastSentAt < sendEveryMs && moved < farEnough) return
+        if (!sos && Night.quiet()) { hb.store.lastLat = fix.latitude.toFloat(); hb.store.lastLng = fix.longitude.toFloat(); return }
         lastSent = fix; lastSentAt = now
         hb.store.lastLat = fix.latitude.toFloat(); hb.store.lastLng = fix.longitude.toFloat(); hb.store.lastSentAt = now
         val battery = (getSystemService(Context.BATTERY_SERVICE) as BatteryManager).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -191,6 +192,7 @@ class HomebaseService : Service() {
         if (cursor < 0) { cursor = runCatching { app.api.events(-1, 0).cursor }.getOrDefault(0); app.store.cursor = cursor }
         var failures = 0
         while (currentCoroutineContext().isActive) {
+            if (Night.quiet()) { delay(60_000); continue }                 // midnight to 6 am: let the free server sleep
             try {
                 val r = app.api.events(cursor, 25)
                 failures = 0
