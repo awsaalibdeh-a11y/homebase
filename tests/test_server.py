@@ -304,7 +304,8 @@ class Misc(Base):
             self.assertEqual(r.status_code, 200, asset)
             r.close()
         dl = self.c.get("/download")                                          # the app itself is served from static/homebase.apk
-        self.assertEqual(dl.status_code, 200 if os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "homebase.apk")) else 404)
+        self.assertEqual(dl.status_code, 302)                       # the app file is served from Hugging Face
+        self.assertIn("huggingface.co", dl.headers["Location"])
         dl.close()
 
 

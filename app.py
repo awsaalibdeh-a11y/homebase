@@ -17,7 +17,7 @@ import threading
 import time
 from collections import defaultdict
 
-from flask import Flask, g, jsonify, render_template, request, send_from_directory
+from flask import Flask, redirect, g, jsonify, render_template, request, send_from_directory
 
 import db
 from db import delete, insert, select, update
@@ -25,6 +25,8 @@ from moderation import moderate, worst
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__)
+from flask_compress import Compress  # noqa: E402  (gzip pages, JSON and scripts: Render's free plan counts bandwidth)
+Compress(app)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
@@ -181,8 +183,13 @@ def same_family(member_id):
     return m if m and m["family_id"] == g.m["family_id"] else None
 
 
+EVENTS = threading.Condition()                                         # waiting /api/events requests sleep here until push() wakes them
+
+
 def push(member_id, kind, payload):
     db.run(insert(db.events).values(member_id=member_id, type=kind, payload=json.dumps(payload, ensure_ascii=False), created=time.time()))
+    with EVENTS:
+        EVENTS.notify_all()
     try:                                                              # a phone or browser with the app closed still hears about the things that matter
         note = web_note(kind, payload)
         if note:
@@ -4164,19 +4171,38 @@ def event_stream():
         return jsonify(cursor=top["id"] if top else 0, events=[])
     wait = min(25, max(0, qint("wait", 0)))
     deadline, rows = time.time() + wait, []
+    housekeeping()
     while True:
+        rows = db.many(select(db.events).where(db.events.c.member_id == m["id"], db.events.c.id > after).order_by(db.events.c.id).limit(100))
+        if rows or time.time() >= deadline:
+            break
+        # sleep until something is pushed (or 5 s as a safety net), instead of asking the database every 0.6 s:
+        # every query goes out to Neon, and Render's free plan counts that traffic
+        with EVENTS:
+            EVENTS.wait(min(5, max(.05, deadline - time.time())))
+        housekeeping()
+    if int(time.time()) % 40 == 0:
+        db.run(delete(db.events).where(db.events.c.created < time.time() - 2 * 86400))
+    return jsonify(cursor=rows[-1]["id"] if rows else after, events=[{"id": r["id"], "type": r["type"], "payload": json.loads(r["payload"]), "at": r["created"]} for r in rows])
+
+
+_house = {"at": 0.0}
+_house_lock = threading.Lock()
+
+
+def housekeeping():
+    """Missed calls, plan and birthday reminders, offline and watcher checks: at most every 15 s for the whole server."""
+    if time.time() - _house["at"] < 15 or not _house_lock.acquire(blocking=False):
+        return
+    try:
+        _house["at"] = time.time()
         expire_calls()
         remind_plans()
         remind_birthdays()
         check_offline()
         check_watchers()
-        rows = db.many(select(db.events).where(db.events.c.member_id == m["id"], db.events.c.id > after).order_by(db.events.c.id).limit(100))
-        if rows or time.time() >= deadline:
-            break
-        time.sleep(0.6)
-    if int(time.time()) % 40 == 0:
-        db.run(delete(db.events).where(db.events.c.created < time.time() - 2 * 86400))
-    return jsonify(cursor=rows[-1]["id"] if rows else after, events=[{"id": r["id"], "type": r["type"], "payload": json.loads(r["payload"]), "at": r["created"]} for r in rows])
+    finally:
+        _house_lock.release()
 
 
 # ---------------------------------------------------------------- calls: the server only passes the two phones' handshake notes along
@@ -4373,8 +4399,14 @@ def qr_svg():
     return app.response_class(buf.getvalue(), mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=3600"})
 
 
+APK_URL = os.environ.get("APK_URL", "https://huggingface.co/datasets/Death242/downloads/resolve/main/mellow.apk")
+
+
 @app.get("/download")
 def download():
+    """The Android app. It is 55 MB, so it is served from Hugging Face: Render's free plan only includes 5 GB a month."""
+    if APK_URL:
+        return redirect(APK_URL, 302)
     path = os.path.join(BASE, "static")
     if not os.path.exists(os.path.join(path, "homebase.apk")):
         return err("The app file is not uploaded yet.", 404)
