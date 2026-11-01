@@ -17,6 +17,7 @@ from flask import jsonify, request
 
 HUB = os.environ.get("HUB_URL", "https://cramly-twz5.onrender.com").rstrip("/")
 KEEP = ("/static/", "/health", "/healthz", "/sw.js", "/favicon", "/manifest")        # always reachable, so pages can show why they are off
+TTL = 1800                                                                            # seconds between checks of one visitor
 _cache = {}                                                                           # (key, dev) -> (answer, fetched at)
 _lock = threading.Lock()
 
@@ -37,9 +38,9 @@ def _refresh(app_id, key, dev):
         if ans is not None:
             _cache[(key, dev)] = (ans, time.time())
         elif (key, dev) in _cache:
-            _cache[(key, dev)] = (_cache[(key, dev)][0], time.time() - 240)          # try again in about a minute, not on every request
+            _cache[(key, dev)] = (_cache[(key, dev)][0], time.time() - (TTL - 60))   # try again in about a minute, not on every request
         else:
-            _cache[(key, dev)] = ({}, time.time() - 240)
+            _cache[(key, dev)] = ({}, time.time() - (TTL - 60))
 
 
 def verdict(app_id, key="", dev=""):
@@ -52,7 +53,7 @@ def verdict(app_id, key="", dev=""):
     if hit is None:
         threading.Thread(target=_refresh, args=(app_id, key, dev), daemon=True).start()   # first sight: do not make the visitor wait
         return {}
-    if time.time() - hit[1] > 300:                                                       # every 5 minutes: each check is traffic, and wakes Cramly
+    if time.time() - hit[1] > TTL:                                                       # at most every 30 minutes: each check wakes Cramly and uses Render's free hours
         threading.Thread(target=_refresh, args=(app_id, key, dev), daemon=True).start()
     return hit[0]
 

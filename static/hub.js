@@ -201,7 +201,12 @@
     c.setAttribute("aria-label", "Made by Legion. Contact me: Awsaa-Legion@proton.me");
     document.body.append(c);
   };
-  const start = () => { credit(); drawChip(); poll(); setInterval(poll, 30000); document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); }); };
+  /* Ask Cramly at most every 20 minutes (shared by every tab of this app): Render puts a server to sleep after 15 quiet minutes, so a slower
+     rhythm lets Cramly sleep instead of using free hours all day. Bans still apply at once on the server side (hubguard). */
+  const GAP = 20 * 60 * 1000;
+  const due = () => { const last = +store.get("lastpoll") || 0; return Date.now() - last >= GAP || Date.now() < last; };
+  const maybePoll = () => { if (document.hidden || !due()) return; store.set("lastpoll", String(Date.now())); poll(); };
+  const start = () => { credit(); drawChip(); maybePoll(); setInterval(maybePoll, 60000); document.addEventListener("visibilitychange", maybePoll); };
   if (document.body) start(); else addEventListener("DOMContentLoaded", start);
 })();
 /* LEGION-SPLASH-START */
