@@ -30,9 +30,14 @@ Compress(app)
 import hubguard  # noqa: E402  (the owner's universal switches, kept in Cramly)
 hubguard.install(app, "homebase")
 app.config["MAX_CONTENT_LENGTH"] = 1536 * 1024                      # room for one chat photo (a JPEG up to 900 KB is about 1.2 MB as text); everything else is tiny
-VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "18"))      # what Android compares (a plain counter)
-VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.4")           # what people see: a whole number is a big update, a decimal is a small one
+VERSION_CODE = int(os.environ.get("APP_VERSION_CODE", "19"))      # what Android compares (a plain counter)
+VERSION_NAME = os.environ.get("APP_VERSION_NAME", "6.5")           # what people see: a whole number is a big update, a decimal is a small one
 CHANGELOG = [                                                         # newest first; shown on the install and update page
+    {"v": "6.5", "date": "1 Nov 2026", "title": "Mellow keeps itself free", "items": [
+        "Mellow now rests from midnight to 7 am, and a little longer if the month's free server time is running out, so it never goes offline.",
+        "A Mellow page left open with nobody using it rests too.",
+        "SOS and anything you do yourself always go through, any time.",
+    ]},
     {"v": "6.4", "date": "24 Oct 2026", "title": "Mellow rests at night", "items": [
         "From midnight to 6 am Mellow rests so it stays free: background updates, location and screen-time sends wait until 6 am.",
         "SOS and anything you do yourself still go through at night, and Mellow works normally while it is open on your screen.",
@@ -4450,6 +4455,84 @@ def noor_need(fn):
         return fn(*a, **k)
     wrapped.__name__ = fn.__name__
     return wrapped
+
+
+# ---------------------------------------------------------------- the free-hours budget
+# Render gives one free pool of 750 hours a month to every app together, and a server only uses hours while it is awake. Mellow's
+# devices would keep it awake all month, so it keeps to a budget: it counts its own awake time, and every reply tells the devices when
+# to rest (no background traffic), so the server can fall asleep. Anything a person does on purpose, and SOS, always goes through.
+REST_TO = int(os.environ.get("REST_TO", "7"))                          # devices rest from midnight to this hour (their own clock)
+HOURS_BUDGET = float(os.environ.get("MELLOW_HOURS", "520"))            # the month's awake budget, leaving the rest of the 750 for the other apps
+AWAKE_STEP = 300                                                        # counted every 5 minutes while the process is up
+_awake = {"started": False, "at": 0.0, "until": 0.0}
+
+
+def month_bounds(now):
+    t = datetime.datetime.fromtimestamp(now, datetime.timezone.utc)
+    start = datetime.datetime(t.year, t.month, 1, tzinfo=datetime.timezone.utc)
+    end = datetime.datetime(t.year + (t.month == 12), t.month % 12 + 1, 1, tzinfo=datetime.timezone.utc)
+    return start.timestamp(), end.timestamp(), start.strftime("%Y-%m")
+
+
+def add_awake(seconds, now=None):
+    _, _, key = month_bounds(now or time.time())
+    row = db.one(select(db.uptime).where(db.uptime.c.month == key))
+    if row:
+        db.run(update(db.uptime).where(db.uptime.c.month == key).values(seconds=(row["seconds"] or 0) + seconds))
+    else:
+        db.run(insert(db.uptime).values(month=key, seconds=seconds))
+
+
+def hours_used(now=None):
+    _, _, key = month_bounds(now or time.time())
+    row = db.one(select(db.uptime).where(db.uptime.c.month == key))
+    return ((row["seconds"] or 0) if row else 0) / 3600
+
+
+def rest_until(now=None):
+    """0 when the month is on budget. Ahead of budget: rest long enough to fall back in line (the server sleeps while devices rest).
+    Budget spent: rest until the month ends."""
+    now = now or time.time()
+    start, end, _ = month_bounds(now)
+    used = hours_used(now)
+    if used >= HOURS_BUDGET:
+        return end
+    over = used - HOURS_BUDGET * (now - start) / (end - start)
+    return 0 if over <= 0 else now + min(6 * 3600, 1800 + over * 3600)
+
+
+def _awake_loop():
+    while True:
+        time.sleep(AWAKE_STEP)
+        try:
+            add_awake(AWAKE_STEP)
+        except Exception:                                               # the database may be busy; the next step tries again
+            pass
+
+
+@app.after_request
+def rest_header(resp):
+    if not request.path.startswith("/api/"):
+        return resp
+    if not _awake["started"] and os.environ.get("RENDER"):              # only on Render: count real awake time, never in tests or at home
+        _awake["started"] = True
+        threading.Thread(target=_awake_loop, daemon=True).start()
+    now = time.time()
+    if now - _awake["at"] > 120:                                        # worked out at most every 2 minutes
+        try:
+            _awake["until"] = rest_until(now)
+        except Exception:
+            pass
+        _awake["at"] = now
+    resp.headers["X-Rest"] = f"{REST_TO};{int(_awake['until'])}"
+    resp.headers["Access-Control-Expose-Headers"] = "X-Rest"
+    return resp
+
+
+@app.get("/api/rest")
+def rest_info():
+    now = time.time()
+    return jsonify(used_hours=round(hours_used(now), 1), budget_hours=HOURS_BUDGET, rest_to=REST_TO, rest_until=int(rest_until(now)))
 
 
 @app.after_request

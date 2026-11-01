@@ -206,6 +206,8 @@ homework = Table("homework", meta,
 message_images = Table("message_images", meta,                       # photos sent in family chats: a small JPEG or PNG, found by a long random token
     Column("id", Integer, primary_key=True), Column("token", String(40), unique=True, index=True), Column("family_id", Integer, index=True),
     Column("from_id", Integer), Column("mime", String(16)), Column("data", Text), Column("created", Float))
+uptime = Table("uptime", meta,                                            # how long this server has been awake each month (Render's free hours are shared by every app)
+    Column("month", String(7), primary_key=True), Column("seconds", Float, default=0))
 meta.create_all(engine)
 try:                                                                  # older databases get the new column
     with engine.begin() as _c:

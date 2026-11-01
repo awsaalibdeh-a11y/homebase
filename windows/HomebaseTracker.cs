@@ -1,4 +1,4 @@
-// Homebase for Windows: screen time (only active playing/watching), parent locks and grounded apps.
+﻿// Homebase for Windows: screen time (only active playing/watching), parent locks and grounded apps.
 // Built for a computer that more than one child uses: it asks who is using it, and counts, locks and grounds each person separately.
 // No scripts, no PowerShell. Run it, type the 6-digit code from Homebase, and it links itself.
 //   HomebaseTracker.exe            first run asks for the code; afterwards it just runs from the tray
@@ -351,8 +351,20 @@ class App : ApplicationContext
     }
 
     // ---------- talking to Homebase
-    // Mellow rests from midnight to 6 am so the free server can sleep: no background traffic then.
-    static bool Night { get { return DateTime.Now.Hour < 6 && Environment.GetEnvironmentVariable("HB_NO_NIGHT") == null; } }
+    // Mellow rests so the free server can sleep: no background traffic from midnight until the hour the server gives (7 am), nor while
+    // the server asks for a rest because the month's free hours are running ahead. Every reply carries X-Rest: "<hour>;<rest until, unix>".
+    static int restTo = 7; static long restUntil = 0;
+    static bool Night { get { return (DateTime.Now.Hour < restTo || DateTimeOffset.UtcNow.ToUnixTimeSeconds() < restUntil) && Environment.GetEnvironmentVariable("HB_NO_NIGHT") == null; } }
+    static void ReadRest(HttpWebResponse x)
+    {
+        try
+        {
+            string h = x.Headers["X-Rest"]; if (string.IsNullOrEmpty(h)) return;
+            string[] p = h.Split(';'); int to; long until;
+            if (p.Length == 2 && int.TryParse(p[0], out to) && long.TryParse(p[1], out until) && to >= 0 && to <= 12 && until >= 0) { restTo = to; restUntil = until; }
+        }
+        catch { }
+    }
     bool nightOk;                                                            // the one send at midnight that closes yesterday
     DateTime lockUntil = DateTime.MinValue;                                  // a parent's lock, remembered so it holds through the night
 
@@ -363,7 +375,7 @@ class App : ApplicationContext
         r.Method = method; r.Timeout = 20000; r.UserAgent = "HomebaseTracker/1.0";
         if (token != "" && !path.StartsWith("/api/devices/claim")) r.Headers["Authorization"] = "Bearer " + token;
         if (body != null) { byte[] b = Encoding.UTF8.GetBytes(Json.Serialize(body)); r.ContentType = "application/json"; r.ContentLength = b.Length; using (Stream s = r.GetRequestStream()) s.Write(b, 0, b.Length); }
-        try { using (HttpWebResponse x = (HttpWebResponse)r.GetResponse()) { status = (int)x.StatusCode; using (StreamReader sr = new StreamReader(x.GetResponseStream())) return sr.ReadToEnd(); } }
+        try { using (HttpWebResponse x = (HttpWebResponse)r.GetResponse()) { status = (int)x.StatusCode; ReadRest(x); using (StreamReader sr = new StreamReader(x.GetResponseStream())) return sr.ReadToEnd(); } }
         catch (WebException e) { HttpWebResponse x = e.Response as HttpWebResponse; if (x == null) throw; status = (int)x.StatusCode; using (StreamReader sr = new StreamReader(x.GetResponseStream())) return sr.ReadToEnd(); }
     }
 

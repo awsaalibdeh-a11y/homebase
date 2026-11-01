@@ -1974,6 +1974,65 @@ class FamilyGames(Base):
         self.assertEqual(codes[10:], [429, 429])
 
 
+class FreeHours(Base):
+    """Mellow keeps to a monthly awake budget so Render's shared free hours last for every app."""
+
+    def set_used(self, hours, now):
+        _, _, key = server.month_bounds(now)
+        db.run(db.delete(db.uptime))
+        db.run(db.insert(db.uptime).values(month=key, seconds=hours * 3600))
+        server._awake["at"] = 0
+
+    def test_every_api_reply_says_when_to_rest(self):
+        db.run(db.delete(db.uptime))
+        server._awake["at"] = 0
+        r = self.get(self.mum, "/api/family")
+        self.assertEqual(r.headers["X-Rest"], f"{server.REST_TO};0")
+        self.assertIn("X-Rest", r.headers["Access-Control-Expose-Headers"])
+        self.assertNotIn("X-Rest", self.c.get("/").headers, "only the API, not the pages")
+
+    def test_awake_time_adds_up_per_month(self):
+        db.run(db.delete(db.uptime))
+        now = time.time()
+        server.add_awake(300, now); server.add_awake(300, now)
+        self.assertAlmostEqual(server.hours_used(now), 600 / 3600)
+        start, end, _ = server.month_bounds(now)
+        self.assertEqual(server.hours_used(end + 10), 0, "a new month starts from zero")
+
+    def test_on_budget_means_no_rest(self):
+        start, end, _ = server.month_bounds(time.time())
+        mid = start + (end - start) / 2
+        self.set_used(server.HOURS_BUDGET / 2 - 5, mid)
+        self.assertEqual(server.rest_until(mid), 0)
+
+    def test_ahead_of_budget_rests_long_enough_to_catch_up_but_never_more_than_six_hours(self):
+        start, end, _ = server.month_bounds(time.time())
+        mid = start + (end - start) / 2
+        self.set_used(server.HOURS_BUDGET / 2 + 2, mid)
+        until = server.rest_until(mid)
+        self.assertAlmostEqual(until - mid, 1800 + 2 * 3600, delta=5)
+        self.set_used(server.HOURS_BUDGET / 2 + 40, mid)
+        self.assertAlmostEqual(server.rest_until(mid) - mid, 6 * 3600, delta=5)
+
+    def test_spent_budget_rests_until_the_month_ends(self):
+        start, end, _ = server.month_bounds(time.time())
+        late = end - 3 * 86400
+        self.set_used(server.HOURS_BUDGET + 1, late)
+        self.assertEqual(server.rest_until(late), end)
+
+    def test_the_owner_can_see_the_meter(self):
+        db.run(db.delete(db.uptime))
+        server.add_awake(7200)
+        d = self.c.get("/api/rest").get_json()
+        self.assertEqual((d["used_hours"], d["budget_hours"], d["rest_to"], d["rest_until"]), (2.0, server.HOURS_BUDGET, server.REST_TO, 0))
+
+    def test_december_rolls_into_january(self):
+        import datetime as dt
+        dec = dt.datetime(2026, 12, 15, tzinfo=dt.timezone.utc).timestamp()
+        start, end, key = server.month_bounds(dec)
+        self.assertEqual((key, dt.datetime.fromtimestamp(end, dt.timezone.utc).strftime("%Y-%m-%d")), ("2026-12", "2027-01-01"))
+
+
 class GifMessages(Base):
     def send(self, body, who=None):
         return self.post(who or self.kid, "/api/messages", kind="gif", body=body)

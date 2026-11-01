@@ -32,14 +32,20 @@ const S = { av: {}, token: localStorage.getItem("hb_token") || "", me: 0, family
   online: navigator.onLine, open: 0, chatOpen: false, outbox: load("hb_out", []), savedAt: 0, tmp: -1, plans: [], polls: [], rewards: [], asks: [], bal: {}, board: [], streaks: {}, bonus: {} };
 
 /* ---------- helpers ---------- */
-// Mellow rests from midnight to 6 am so the free server can sleep: a tab in the background sends nothing then
-const nightQuiet = () => document.hidden && new Date().getHours() < 6;
+// Mellow rests so the free server can sleep: a tab in the background sends nothing from midnight until the hour the server gives
+// (7 am), nor while the server asks for a rest because the month's free hours are running ahead (see X-Rest in app.py)
+const REST = (() => { try { return JSON.parse(localStorage.getItem("hb_rest") || "null") || { to: 7, until: 0 }; } catch (e) { return { to: 7, until: 0 }; } })();
+let lastInput = Date.now();
+["pointerdown", "keydown", "touchstart", "wheel"].forEach(ev => addEventListener(ev, () => { lastInput = Date.now(); }, { passive: true, capture: true }));
+const away = () => document.hidden || Date.now() - lastInput > 30 * 60 * 1000;          // a tab left open with nobody using it counts as away
+const nightQuiet = () => away() && (new Date().getHours() < REST.to || Date.now() / 1000 < REST.until);
+const readRest = r => { const h = r.headers.get("X-Rest"); if (!h) return; const [to, until] = h.split(";").map(Number); if (to >= 0 && to <= 12 && until >= 0 && (to !== REST.to || until !== REST.until)) { REST.to = to; REST.until = until; try { localStorage.setItem("hb_rest", JSON.stringify(REST)); } catch (e) { /* private mode */ } } };
 async function api(path, method = "GET", body) {
-  if (nightQuiet() && method === "GET") { await new Promise(res => setTimeout(res, 60000)); throw Object.assign(new Error("Resting for the night."), { offline: true, night: true }); }
+  if (nightQuiet() && method === "GET") { await new Promise(res => setTimeout(res, 60000)); throw Object.assign(new Error("Resting so the free server can sleep."), { offline: true, night: true }); }
   let r;
   try { r = await fetch(path, { method, headers: { "Content-Type": "application/json", ...(S.token ? { Authorization: "Bearer " + S.token } : {}) }, body: body ? JSON.stringify(body) : undefined }); }
   catch (e) { setOnline(false); throw Object.assign(new Error("You are offline."), { offline: true }); }
-  setOnline(true);
+  setOnline(true); readRest(r);
   let d = {}; try { d = await r.json(); } catch (e) { /* empty body */ }
   if (r.status === 401 && S.token) { signOut(); throw Object.assign(new Error("Sign in again."), { status: 401 }); }
   if (!r.ok) throw Object.assign(new Error(d.error || "Something went wrong."), { status: r.status, data: d });

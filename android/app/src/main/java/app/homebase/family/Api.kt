@@ -34,6 +34,7 @@ class Api(private val store: Store) {
         if (auth && store.token.isNotEmpty()) rb.header("Authorization", "Bearer ${store.token}")
         rb.method(method, if (method == "GET") null else (body ?: buildJsonObject { }).toString().toRequestBody(jsonType))
         (if (long) poller else client).newCall(rb.build()).execute().use { r ->
+            Night.read(r.header("X-Rest"))
             val text = r.body?.string().orEmpty()
             if (!r.isSuccessful) {
                 val obj = runCatching { Net.parseToJsonElement(text).jsonObject }.getOrNull()
